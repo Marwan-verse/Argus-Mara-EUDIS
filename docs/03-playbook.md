@@ -67,6 +67,8 @@ Milestones for the other ideas:
 
 ## 3.4 Roles (team of 5)
 
+The team is versatile, so assign owners by workstream. [04-work-plan.md](04-work-plan.md) has the full split, the tasks and the timeline. Roles during the pitch:
+
 | Role | Owns | During the pitch |
 |---|---|---|
 | **Lead (you)** | Problem, users, mentor interviews, business model, pitch | Presents |

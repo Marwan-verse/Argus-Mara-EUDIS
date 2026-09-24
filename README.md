@@ -35,11 +35,14 @@ It complements what Ireland already funds (Sea-Scan fibre sensing and GUARD ship
 1. [Hackathon analysis](docs/01-hackathon-analysis.md): the event, the challenges verbatim, who's in the room, how it's judged, what has won before, the Irish context in numbers, and eight strategic insights.
 2. [The ideas](docs/02-ideas.md): full briefs, demo scripts, metrics, data, team, market, risks, and a scorecard.
 3. [Playbook](docs/03-playbook.md): the plan from today to the pitch, roles, the 4-minute pitch, hard questions, demo rules, and after the event.
-4. [Sources](docs/sources.md)
+4. [Work plan](docs/04-work-plan.md): ANCHOR WATCH split into workstreams, with demo scope, architecture, the data contracts to agree on day one, tasks, and a dated timeline.
+5. [Sources](docs/sources.md)
 
-## Next 72 hours
+## Status and next 72 hours
 
-1. Choose the idea with the team, using the "Choosing" guide in [02-ideas.md](docs/02-ideas.md).
-2. Confirm every member's eligibility (citizenship ID!) and availability.
+The team has applied and chosen **Challenge 3**, with **ANCHOR WATCH** as the working idea.
+
+1. Kick off: give each workstream an owner and agree the data contracts ([04-work-plan.md](docs/04-work-plan.md)).
+2. **Start the 24/7 AIS recorder today**, so you have three weeks of your own Irish traffic data by the event.
 3. Email the organisers the questions in [03-playbook.md §3.1](docs/03-playbook.md).
 4. Create the data accounts and start `PRIOR_WORK.md`.
