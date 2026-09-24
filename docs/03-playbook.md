@@ -1,142 +1,93 @@
-# 3. Playbook: from today (24 Sep) to the podium (17 Oct)
+# 3. Playbook: pitch, questions, demo rules
 
-The plan is written for the recommended idea, **ANCHOR WATCH**. The other ideas follow the same rhythm with different milestones.
+This playbook is for **Argus Mara** (Challenge 3). The dated plan and checklists are in [04-work-plan.md](04-work-plan.md), and the build recipes are in [05-build-guide.md](05-build-guide.md).
 
-## 3.1 This week (24–30 Sep)
+## 3.1 Questions for the organisers (send this week)
 
-- [ ] **Pick the idea** using the guide at the end of [02-ideas.md](02-ideas.md). Write a one-page brief covering the problem, the user, the demo moment, the headline metric and the ask.
-- [ ] **Lock the team.** The allowed size is 3–10; 4–6 works best. Check each person now:
-  - [ ] 18 or older.
-  - [ ] **A citizen of an EU member state, Norway or Ukraine**, and able to bring a passport or national ID. IDs are checked on site. UK-only or other non-EU nationals are not eligible, even if they live in Ireland.
-  - [ ] Available on site for all 2.5 days.
-- [ ] **Email the organisers.** Event questions go to the DCU:Innovate Hub contact on the official page. Ask:
-  1. What is the judging rubric and its weights? How long is the pitch and the Q&A? What must be submitted: deck, video, repo?
-  2. Does the jury try to spread the prizes across the three challenges?
-  3. Will any data, APIs, hardware or compute be provided during the event (TensorX credits, Defence Forces RTI data)?
-  4. Can we fly small drones on site, indoors or outdoors? Glasnevin is about 5 km from Dublin Airport, so outdoor flights are probably inside controlled airspace or a drone restriction zone and need clearance from the Irish Aviation Authority (IAA).
-  5. Is the venue internet good enough for live data streams?
-  6. What are the dates of the pre-event drone workshops?
-  7. Will Defence Forces or Department of Defence mentors be available early on Day 1?
-- [ ] **Get data accounts and API keys.**
-  - ANCHOR WATCH: aisstream.io, Global Fishing Watch API, Copernicus Data Space Ecosystem, EMODnet downloads.
-  - ONE SHIP: Copernicus Marine; optionally D-Wave Leap or IBM Quantum.
-  - MAGNAV ÉIRE: MagNav.jl data, GSI Tellus grids, INTERMAGNET.
-- [ ] **Start a `PRIOR_WORK.md` file and commit from day one.** The organisers want a clear line between what existed before and what was built at the event. Dated commits are the easiest proof.
+Event questions go to the DCU:Innovate Hub contact on the official page.
 
-## 3.2 Weeks 2–3 (1–14 Oct): build the core, declared as prior work
+1. What is the judging rubric and its weights? How long are the pitch and the Q&A? What must be submitted: deck, video, repo?
+2. Does the jury try to spread the prizes across the three challenges?
+3. Will any data, APIs, hardware or compute be provided during the event (TensorX credits, Defence Forces RTI data)?
+4. Can we fly small drones on site? Glasnevin is about 5 km from Dublin Airport, so outdoor flights probably need clearance from the Irish Aviation Authority. We don't need drones for Argus Mara, but ask anyway.
+5. Is the venue internet good enough for live data streams?
+6. What are the dates of the pre-event drone workshops?
+7. Will Department of Defence or Defence Forces mentors be available early on Day 1?
 
-| By | ANCHOR WATCH milestone |
-|---|---|
-| 4 Oct | Live and historical AIS ingest. Cable, pipeline and depth layers. A map shows live traffic over the cable corridors. |
-| 8 Oct | Rule-based detectors plus the naive geofence baseline. Scenario generator (fictional vessel names; incident profiles reconstructed from public reporting). Replay mode. |
-| 12 Oct | First Sentinel-1 ingest and match against AIS. First alert card with a time-to-crossing. One week of historical AIS processed for false-alarm statistics. |
-| 14 Oct | Full end-to-end dry run. Pitch v1. Backup demo video v1. Data cached for offline use. |
+**Eligibility reminder:** every member must be 18+ and a citizen of the EU, Norway or Ukraine, and must bring a passport or national ID. IDs are checked on site.
 
-Alongside the build:
-- **Go to the drone workshops.** Meet the Defence Forces RTI unit, Hextronics, Drone Space and the other teams.
-- **Get 20 minutes with one real operator.** A retired Naval Service officer, a Coast Guard watch officer, or a cable-operator engineer would all do. Ask:
+## 3.2 Before the event: the habits that win
+
+- **Talk to real operators.** Get 20 minutes each with one or two: a retired Naval Service officer, a Coast Guard watch officer, or a cable-operator engineer. Ask:
   - What do you watch?
   - What do you ignore?
   - What decision do you need to make, and how fast?
-  - Quote them in the pitch.
-- **Check the defence figures in Budget 2027** (early October) so your numbers are fresh on the day.
-- **Line up an academic partner at an eligible Irish research body now** † if you want to apply to the Research Ireland Defence Innovation Challenge on 29 Oct.
+  - How many false alarms would you tolerate?
+  - **Quote them in the pitch.**
+- **Go to the drone workshops** if you are invited. Meet the RTI unit, Hextronics, Drone Space and the other teams.
+- **Check the defence figures in Budget 2027** (early October) so your numbers are fresh.
+- **Contact the Sea-Scan team** (plan §4.8), and **keep `PRIOR_WORK.md` current**.
 
-Milestones for the other ideas:
-- **ONE SHIP:**
-  - By 4 Oct: drift sim with OpenDrift and the probability map.
-  - By 8 Oct: IAMSAR baseline, plus the Monte Carlo harness.
-  - By 12 Oct: QUBO and classical solvers benchmarked; comms-loss fallback.
-  - By 14 Oct: dry run.
-- **MAGNAV ÉIRE:**
-  - By 4 Oct: MagNav.jl baseline reproduced.
-  - By 8 Oct: particle filter on the Challenge flight data.
-  - By 12 Oct: Tellus map loaded and upward-continued; spoofing detector.
-  - By 14 Oct: dry run.
+## 3.3 Roles during the event and the pitch
 
-## 3.3 The 2.5 days
-
-| When | Focus |
+| Workstream owner | During the pitch |
 |---|---|
-| **Day 1 (Thu)**, first 2 hours | Set up the demo machine with offline data. **Interview at least three mentors, starting with the Defence Forces and Department of Defence.** Test the operator workflow and the action cards on them, then adjust. |
-| Day 1, rest | Learned behaviour scoring and satellite-radar fusion/custody. End-to-end run #1 by the evening. Agree a cut list. |
-| **Day 2 (Fri)**, morning | Prediction, course-of-action cards, evidence pack |
-| Day 2, afternoon | Backtests and false-alarm statistics, then UI polish. **Freeze features at about 17:00**; after that, only demo polish. |
-| Day 2, evening | Record the backup video. Pitch v2. Rehearse with a mentor watching. |
-| **Day 3 (Sat)** | Fixes only. Rehearse five times with a timer. Prepare Q&A cards. Pitch. Then network with the RTI unit, the Department, Deloitte, TensorX and the Irish Space Association, and **collect follow-up contacts**. |
+| **E. Story, the lead (you)** | Presents |
+| D. Interface | Drives the demo |
+| B. Brain | Takes detection, metrics and false-alarm questions |
+| C. Space | Takes satellite and identity questions |
+| A. Data | Standby on the backup video; takes data-source questions |
 
-## 3.4 Roles (team of 5)
-
-The team is versatile, so assign owners by workstream. [04-work-plan.md](04-work-plan.md) has the full split, the tasks and the timeline. Roles during the pitch:
-
-| Role | Owns | During the pitch |
-|---|---|---|
-| **Lead (you)** | Problem, users, mentor interviews, business model, pitch | Presents |
-| Data engineer | AIS and satellite-radar pipelines, replay, offline data | Standby on the backup video |
-| ML / analytics | Detectors, risk model, prediction, backtests | Takes technical questions |
-| Geospatial / space | Sentinel-1 processing, fusion, satellite passes | Takes space questions |
-| Front end | Map, action cards, evidence pack | Drives the demo |
-
-## 3.5 The 4-minute pitch (ANCHOR WATCH)
+## 3.4 The 4-minute pitch
 
 | Time | Beat | Talk track (adapt freely) |
 |---|---|---|
-| 0:00–0:25 | **Hook** | "Christmas Day 2024. A tanker called *Eagle S* dragged its anchor across the floor of the Gulf of Finland and cut a power cable and four data cables †. Its slow, strange track was visible in public ship data while it happened. Nobody was watching that signal. Since March, ships from the same shadow fleet sail past the west of Ireland." |
-| 0:25–0:55 | **Irish stakes** | "About eleven transatlantic cables. The pipelines that bring most of our gas. A sea area seven times our land. And crews for two ships at sea. The Maritime Security Strategy asks us to protect undersea infrastructure and improve maritime awareness. The problem isn't data. It's attention and time." |
-| 0:55–1:10 | **Solution** | "ANCHOR WATCH watches every ship, every minute, and tells the watch officer three things: which ship matters, which cable is at risk and when, and what can get there in time." |
-| 1:10–2:40 | **Live demo** | Dark tanker → satellite radar regains it → anchor-drag alert with ETA → action cards → evidence pack. |
-| 2:40–3:10 | **Proof** | Warning time on the reconstructed incidents, false alarms per day against the geofence baseline, dark-period custody rate. |
-| 3:10–3:35 | **Fit and path** | "It complements Sea-Scan and GUARD, runs on open and space data, and uses sovereign EU compute. Next: a trial with the RTI unit on historical data, a Defence Innovation Challenge application, and cable operators as commercial buyers." |
-| 3:35–3:50 | **Honesty and team** | What existed before vs what was built here, and who you are. |
-| 3:50–4:00 | **Ask** | "Six weeks with the RTI unit on historical data, and one introduction to a cable operator." |
+| 0:00–0:30 | **Hook** | "August 2025. A sanctioned tanker called *Blue* switched off its transponder before entering Irish waters. It has had four identities and six flags in five years. Since March, an unprecedented number of ships like it have sailed past our west coast. On Christmas Day 2024, a ship like that, the *Eagle S*, slowed from 12 to 9 knots in the Gulf of Finland and dragged its anchor about 90 kilometres across the seabed. It cut a power cable and several data cables. The signal was there. **Nobody was counting down.**" |
+| 0:30–0:55 | **Irish stakes** | "About eleven transatlantic cables. The pipelines that bring most of our gas. A sea area seven times our land. And crews for two ships at sea. The new Maritime Security Strategy asks for three things: protecting undersea infrastructure, better maritime awareness, and a national maritime security centre for faster decisions. The problem isn't data. It's attention and time." |
+| 0:55–1:10 | **Solution** | "**Ireland can crew two ships. Argus Mara gives them a hundred eyes.** It watches every ship, every minute. When one becomes a threat, it starts a **countdown to the cable it threatens**, and it shows what can get there in time." |
+| 1:10–2:40 | **Live demo** | The 8 steps in [02-ideas.md](02-ideas.md): dark tanker → radar regains it → identity mismatch → it turns towards the shelf → the countdown → *Eagle S* signature → action panel → "confirmed by fibre" → evidence pack. |
+| 2:40–3:10 | **Proof** | False alarms per day against the geofence baseline, warning time on the *Eagle S* replay, and the dark-period custody rate. |
+| 3:10–3:35 | **Fit and path** | "Argus Mara complements Trinity's Sea-Scan. They hear the cable; we see the ship coming and name it. It runs on open and space data and on sovereign EU compute. Next: a trial with the RTI unit on historical data, and a joint pilot with Sea-Scan on the Dublin–Holyhead link." *Say "joint pilot" only if they agreed; otherwise say "designed to complement Sea-Scan".* |
+| 3:35–3:50 | **Honesty and team** | What existed before (the `pre-hackathon` tag) vs what was built here, and who you are. |
+| 3:50–4:00 | **Ask** | "Six weeks with the RTI unit on historical data, and your help connecting Argus Mara to the future national maritime security centre." |
 
-## 3.6 Hard questions to rehearse
+## 3.5 Hard questions to rehearse
 
-1. **"How is this different from Windward, Kpler or Global Fishing Watch?"** They are generic maritime-risk platforms. Ours:
-   - works at cable-segment level, using anchor-reach physics;
-   - predicts, and checks which responses can arrive in time;
-   - fuses Irish in-situ sensing such as Sea-Scan;
-   - is sovereign and can run on premises.
-2. **"Isn't anchor-drag detection what Sea-Scan does?"** Sea-Scan hears it *at the cable*. We see the ship coming hours earlier, know who it is, cover pipelines and power cables without fibre sensing, and recommend a response. Together they give cue-then-verify.
-3. **"What if the ship turns off AIS or spoofs it?"** Custody through the dark with satellite radar, spoofing detectors, commercial radar-satellite tasking, and fusion with fibre sensing.
-4. **"How many false alarms?"** Give the measured rate on a week of real traffic and the ratio against the naive baseline. Explain the context suppression.
-5. **"AIS coverage far offshore?"** Terrestrial AIS near the coast today. Satellite AIS, and EMSA feeds through the Defence Forces, on the roadmap.
-6. **"What can Ireland legally do in its EEZ?"** The system informs; people decide. It supports hailing, notifying operators and partners, and evidence packs. Boarding-powers legislation is being drafted.
-7. **"Why would a cable operator pay?"** Most faults are accidental, from anchors and fishing gear. Repairs are slow and expensive †.
-8. **"How good are your incident reconstructions?"** They are built from public reporting and clearly labelled. Validation on real data is step one of the trial.
-9. **"What's autonomous about it?"** Monitoring, custody, prediction and recommendation run around the clock without a human. Sensors can be cued automatically within pre-approved rules. Actions stay with a human.
-10. **"Data sensitivity?"** Public data only in the prototype, deployable on sovereign or on-premises compute.
-11. **"Business model?"** A subscription per protected asset or area, plus integration.
-12. **"Will the team continue?"** Name who commits, plus DCU incubation and the next funding deadline.
+1. **"Commercial AIS cable-watch services already exist (NKT, Sentinel Proactive, UltramapGlobal, Gatehouse). Why you?"**
+   - They warn ships about accidental anchoring on behalf of one cable owner, and their existence proves the market.
+   - Argus Mara is for the State: all seabed infrastructure at once, *adversarial* ships (dark, false identities, sanctioned), a countdown with response planning, fibre fusion, and it's sovereign.
+2. **"How is this different from Windward, Kpler or Global Fishing Watch?"** Those are generic maritime-intelligence platforms. We work at cable-segment level with anchor-reach physics and feasibility-aware decisions, fuse Irish sensors, and run sovereign.
+3. **"Isn't anchor-drag detection what Sea-Scan does?"**
+   - Sea-Scan hears it *at the cable*. We see the ship coming hours earlier, name it, cover pipelines and power cables, and plan the response.
+   - It works both ways: their fibre event triggers our identification, and our countdown tells their fibre where to listen. Our clean AIS tracks also improve their training labels.
+4. **"Satellite data isn't real time."** Correct. The countdown runs on real-time AIS. Space gives custody and identity checks at each pass, and we plan the next look.
+5. **"What if the ship turns off AIS or spoofs it?"** Custody through the dark with radar, the identity check (radar length vs AIS length, flag and name history), spoofing detectors, and fibre fusion.
+6. **"How many false alarms?"** Give the measured rate on your recorded weeks of Irish traffic, the ratio against the naive geofence, and explain the context suppression.
+7. **"AIS coverage far offshore?"** Terrestrial AIS near the coast today. Satellite AIS (Sentinel-1C/1D carry AIS receivers too) and EMSA feeds through the Defence Forces are on the roadmap.
+8. **"What can Ireland legally do in its EEZ?"** The system informs and people decide. It supports hailing, notifying operators and partners, and evidence packs. Boarding-powers legislation is being drafted.
+9. **"How good are your incident reconstructions?"** They are built from public reporting and clearly labelled. Validation on real data is step one of the RTI trial.
+10. **"What's autonomous about it?"** Monitoring, custody, prediction and cueing run 24/7 without a human, within pre-approved rules. Actions stay human.
+11. **"Business model?"** A State licence per region plus integration, with a commercial add-on per protected asset.
+12. **"Will the team continue?"** Name who commits, plus DCU incubation, ESA BIC, the RTI trial, and the Sea-Scan pilot.
 
-**If you pitch ONE SHIP or MAGNAV, add the quantum question: "Why quantum?"**
-- Answer with what you measured: QUBO vs classical, the optimality gap, runtime, and where classical still wins.
-- For MagNav, the value of quantum sensors is being absolute and drift-free, not the noise floor.
-- **Never claim more than you measured.**
+## 3.6 Demo rules
 
-## 3.7 Demo rules
-
-- **Have an offline replay mode.** Never depend on venue Wi-Fi. Cache every dataset locally.
+- **Have an offline replay mode.** Never depend on venue Wi-Fi, and cache every dataset locally.
 - **Keep a recorded backup video**, on a laptop and on a USB stick.
-- **Use fictional vessel names** in scenarios, and label everything *real*, *reconstructed* or *simulated*.
+- **Use fictional vessel names** in scenarios, and label everything *real*, *reconstructed* or *simulated*. That includes the fibre cue.
 - Show one screen, with big fonts, rehearsed clicks and a reset button.
-- Keep the headline number **on screen** at the end of the demo.
-- **Never transmit jamming or spoofing signals, even "just to test".** It is illegal. Use recorded datasets or simulator fault injection instead.
-- **No outdoor flying without organiser and IAA clearance.** Plan for indoor flights, the simulator, or recorded flight logs.
+- Keep the headline numbers **on screen** at the end of the demo.
+- **Never transmit radio signals** of any kind for testing. Use recorded data only.
 
-## 3.8 What to bring
+## 3.7 What to bring
 
 - Passports or national ID cards for everyone.
 - Laptops and chargers, HDMI/USB-C adapters, and a 4G/5G hotspot.
 - Offline data copies and the backup video on USB.
 - A printed one-page summary for judges, with a QR code to the demo video.
 
-## 3.9 After the hackathon, where most of the value is
+## 3.8 After the hackathon, where most of the value is
 
-- **29 Oct: Research Ireland Defence Innovation Challenge 2026 closes.** It offers up to €220k over 13 months plus a €1m prize phase, and Area 1 is space-based situational awareness. It needs an eligible Irish research-body lead †.
-- **If you win:** EUDIS mentoring (about 40 h over about 2 months), then an EU-wide final judged on *progress*. Arrive with an eight-week plan:
-  - an RTI trial on historical, unclassified data;
-  - one letter of intent from a cable or energy operator;
-  - a satellite-AIS integration;
-  - an ESA BIC application.
-- **Whatever you place:** ask about DCU:Innovate incubation, TensorX credits and RTI test and validation. Those supports are open to several teams, not only the winner.
+- **If you win:** EUDIS mentoring (about 40 h over about 2 months), then an EU-wide final judged on **progress**. Run the 8-week plan in [04-work-plan.md §4.7](04-work-plan.md).
+- **Whatever you place:** ask about DCU:Innovate incubation, TensorX credits, and test and validation with the RTI unit. Those supports are open to several teams.
+- **Research Ireland Defence Innovation Challenge 2026:** it closes 29 Oct, but the **intent-to-apply deadline was 15 Sep 2026**. It is only possible through a partner who already registered, e.g. ask the Sea-Scan team. Otherwise, aim for the next round.

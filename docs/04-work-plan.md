@@ -1,175 +1,221 @@
-# 4. Work plan: ANCHOR WATCH (Challenge 3)
+# 4. The plan: Argus Mara, from today to the pitch
 
-The team is versatile, so the work is split by **workstream**, not by skill. Each workstream has one owner, plus a buddy if the team is bigger.
+**Goal:** win Dublin (1st place: €10k plus EUDIS mentoring). We do it with a **live demo of the Argus Mara countdown**, two hard numbers, and a visible link to Trinity's Sea-Scan.
 
-**Rule #1: always have a demo that runs end to end.** Build a thin slice through the whole system first, then make each part smarter.
+**Rule #1: always have a demo that runs end to end.** Build the thin slice first, then make each part smarter.
 
-## 4.1 Scope: what goes in the demo
+## 4.0 At a glance
 
-**Must have** (the demo breaks without it):
-- A map showing cables and pipelines, with anchor-reachable segments highlighted, and ship traffic, live or replayed.
-- A scenario replay: the tanker goes dark, satellite radar re-acquires it, it shows anchor-drag behaviour, and an alert fires.
-- An alert card with a **countdown to the cable** and "why" chips explaining the alert.
-- An action panel showing the ETAs of the C295 aircraft, the ship and the next satellite pass, and whether each **arrives in time**.
-- An evidence pack (one HTML page).
-- Two numbers:
-  - false alarms per day compared with the naive geofence;
-  - warning time on a reconstructed incident.
+| Phase | Dates | Goal | Done when… (checked at the demo run) |
+|---|---|---|---|
+| **0. Set-up** | Thu 24 – Sun 27 Sep | Everyone can start | The AIS recorder is running 24/7; the data contracts are committed; the map shows cables; one radar scene is opened; emails are sent to the organisers and Sea-Scan |
+| **1. Skeleton** | Mon 28 Sep – Sun 4 Oct | A thin slice end to end | Live ships and glowing cables on the map; one rule-based alert with a countdown; one radar scene with matched and dark ships |
+| **2. The countdown** | Mon 5 – Thu 8 Oct | The heart works | The full scenario plays: tanker, alert, countdown, action panel, approve |
+| **3. Space and proof** | Fri 9 – Mon 12 Oct | Special features and numbers | Dark custody and the identity check work on real examples; the evidence pack opens; both headline numbers are on screen |
+| **4. Rehearse** | Tue 13 – Wed 14 Oct | Nothing can break | Two offline dry runs in a row; backup video recorded; `git tag pre-hackathon` pushed |
+| **5. Hackathon** | Thu 15 – Sat 17 Oct | Make it impressive, pitch it | Pitch delivered; contacts collected |
+| **6. After** | From 18 Oct | Turn the win into progress | An 8-week progress plan is running |
 
-**Should have** (this is what makes it special):
-- The identity check from space: ship length on radar vs the length declared in AIS.
-- Custody through AIS gaps, on real data.
-- A learned behaviour score, not hand-tuned thresholds.
-- The *Eagle S* replay with a measured warning time.
+**Workstreams (one owner each):**
+- **A. Data:** everything flows.
+- **B. Brain:** notice, score, count down.
+- **C. Space:** see what AIS hides.
+- **D. Interface:** what the judges see.
+- **E. Story:** the team lead.
 
-**Nice to have** (only if you're ahead):
-- A watch-officer brief from an LLM on TensorX.
-- The threat forecast, days ahead.
-- A Sea-Scan cue (simulated).
-- The "Who launched it?" module.
+How to build each piece is in [05-build-guide.md](05-build-guide.md).
 
-**Out of scope:**
-- Training deep models from scratch.
-- Global coverage.
-- User accounts, a mobile app, 3D.
-- A live satellite-tasking integration.
+---
 
-## 4.2 Architecture: so everyone can work in parallel
+## 4.1 Phase 0: Set-up (Thu 24 – Sun 27 Sep)
 
-```
-connectors ─────────► local store ─────────► engine ─────────► API ─────────► map UI
-AIS live + history    (DuckDB/Parquet)       tracks, detectors  (FastAPI)      (MapLibre + deck.gl)
-cables, pipelines     positions, vessels,    risk + reasons,    /vessels       ships, cables, alerts,
-depth, sanctions,     segments, detections,  countdown,         /alerts        countdown, action panel,
-Sentinel-1 radar      risk list, weather     response options,  /segments      replay controls,
-weather                                      evidence pack      /evidence/{id} evidence page
-                                  ▲
-                 scenario generator / replay
-                 (feeds the engine as if it were live)
-```
+**E. Story (you)**
+- [ ] 60-minute kickoff: walk through [DECISIONS.md](../DECISIONS.md), give workstreams A–D an owner each, and fix the rhythm (§4.9).
+- [ ] Create a GitHub Project board with the tasks from this plan.
+- [ ] Email the organisers the questions in [03-playbook.md §3.1](03-playbook.md).
+- [ ] Email the Sea-Scan team, using the template in §4.8.
+- [ ] Create `PRIOR_WORK.md` in the repo.
 
-**Agree these contracts on day one.** Each workstream can then build against stub data until the real pieces arrive.
+**A. Data**
+- [ ] Get an aisstream.io API key and **start the AIS recorder 24/7** for a box around Ireland (§1 of the build guide). ← *the most important task of the week*
+- [ ] Download cable and pipeline routes (EMODnet, TeleGeography) and bathymetry (EMODnet or GEBCO) for Irish waters.
 
-Tables:
-- `positions(mmsi, ts, lat, lon, sog, cog, heading, nav_status)`
-- `vessels(mmsi, imo, name, ship_type, length_m, flag)`
-- `segments(id, name, kind, geometry, min_depth_m, anchor_reachable, criticality)`
-- `detections(ts, lat, lon, length_m, source, matched_mmsi)`
-- `risk_list(imo, mmsi, list_name, reason)`
+**B. Brain**
+- [ ] Commit the data contracts as code (the schemas and the alert JSON, §2 of the build guide).
+- [ ] From public reporting, write down the speed and course profile and the timeline of *Eagle S*, *Yi Peng 3* and *Newnew Polar Bear*.
 
-Alert JSON:
-```json
-{
-  "id": "…", "mmsi": 0, "name": "…", "ship_type": "tanker",
-  "score": 0.92, "reasons": ["speed 3x below class norm", "course variance x6", "sanctions-listed", "anchor-reachable depth"],
-  "segment_id": "…", "distance_km": 12.0, "eta_minutes": 95,
-  "position": [lat, lon], "predicted_track": [[lat, lon, "ts"], …],
-  "options": [{"asset": "C295 (Casement)", "eta_minutes": 70, "in_time": true}, …],
-  "evidence_url": "/evidence/…"
-}
-```
+**C. Space**
+- [ ] Create a Copernicus Data Space account. Download one Sentinel-1 scene over Irish waters that your recorder covers, and open it.
+- [ ] Get a Global Fishing Watch API token and pull its radar vessel detections for Irish waters for one recent week.
 
-## 4.3 Workstreams
+**D. Interface**
+- [ ] Build the map skeleton (MapLibre + deck.gl) with the coastline and a static cable layer, plus a FastAPI app shell serving stub data.
 
-### A. Data: "everything flows"
+## 4.2 Phase 1: Skeleton (Mon 28 Sep – Sun 4 Oct)
 
-- **A1. Live AIS.** Subscribe to aisstream.io with a bounding box around Ireland and write to `positions` and `vessels`.
-  - **Start a 24/7 recorder today**, on a small cloud VM, a Raspberry Pi or a spare laptop. By 15 Oct you will have three weeks of *your own* Irish traffic data for learning "normal" behaviour and measuring false alarms.
-- **A2. Historical AIS.** Pull a larger sample from the Danish Maritime Authority or NOAA, to learn normal speeds by ship type.
-- **A3. Infrastructure layer.**
-  - Load EMODnet telecom cables, power cables and pipelines.
-  - Sample the depth along each segment from EMODnet Bathymetry and set `anchor_reachable` with a configurable threshold (start at 250 m).
-  - Set criticality weights by hand: gas interconnectors and power links high.
-- **A4. Risk lists.** Load the EU, UK and OFAC sanctioned-vessel lists (by IMO number) into `risk_list`.
-- **A5. (Optional) Weather context** from the Marine Institute buoys.
+- **A:**
+  - [ ] A store (DuckDB over the recorder's Parquet files).
+  - [ ] API endpoints `/vessels` and `/segments`.
+  - [ ] An `anchor_reachable` flag for each cable segment.
+  - [ ] Sanctions lists loaded.
+- **B:**
+  - [ ] Track builder with gap detection.
+  - [ ] Naive geofence baseline.
+  - [ ] **Anchor-drag detector v1** (rules).
+  - [ ] **Countdown v1**: straight-line projection to the first anchor-reachable segment.
+- **C:**
+  - [ ] Ship detection on one scene.
+  - [ ] Length estimate for each detection.
+  - [ ] Match against AIS at the time the image was taken, giving a list of dark ships.
+- **D:**
+  - [ ] Live and replayed ships on the map.
+  - [ ] Anchor-reachable cable segments glow.
+  - [ ] Alert list panel and replay controls v1.
+- **E:**
+  - [ ] Book operator interview #1.
+  - [ ] Write the scenario script v1 (see [02-ideas.md](02-ideas.md), the demo).
+  - [ ] Pitch outline v0.
 
-**Done when:** the API returns ships in Irish waters and segments with the anchor-reachable flag, and at least one week of AIS is stored.
+**Sunday 4 Oct demo run:** live ships plus glowing cables, one real alert with a countdown, and one radar scene showing matched and dark ships.
 
-### B. Brain: "notice, score, count down"
+## 4.3 Phase 2: The countdown (Mon 5 – Thu 8 Oct)
 
-- **B1. Track builder:** per-vessel tracks, plus gaps (AIS silent for more than N minutes).
-- **B2. The naive baseline to beat:** a geofence that fires on anything under 6 kn within 1 km of a cable.
-- **B3. Detectors v1 (rules):**
-  - anchor-drag signature: speed well below the norm for the ship's type, speed oscillation and course wobble, sustained over time;
-  - loitering over a segment;
-  - an AIS gap that starts or ends near infrastructure;
-  - impossible position jumps.
-- **B4. Risk score** with human-readable reasons (the "why" chips).
-- **B5. Countdown:** a predicted track, the first crossing of an anchor-reachable segment, and the distance and ETA to it.
-- **B6. Response options:**
-  - **Assets:** a C295 at Casement Aerodrome, Naval Service ships (simulated positions), a drone, and the next satellite pass (from Space).
-  - For each asset, compare its ETA with the countdown and set `in_time`.
-- **B7. At the event, v2:**
-  - Replace the thresholds with a learned score, e.g. gradient boosting on the B3 features.
-  - Add context suppression for anchorages, storms and fishing grounds.
+- **B:**
+  - [ ] **Countdown v2**: the state machine (WATCH → APPROACHING → ALERT → CONTACT → RESOLVED), with an uncertainty cone giving an *earliest* and an *expected* ETA.
+  - [ ] **Response options** with ETAs and `in_time`.
+  - [ ] Context suppression v1: anchorages, port approaches, storms.
+- **A:**
+  - [ ] **Scenario generator**: a fictional tanker injected into real traffic, with the *Eagle S*-like profile (12→9 kn, course wobble).
+  - [ ] A replay engine that feeds the engine as if it were live.
+- **C:**
+  - [ ] The "next satellite look" at a predicted position, from ESA's Sentinel-1 acquisition plans or orbit data. Feed it into the options.
+- **D:**
+  - [ ] **Alert card with a live countdown** and the "why" chips.
+  - [ ] Action panel ✅/❌ with an "approve" button.
+  - [ ] Jump-to-moment in replay.
+- **E:**
+  - [ ] Operator interview #1 done. Change the action cards based on what you hear.
+  - [ ] Pitch v0.5.
 
-**Done when:** the scenario fires one alert with the right countdown and options, and the false alarms per day are computed for both the baseline and our method on the stored week.
+**Thursday 8 Oct demo run:** the whole storyline plays from the tanker to "approve".
 
-### C. Space: "see what AIS hides"
+## 4.4 Phase 3: Space and proof (Fri 9 – Mon 12 Oct)
 
-- **C1. Get the scenes.** Download Sentinel-1 radar scenes over Irish waters from the Copernicus Data Space Ecosystem, for dates your recorder covers. The alternative is Global Fishing Watch's radar vessel detections.
-- **C2. Detect ships** on the sea, with land masked out. Use ESA SNAP's built-in ship-detection tool or a simple CFAR threshold in Python. Estimate a rough length for each ship.
-- **C3. Match detections to AIS** at the moment the image was taken:
-  - Unmatched detections are **dark ships**.
-  - Link them back to ships in an AIS gap by checking who could physically have reached that point.
-- **C4. Identity check from space:** compare the radar length with the AIS-declared length and flag big mismatches.
-- **C5. Satellite passes:** compute the next Sentinel-1 overpass (acquisition plan permitting) over a predicted position, using CelesTrak orbit data and Skyfield. Feed it into B6.
+- **C:**
+  - [ ] **Custody through gaps** (reachability plus radar match), in the scenario and on at least one real example.
+  - [ ] **Identity check** (radar vs AIS length) on real ships.
+  - [ ] Flag and name history from the risk lists.
+- **B:**
+  - [ ] **Metrics harness**, covering:
+    - false alarms per day (ours vs the geofence) on the recorded weeks;
+    - precision and recall on synthetic anchor-drag episodes;
+    - **warning time on the *Eagle S* reconstruction**.
+- **D:**
+  - [ ] **Evidence pack** page.
+  - [ ] The "confirmed by fibre" chip and the CONTACT state.
+- **A:**
+  - [ ] **Sea-Scan adapter**: the fibre-event schema, plus converting a distance along the cable (km) to a map position.
+  - [ ] Simulated fibre events for the scenario.
+  - [ ] **Offline cache** of all demo data.
+- **E:**
+  - [ ] Pitch v1 with real numbers, Q&A cards and a one-page summary.
+  - [ ] Check the defence numbers in Budget 2027.
+  - [ ] Follow up with Sea-Scan.
 
-**Done when:**
-- one real scene over Irish waters shows matched vs dark ships on the map;
-- the length check works on a few real ships;
-- pass times appear in the action panel.
+**Monday 12 Oct demo run:** all 8 demo steps run, numbers are on screen, and the evidence pack opens. **Anything not working today is cut.**
 
-### D. Interface and demo: "what the judges see"
+## 4.5 Phase 4: Rehearse (Tue 13 – Wed 14 Oct)
 
-- **D1. Map:** coastline, cables and pipelines (anchor-reachable segments glow), ships, tracks, radar detections.
-- **D2. Replay controls:** play, pause, ×60 speed, jump to a moment.
-- **D3. Alert card** with a live countdown and the "why" chips.
-- **D4. Action panel:** in time ✅ / ❌, plus an "approve" button.
-- **D5. Evidence page:** timeline, track snapshot, radar image chip, raw messages, and a hash so tampering is detectable.
-- **D6. Offline mode** and a demo reset button.
+- [ ] Two full dry runs with the Wi-Fi **off**, timed at 4 minutes for the pitch plus demo.
+- [ ] Fixes only.
+- [ ] Record the backup video, and keep it on a laptop and a USB stick.
+- [ ] E: pitch v2; update `PRIOR_WORK.md`; **`git tag pre-hackathon` and push it**; print the one-pagers; check that everyone's ID is packed.
 
-**Done when:** the 90-second demo runs end to end with no internet.
+## 4.6 Phase 5: The hackathon (Thu 15 – Sat 17 Oct)
 
-### E. Story and proof: the team lead
-
-- **E1. Kickoff.** Assign owners, set up a board (GitHub Projects), and hold two 30-minute syncs a week.
-- **E2. Scenarios** (together with B):
-  - the fictional tanker scenario;
-  - an *Eagle S* reconstruction from public reporting (speed and course profile, timeline).
-- **E3. Talk to 1–2 real operators:** someone ex-Naval Service, a Coast Guard watch officer, or a cable-operator engineer. Ask:
-  - What decision do you need to make, and how fast?
-  - How many false alarms would you tolerate?
-- **E4. Organisers:** the judging rubric, pitch format, drone rules, internet, and whether mentors are available on Day 1.
-- **E5. Pitch material:** pitch v1 → v2, a one-page summary for judges, and the backup video.
-- **E6. Prior-work record:** keep `PRIOR_WORK.md` up to date, and run `git tag pre-hackathon` on 14 Oct. The tag is your proof of what existed before the event.
-- **E7. Follow-on funding:** for the Defence Innovation Challenge (closes 29 Oct), find an academic lead now. Also open conversations with TensorX and the Defence Forces RTI unit.
-
-## 4.4 Timeline
-
-| Date | Milestone ("done" = you can demo it) |
+| Day | Plan |
 |---|---|
-| **Sun 27 Sep** | Kickoff done; schemas agreed; accounts created; **AIS recorder running 24/7**; each workstream has a "hello world" |
-| **Sun 4 Oct** | Thin slice end to end: AIS → store → API → map with ships and cables; baseline plus first detector; one Sentinel-1 scene processed |
-| **Thu 8 Oct** | Scenario replay; alert with countdown; action panel with ETAs; *Eagle S* reconstruction v1 |
-| **Mon 12 Oct** | Custody through gaps; identity check; evidence pack; first numbers (false alarms per day for both methods, warning time); pitch v1 |
-| **Wed 14 Oct** | Two full dry runs; backup video; offline data cache; pitch v2; **`git tag pre-hackathon`** |
-| **Thu 15 Oct** | Mentor interviews first, then adjust; learned score; context suppression |
-| **Fri 16 Oct** | Final metrics; UI polish; feature freeze around 17:00; record video; rehearsal |
-| **Sat 17 Oct** | Rehearse five times; pitch; network |
+| **Thu** | Set up. **First 2 hours: interview the mentors** (Department of Defence, the RTI unit, TCD if present) and note three changes. Then build the learned anchor-drag score and context suppression v2. The LLM brief on TensorX is optional. |
+| **Fri** | Final metrics and UI polish. **Freeze features at 17:00.** Record the final video, then rehearse with a mentor watching. |
+| **Sat** | Fixes only. Rehearse five times. Pitch. Then network, and **collect contacts** (Department of Defence, the RTI unit, TCD, TensorX, the Irish Space Association, Deloitte). |
 
-## 4.5 Adjusting to team size
+Deliverables: the live demo, slides, the video, and the repo. The `pre-hackathon` tag shows what existed before; everything after it was built at the event.
+
+## 4.7 Phase 6: After the hackathon
+
+- **If you win**, EUDIS mentoring follows (about 40 h over about 2 months), then the EU-wide final, which is judged on **progress**. Run an 8-week plan:
+  1. Validation with the RTI unit on unclassified historical data.
+  2. **A joint pilot with Sea-Scan on the Dublin–Holyhead corridor** (Emerald Bridge Fibres), where they already have fibre-sensing data.
+  3. A satellite-AIS integration.
+  4. One letter of intent from a cable or energy operator.
+  5. An ESA BIC application.
+- **Whatever you place:** ask for DCU incubation, TensorX credits, and test and validation with the RTI unit.
+
+## 4.8 The Sea-Scan (Trinity) partnership
+
+**Why:** Research Ireland and the Defence Forces funded Sea-Scan, and the jury knows it. "We join it up" beats "we compete with it".
+
+**Steps:**
+1. **Read their two papers first:**
+   - *Sea-Scan: weakly supervised fibre-sensing (DAS) dark-vessel detection*, arXiv 2606.21326.
+   - *DAS–AIS association patterns on the Dublin–North Wales link*, arXiv 2607.02536.
+2. **Email by Sun 27 Sep** to Prof. Marco Ruffini (School of Computer Science and Statistics) and Dr John Kennedy (School of Engineering), both at TCD. Their addresses are on the TCD staff pages.
+3. **Follow up on Fri 2 Oct** and ask for a 20-minute call.
+4. **On the call, ask:**
+   - (a) Are we OK to name Sea-Scan as complementary?
+   - (b) Would you give us informal advice?
+   - (c) Would you be interested in a joint pilot on the Dublin–Holyhead corridor after the event?
+   - (d) Did you register an intent for the Defence Innovation Challenge 2026, and could a space-cueing work package fit?
+   - (e) What does your fibre-event output look like? Our adapter should match it.
+5. **Wording in the pitch:**
+   - With written consent: *"designed with input from the Sea-Scan team (TCD)"*.
+   - Otherwise: *"designed to complement Sea-Scan"*.
+
+**Don'ts:**
+- Don't claim a partnership or endorsement without written consent.
+- Don't use their data or logo without permission.
+- Never present their numbers as ours.
+
+**Email template:**
+
+> **Subject:** Argus Mara — a space/AIS early-warning layer designed to complement Sea-Scan (EUDIS hackathon, DCU, 15–17 Oct)
+>
+> Dear Prof. Ruffini and Dr Kennedy,
+>
+> I lead a team competing in Challenge 3 ("Space-Enabled Maritime Domain Awareness", set by the Department of Defence) at the EUDIS Defence Hackathon at DCU on 15–17 October.
+>
+> We are building **Argus Mara**, an early-warning layer for Ireland's undersea cables and pipelines. It watches AIS and satellite radar and spots vessels whose behaviour matches past cable incidents, such as the *Eagle S* speed-drop and anchor-drag pattern. It then shows the watch officer a **countdown to the threatened cable** and which response assets can arrive in time.
+>
+> We have read your Sea-Scan work, including the DAS–AIS association study on the Dublin–North Wales link. We see the two systems as complementary: Sea-Scan hears what happens at the cable, while Argus Mara sees vessels coming hours earlier and can name them. The link works in both directions: a fibre event can cue identification, and an Argus Mara countdown can cue a fibre segment. Argus Mara's cleaned AIS tracks could also provide better labels.
+>
+> Would you be open to a 20-minute call in the next two weeks? We would value your advice, and we would like your permission before mentioning Sea-Scan by name in our pitch. If there is interest, we would be glad to explore a small joint pilot after the event.
+>
+> Kind regards,
+> [Name] · [team] · [phone]
+
+## 4.9 Rhythm and rules
+
+- **Syncs:**
+  - Tuesday and Friday: 30-minute sync.
+  - **Sunday:** full demo run, recorded.
+  - Keep the board up to date daily.
+- **Stub, then replace.** Build behind the agreed contracts with fake data until the real piece arrives. In the final demo, label everything *real*, *reconstructed* or *simulated*.
+- **Cut, don't stretch.** Anything not working on 12 Oct is dropped.
+- **Adjusting to team size:**
 
 | People | Split |
 |---|---|
-| 3 | Data + Space · Brain · Interface. The lead also owns Story. |
+| 3 | Data + Space · Brain · Interface; the lead also owns Story |
 | 4 | Data + Space · Brain · Interface · Lead |
-| 5 | A · B · C · D · Lead (E) |
-| 6–10 | Split Brain (detectors / countdown + response), Space (radar detection / passes + identity check) and Interface (map / evidence + replay). Add a dedicated "proof" person for metrics and incident reconstructions. |
+| 5 | A · B · C · D · Lead |
+| 6–10 | Split Brain (detectors / countdown + response), Space (detection / passes + identity) and Interface (map / evidence + replay). Add a "proof" person for metrics. |
 
-## 4.6 Rules that keep you on track
+## 4.10 The finish line (17 Oct checklist)
 
-- **Always keep a working end-to-end demo**, even an ugly one.
-- **Stub, then replace.** Build behind the agreed schemas with fake data until the real piece arrives. In the final demo, label everything *real*, *reconstructed* or *simulated*.
-- **Every Sunday:** run the full demo and record it.
-- **Cut, don't stretch.** If a should-have isn't working by 12 Oct, drop it.
+- [ ] The 8-step demo runs **offline**, end to end.
+- [ ] Two numbers on screen: **false alarms per day (ours vs the geofence)** and **warning time on the *Eagle S* replay**.
+- [ ] Dark custody and the identity check shown on at least **one real example**.
+- [ ] The evidence pack opens.
+- [ ] The 4-minute pitch rehearsed 5+ times, the backup video, and the one-pager.
+- [ ] Prior work declared (the tag plus `PRIOR_WORK.md`).
+- [ ] Sea-Scan mentioned with the right, consent-based wording.

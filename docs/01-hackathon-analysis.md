@@ -112,10 +112,17 @@ Ireland is the only host that chose **maritime and space**.
 - Roughly 75–80% of Ireland's gas arrives by subsea pipelines from Great Britain †. Power interconnectors include Greenlink, EWIC and the Celtic Interconnector (due about 2027–28) †.
 - **Russian activity:**
   - The *Yantar* loitered near cables and a gas pipeline in Nov 2024 while flying 3 drones.
-  - Since late Mar 2026, **shadow-fleet tankers have rerouted west of Ireland**, including a convoy of 5 EU-sanctioned tankers in Apr 2026. They are the same class of ageing, sanctioned ships linked to Baltic cable cuts (*Eagle S*, Dec 2024 †).
+  - In Aug 2025, the sanctioned, falsely flagged tanker *Blue* (4 identities and 6 flags since 2020) **switched off its AIS before entering Ireland's EEZ**.
+  - Since late Mar 2026, **shadow-fleet tankers have rerouted west of Ireland**, including a convoy of 5 EU-sanctioned tankers in Apr 2026. They are the same class of ageing, sanctioned ships linked to Baltic cable cuts. *Eagle S* (Dec 2024) slowed from 12 to 9 kn and left a drag line of about 90 km.
   - Legislation to give the Naval Service **boarding powers** is being drafted.
+- **Policy direction:**
+  - The National Maritime Security Strategy (Feb 2026) plans a **national maritime security centre** joining civil and military information for faster decisions. It names **space-based monitoring** as an area to develop.
+  - EU defence ministers met in **Wicklow (31 Aug–1 Sep 2026)**. Their agenda included space in security and defence, and maritime security.
 - **Existing Irish projects:**
-  - **Sea-Scan** (TCD/ADAPT/CONNECT) won Research Ireland's Defence Innovation Challenge, with about €1.2m. It turns subsea telecom fibre into a sensor that detects dark vessels, anchor drag and trawling near cables.
+  - **Sea-Scan** (TCD/ADAPT/CONNECT) won Research Ireland's Defence Innovation Challenge, with about €1.2m.
+    - It turns subsea telecom fibre into a sensor (distributed acoustic sensing plus polarisation sensing) that detects dark vessels, anchor drops and trawling near cables.
+    - It is trained with weak supervision from imperfect AIS labels, and reports 97.8% detection at a 1.98% false-trigger rate.
+    - Its field study used the Dublin–North Wales link (Emerald Bridge Fibres).
   - **GUARD** (Tyndall, €7.6m from the Disruptive Technologies Innovation Fund, DTIF) builds long-endurance drones, up to about 17 h, launched and recovered from Naval Service ships.
 - The DF describes using **AI to cover shortfalls in resources and personnel**.
 
@@ -137,6 +144,7 @@ Ireland is the only host that chose **maritime and space**.
 - **Research Ireland Defence Innovation Challenge 2026 closes 29 Oct 2026**, 12 days after the hackathon.
 - It offers up to €220k over 13 months, plus a €1m prize phase.
 - Area 1 is *space-based situational awareness and security*.
+- **But:** the intent-to-apply deadline was **15 Sep 2026**, and applicants must be eligible Irish research bodies. It is only reachable through a partner who already registered.
 
 ## 1.7 Strategic insights
 
@@ -155,7 +163,7 @@ Ireland is the only host that chose **maritime and space**.
    - Talk of "autonomous targeting" will cost you with an Irish Department of Defence jury.
 7. **Don't rebuild what Ireland already funded; connect to it.** Sea-Scan (fibre sensing on cables) and GUARD (ship-launched drones) are DF-backed. A pitch that says "we plug into them" shows you know the ecosystem. A pitch that duplicates them invites an awkward comparison.
 8. **Design for the follow-on:**
-   - the Defence Innovation Challenge deadline on 29 Oct;
+   - the Defence Innovation Challenge (29 Oct), but only through a partner who registered intent by 15 Sep;
    - ESA BIC, which needs a space link;
    - DF RTI trials;
    - TensorX credits;
@@ -168,6 +176,7 @@ Ireland is the only host that chose **maritime and space**.
 - **Challenge 3** will probably draw the most teams: it is software-only, has lots of open satellite and AIS data, and attracts the space/AI crowd.
   - Expect several "dark-vessel detector" and "AIS anomaly dashboard" entries.
   - Win it by being **infrastructure-specific, predictive and decision-oriented**, not by building another detector.
+  - Commercial AIS "cable watch" services already exist (NKT, Sentinel Proactive, UltramapGlobal, Gatehouse Maritime, OSI). Expect judges to ask how you differ. See [06-challenge-3-deep-dive.md §6.7](06-challenge-3-deep-dive.md).
 - **Challenges 1 and 2** will draw drone and robotics teams, including teams with Ukrainian battlefield experience.
   - Expect strong visual-navigation entries.
   - The quantum requirement in C2 will put some teams off, which could leave a well-executed C2 entry with little competition.

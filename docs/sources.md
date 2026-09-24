@@ -61,6 +61,41 @@ This research was done on 24 Sep 2026. Most official sites couldn't be opened di
 - Defence Innovation Challenge 2026 (closes 29 Oct 2026): https://www.researchireland.ie/news/defence-innovation-challenge-2026/
 - GUARD project: https://theguardproject.com/
 
+## Challenge 3 deep dive (added 24 Sep 2026)
+
+- **National Maritime Security Strategy 2026–2030:**
+  - https://www.gov.ie/en/department-of-defence/publications/national-maritime-security-strategy-20262030/
+  - Eolas: https://www.eolasmagazine.ie/government-publishes-first-national-maritime-security-strategy/
+  - The planned centre: https://www.irishexaminer.com/news/spotlight/arid-41822300.html
+- **Sea-Scan:**
+  - Paper (weakly supervised DAS; 97.8% detection at 1.98% false triggers; ECOC 2026): https://arxiv.org/abs/2606.21326
+  - DAS–AIS association on the Dublin–North Wales link: https://arxiv.org/abs/2607.02536
+  - Project pages: https://www.tcd.ie/e3/news/sea-scan-project-to-uncover-dark-vessels-in-irish-waters-using-fibre-optic-cables/ and https://www.tcd.ie/scss/news/2025/sea-scan-project/
+  - Innovation Award 2026: https://www.adaptcentre.ie/news-and-events/sea-scan-project-wins-innovation-award-at-2026-analytics-ai-awards/
+- **Emerald Bridge Fibres** (Dublin–Holyhead): https://www.submarinecablemap.com/submarine-cable/emerald-bridge-fibres
+- **Tanker *Blue*** (false flag, AIS off before the Irish EEZ, Aug 2025):
+  - https://maritime-executive.com/article/ireland-tracks-shadow-tanker-as-it-avoids-sailing-the-english-channel
+  - https://www.irishtimes.com/ireland/2025/08/08/russian-oil-tanker-operating-under-false-flag-enters-irish-controlled-waters/
+- **Shadow fleet off the west coast** (2026): https://www.marineinsight.com/shipping-news/shadow-fleet-tankers-seen-along-irish-coast-as-they-avoid-english-channel/
+- **EU defence ministers in Wicklow** (31 Aug–1 Sep 2026):
+  - https://irish-presidency.consilium.europa.eu/en/events/informal-meeting-of-defence-ministers-fac-defence/
+  - https://www.globalsecurity.org/military/library/news/2026/09/mil-260901-eeas01.htm
+- ***Eagle S*** (speed 12→9 kn; drag line about 90 km):
+  - https://gcaptain.com/baltic-sea-cable-probe-finnish-investigators-suspect-shadow-tanker-eagle-s-dragged-anchor-for-60-miles/
+  - https://en.wikipedia.org/wiki/2024_Estlink_2_incident
+- **Research Ireland Defence Innovation Challenge 2026** (intent deadline 15 Sep; closes 29 Oct): https://www.researchireland.ie/news/defence-innovation-challenge-2026/
+- **Commercial AIS cable-watch services:**
+  - NKT: https://www.nkt.com/products-solutions/lifecycle-cable-services/cable-monitoring-solutions/offshore/ais-subsea-asset-protection
+  - Gatehouse: https://gatehousemaritime.com/solutions/critical-offshore-and-subsea-infrastructure-protection/monitor-protect-subsea-cables-and-pipelines/
+  - Sentinel Proactive: https://sentinelproactive.com/industries/submarine-cables/
+  - UltramapGlobal: https://ultramapglobal.com/
+  - OSI: https://oceanspecialists.com/services/osi-cable-protection-services/
+  - FiberSense: https://fibersense.com/digitalmarine/
+- **Space layer:**
+  - Sentinel-1D launch (6-day cycle with 1C; AIS payload): https://www.nasaspaceflight.com/2025/11/sentinel-1d-launch/
+  - EMSA Copernicus Maritime Surveillance: https://www.emsa.europa.eu/copernicus.html
+  - Ubotica CogniSAT-6 dark-vessel detection: https://ubotica.com/illuminating-the-invisible-how-ubotica-is-revolutionising-dark-vessel-detection/
+
 ## Battlefield and EU context
 
 - Baltic GNSS interference, 122,607 flights in Jan–Apr 2025: https://www.gpsworld.com/123000-flights-disrupted-by-gnss-jamming/

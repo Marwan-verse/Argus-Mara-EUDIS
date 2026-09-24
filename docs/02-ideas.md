@@ -9,7 +9,7 @@ The briefs below are ranked. There is one recommendation (★), the best alterna
 
 | # | Idea | Challenge | One line | Best if your team is mostly… |
 |---|---|---|---|---|
-| ★1 | **ANCHOR WATCH** | 3: Space-enabled maritime domain awareness | Sees the ship coming *before* its anchor hits the cable, and tells the watch officer what can get there in time | software, data, AI, geospatial |
+| ★1 | **ARGUS MARA** | 3: Space-enabled maritime domain awareness | Sees the ship coming *before* its anchor hits the cable, and tells the watch officer what can get there in time | software, data, AI, geospatial |
 | 2 | **ONE SHIP, TWENTY EYES** | 2: Swarm coordination | Lets one patrol ship and one operator run 10–20 drones that keep working when comms are jammed. Allocation is solved with quantum optimisation and benchmarked honestly. | drones, robotics, simulation, operations research |
 | 3 | **MAGNAV ÉIRE** | 1: Navigation without GNSS | "Navigate by the rocks": quantum-ready magnetic navigation on Ireland's own national magnetic map, plus a detector for when GNSS starts lying | estimation, physics, signal processing, quantum |
 | W1 | SWARM-AS-GPS | 1 or 2 | A swarm that becomes its own positioning constellation in a jammed area | robotics researchers with ranging hardware |
@@ -17,36 +17,46 @@ The briefs below are ranked. There is one recommendation (★), the best alterna
 
 ---
 
-## ★ 1. ANCHOR WATCH: early warning for Ireland's undersea lifelines (Challenge 3)
+## ★ 1. ARGUS MARA: early warning for Ireland's undersea lifelines (Challenge 3)
 
-> *"Sea-Scan hears the anchor on the cable. ANCHOR WATCH sees the ship coming hours before, knows who it is, and tells you what can get there in time."*
+> *"Ireland can crew two ships. Argus Mara gives them a hundred eyes."*
+>
+> *"Sea-Scan hears the anchor on the cable. Argus Mara sees the ship coming hours before, knows who it is, and tells you what can get there in time."*
 
-In seamanship, an *anchor watch* is the lookout kept at night to catch a dragging anchor. This is that watch for the nation's seabed.
+**The name:**
+- In Greek myth, *Argus Panoptes* was the hundred-eyed watchman who never slept all at once.
+- *Mara* is Irish for "of the sea", as in *Foras na Mara*, the Marine Institute.
+- The system's core function is the **Anchor Watch countdown**. In seamanship, an *anchor watch* is the lookout kept at night to catch a dragging anchor.
 
 ### What makes it special: five things the judges will remember
 
-1. **A countdown, not a map.** Other teams will show ships on a map. Every ship ANCHOR WATCH flags gets a **timer to the cable it threatens**, and every response option shows whether it beats that timer.
-2. **Anchor physics.** An anchor can only reach the seabed where the water is shallow enough, roughly the continental shelf. So you watch only the segments that can physically be hit, which means far fewer false alarms.
-3. **An identity check from space.** Satellite radar gives a rough size for every ship, to within tens of metres. If a 250 m tanker claims in its AIS messages to be a 60 m fishing boat, it is lying, and you flag it.
-4. **Sea-Scan's partner, not its rival.** Sea-Scan listens to the cable itself. ANCHOR WATCH sees the ship hours earlier, from far away, and knows who it is.
-5. **Proof on a real case.** Replay the *Eagle S* incident and show when your alarm would have fired, well before the cable broke.
+1. **A countdown, not a map.** Other teams will show ships on a map. Every ship Argus Mara flags gets a **timer to the cable it threatens**, and every response option shows whether it beats that timer.
+2. **Anchor physics.** An anchor can only reach the seabed where the water is shallow enough, roughly the continental shelf. You watch only the segments that can physically be hit, so there are far fewer false alarms. Ships out in the deep Atlantic stay calm on the map.
+3. **An identity check from space.** Satellite radar gives a rough size for every ship, to within tens of metres. If a 250 m tanker claims in AIS to be a 110 m cargo ship, it is lying. Argus Mara combines this with identity history, like the sanctioned tanker *Blue*: four identities and six flags since 2020.
+4. **Sea-Scan's partner, not its rival.** Sea-Scan (Trinity College Dublin) listens to the cable itself. Argus Mara sees the ship hours earlier, from far away, and knows who it is. It can also give Sea-Scan the clean ship tracks its learning depends on.
+5. **Proof on a real case.** Replay the *Eagle S* profile (speed dropping from 12 to 9 knots, a drag line of about 90 km) and show when your alarm would have fired.
 
 ### The problem
 
-- **The assets are critical.** About 11 transatlantic fibre cables pass through or near Irish waters. So do the gas pipelines that bring most of Ireland's gas † and the power interconnectors (EWIC, Greenlink, and the Celtic Interconnector in about 2027–28 †).
-- **The threat is live and nearby.**
-  - The *Yantar* loitered near cables and a pipeline off Ireland in Nov 2024, flying drones.
-  - Since Mar 2026, **Russia's sanctioned shadow-fleet tankers route west of Ireland**, some in convoy. That is the class of ship that cut Baltic cables by dragging anchors (*Eagle S*, Dec 2024 †).
+- **The assets are critical.** About 11 transatlantic fibre cables pass through or near Irish waters. So do the gas pipelines that bring most of Ireland's gas † and the power interconnectors: EWIC, Greenlink, and the Celtic Interconnector in about 2027–28 †.
+- **The threat is live, and it is in Irish waters.**
+  - **Nov 2024:** the Russian spy ship *Yantar* loitered near cables and a pipeline off Ireland, flying drones.
+  - **Aug 2025:** the sanctioned, falsely flagged tanker *Blue* **switched off its AIS before entering Ireland's EEZ** and sailed down the west coast.
+  - **Since late Mar 2026:** shadow-fleet tankers route west of Ireland to avoid UK waters, some in convoy. Irish security sources call the numbers "unprecedented".
+  - These are the same kind of ageing, sanctioned ships that cut Baltic cables. *Eagle S* (Christmas 2024) left a drag line of about 90 km.
+  - **31 Aug–1 Sep 2026:** EU defence ministers met in Wicklow under Ireland's Presidency. Their agenda included **space in security and defence** and **maritime security, including undersea infrastructure**.
 - **There are very few people to watch.**
   - The EEZ is about 7× Ireland's land area.
   - The Naval Service has **8 ships but crews for about 2 at sea**.
   - There is no military primary radar until 2027–28 and no subsea surveillance †.
 - **The gap is attention and time, not data.**
-  - In the Baltic cases, the tell-tale behaviour was visible in ordinary ship-tracking data while it happened †. The alarm came when the cable failed.
+  - Just before *Eagle S* broke the first cable, its speed fell from 12 to 9 knots. That was visible in ordinary ship-tracking data. The alarm came when the cable failed.
+  - At 9 knots, a 90 km drag line is roughly five hours of abnormal sailing.
   - Most cable faults worldwide are caused *accidentally* by anchors and fishing gear †. Early warning is worth money even when there is no sabotage.
-- **It is the Department of Defence's own brief.** The National Maritime Security Strategy (Feb 2026) has two relevant objectives:
-  - Objective 2: protect critical undersea infrastructure.
-  - Objective 3: improve maritime domain awareness.
+- **It is the Department of Defence's own brief.**
+  - The National Maritime Security Strategy (Feb 2026) has two relevant objectives: **protect critical undersea infrastructure** (objective 2) and **improve maritime domain awareness** (objective 3).
+  - It plans a **national maritime security centre** that brings civil and military information into one picture for faster decision-making. **Argus Mara is a working prototype of that decision layer.**
+  - The strategy also names space-based monitoring as an area to develop.
 
 ### What you build
 
@@ -55,140 +65,153 @@ In seamanship, an *anchor watch* is the lookout kept at night to catch a draggin
 1. **A fused maritime picture.** Combine:
    - live ship-tracking (AIS) data;
    - vessel detections from Sentinel-1 radar satellites;
-   - vessel risk lists (EU, UK and US sanctions; reflagging; age);
+   - vessel risk lists (EU, UK and US sanctions; flag and name history);
    - cable and pipeline routes;
    - seabed depth;
    - weather.
 2. **Custody through the dark.** When a ship switches its AIS off, keep its identity:
-   - Predict its possible positions from its last known motion.
+   - Predict where it could have got to from its last known motion.
    - Re-acquire it with satellite radar. Radar sees through cloud and at night, which matters in Ireland.
-   - Radar detections that match no AIS signal are *dark vessels*. The system links them back to known tracks by checking which ships could physically have reached that point.
+   - Radar detections that match no AIS signal are *dark vessels*. Link them back to known tracks by checking which ships could physically have reached that point.
 3. **Behaviour detectors, all explainable:**
-   - **Anchor-drag signature:** a merchant ship underway at an unusually low speed for its type and route, with speed oscillations and heading/course divergence, sustained over kilometres. The thresholds should be learned, not guessed.
+   - **Anchor-drag signature:** a merchant ship's speed drops sharply without any reason (open water, calm weather, no traffic, no port), with speed oscillation and heading/course divergence. This is the *Eagle S* pattern. Learn the thresholds; don't guess them.
    - Loitering or slow transit over infrastructure.
    - Survey-like patterns over a cable by a vessel that isn't a survey ship.
    - AIS switched off or on near infrastructure.
    - Ship-to-ship rendezvous.
-   - Identity or position spoofing: impossible jumps, conflicting vessel IDs (MMSIs).
-   - **Identity check from space:** compare the ship length measured on satellite radar with the length the ship declares in AIS. A big mismatch means a false identity.
+   - Position spoofing: impossible jumps.
+   - **Identity check from space:** compare the radar-measured length with the length the ship declares in AIS, and check name and flag history against sanctions lists.
 4. **Risk that is aware of the infrastructure:**
-   - Only count seabed an anchor can physically reach (a depth mask). The continental shelf matters; the deep Atlantic mostly doesn't.
+   - Only count seabed an anchor can physically reach (a depth mask). The shelf matters; the deep Atlantic mostly doesn't.
    - Weight each cable or pipeline segment by how critical it is.
    - Factor in the vessel's risk profile.
    - Use context to suppress false alarms: storm shelter, designated anchorages, pilot boats, normal fishing grounds.
-5. **Prediction.** Time until the vessel reaches the nearest at-risk segment, which segment it is, and where the vessel will be when each response asset could arrive.
-6. **Decision support.** Course-of-action cards, each showing whether it arrives before the crossing:
-   - hail on VHF channel 16;
+5. **The countdown.** Time until the vessel reaches the nearest at-risk segment, and which segment it is. It updates with every AIS message and widens its uncertainty while a ship is dark.
+6. **Decision support.** Course-of-action cards, each showing whether it **arrives before the countdown ends**:
+   - hail on VHF channel 16, if the ship is within coast-radio range;
    - notify the cable or energy operator and the maritime security centre;
-   - the next free satellite radar pass, or a commercial SAR tasking;
+   - the next Sentinel-1 look, or a commercial radar tasking;
    - an Air Corps C295 sortie;
    - the nearest Naval Service ship;
    - a ship-launched drone (for example GUARD).
-7. **A one-click evidence pack.** A timeline, track, imagery chips and raw messages, hash-chained so they can't be altered unnoticed. It is for the Gardaí, legal follow-up and partners. The boarding-powers legislation is being drafted now.
+7. **A one-click evidence pack:**
+   - Contents: a timeline, track, radar image chips and raw messages.
+   - Each item is hash-chained, so they can't be altered unnoticed.
+   - It is for the Gardaí, legal follow-up and partners. Legislation to give the Naval Service boarding powers is being drafted now.
 8. **Optional: a watch-officer brief.**
    - An LLM running on **sovereign EU compute (TensorX)** summarises the alerts in plain language.
    - It is strictly grounded in the structured alert data, and every sentence cites the evidence behind it.
-   - Keep it a garnish, not the product.
 
 **It connects to what Ireland already funds:**
-- **Sea-Scan** (fibre sensing on the cable): a Sea-Scan alert makes ANCHOR WATCH rank the candidate vessels nearby. An ANCHOR WATCH alert puts that cable segment on high alert. This is multi-domain fusion, one of the challenge bullets.
-- **GUARD** (long-endurance ship-launched drones) is the obvious asset for getting eyes on a vessel.
+- **Sea-Scan** (TCD, winner of Research Ireland's Defence Innovation Challenge):
+  - **What it does:** it turns existing telecom fibre into a sensor, using distributed acoustic sensing plus polarisation sensing, and detects ship noise, anchor drops and trawling near the cable.
+  - **Why it needs AIS:** its papers report training on *imperfect AIS labels*, and studying the messy match between fibre signals and AIS on the Dublin–North Wales link (Emerald Bridge Fibres).
+  - **Three-way synergy:**
+    1. **Fibre → Argus Mara:** a fibre event at km X makes Argus Mara name the candidate vessels. If there are none, it flags a dark contact and checks the next radar pass.
+    2. **Argus Mara → fibre:** a countdown tells the fibre system which cable segment and time window to watch.
+    3. **Better labels:** Argus Mara's cleaned tracks, reconstructed gaps and radar confirmations are the ground truth fibre-sensing models need.
+- **GUARD** (Tyndall's long-endurance ship-launched drones) is the obvious asset for getting eyes on a vessel.
+- **The planned national maritime security centre:** design Argus Mara as a shared picture for several agencies: Defence Forces, Coast Guard, Gardaí, and energy and cable operators.
 
 ### The 90-second demo
 
 The scenario is *clearly labelled as simulated*, uses a fictional vessel name, and is set among real AIS traffic around Ireland.
 
-1. A map of Ireland with the cable and pipeline corridors. Anchor-reachable segments glow. Live ship traffic is moving.
-2. **T+0:** a sanctions-listed tanker (fictional name) transits north-west of Mayo with a convoy, then **goes dark**.
-3. **T+2h:** a Sentinel-1 pass finds an unmatched radar target on its projected track. ANCHOR WATCH says: *"custody regained, 93% match"*.
-4. **T+3h:** AIS returns. The ship is at 4.1 kn where its peers do 12 kn, with oscillating speed, over about 120 m of water (within anchor reach), heading for a cable. **Alert:** *"Anchor-drag signature. 12 km to the shelf segment. Crossing ETA 1 h 35."*
-   - Explanation chips show why: *speed 3× below class norm · course variance ×6 · sanctions-listed · anchor-reachable depth*.
-5. **The action panel** shows what can arrive in time:
-   - Hail now ✅
-   - Notify operator ✅
-   - C295 from Baldonnel, ETA 1 h 10 ✅
+1. A map of Ireland with cables and pipelines. The **anchor-reach zone** (the shelf) glows, and live traffic is moving. Ships in the deep Atlantic stay calm, because their anchors can't reach anything.
+2. **T+0:** a sanctioned tanker (fictional name) with a history of name and flag changes sails south, far off the west coast. It **goes dark** before entering the EEZ.
+3. **T+2h:** a Sentinel-1 pass finds an unmatched radar target on its projected track: *"custody regained, 91% match"*. Then the identity check fires: *"radar length ≈ 245 m; last AIS claimed 'general cargo, 110 m': mismatch"*.
+4. **T+3h:** AIS returns and the ship turns east, **towards the shelf**. The countdown starts: *"anchor-reach zone in 25 min · cable corridor in 1 h 10"*.
+5. Over the shelf its speed drops from **12 to 9 knots**, in calm open water with no traffic, and its course wobbles. That is the *Eagle S* signature. **Alert:** *"Anchor-drag signature. 12 km to the cable. Crossing ETA 1 h 20."*
+   - "Why" chips: *speed −25% with no reason · course wobble · sanctions-listed · identity mismatch · anchor-reachable depth*.
+6. **The action panel:**
+   - Hail on VHF 16 ✅
+   - Notify operator and maritime security centre ✅
+   - C295 from Baldonnel, ETA 1 h 05 ✅
    - Naval Service ship, ETA 6 h ❌
-   - Next free radar pass 18:40 ❌, so request commercial radar (SAR) tasking ✅
-6. The operator approves. The evidence pack is generated, and the brief is read out in one sentence.
+   - Next Sentinel-1 look 18:40 ❌, so request commercial radar tasking
+7. **The fusion moment** (a simulated fibre-sensing cue): *"fibre event at km 43 of the cable"* is matched to the tanker. A chip reads *"confirmed by fibre"*, and the countdown switches to **CONTACT**.
+8. The operator approves. The evidence pack is generated, and the one-sentence brief is read out.
 
 ### How you prove it: numbers against a baseline
 
 | Metric | How | Baseline |
 |---|---|---|
-| **Warning time** | Replay tracks reconstructed from public reporting of *Eagle S*, *Yi Peng 3* and *Newnew Polar Bear*. Measure minutes from alert to cable crossing. | "Detect on damage" = 0 min |
-| **False alarms per day** | Run a week of real AIS around Ireland and check the top alerts by hand | Naive geofence: "any vessel under 6 kn within 1 km of a cable" |
-| **Dark-period custody** | Share of AIS gaps bridged by a radar re-acquisition in replay | Tracks dropped at the gap |
+| **Warning time** | Replay tracks reconstructed from public reporting of the *Eagle S* profile, *Yi Peng 3* and *Newnew Polar Bear*. Measure minutes from alert to each cable crossing. | "Detect on damage" = 0 min |
+| **False alarms per day** | Run your own recorded weeks of Irish AIS and check the top alerts by hand | Naive geofence: "any vessel under 6 kn within 1 km of a cable" |
+| **Detector quality** | Precision and recall on synthetic anchor-drag episodes injected into real tracks | The same geofence |
+| **Dark-period custody** | Share of AIS gaps bridged by a correct radar re-acquisition in replay | Tracks dropped at the gap |
 | **Latency** | Time from AIS message to alert | — |
 
 ### Data (all open; register for keys this week)
 
 | Need | Source |
 |---|---|
-| Live AIS | aisstream.io (free websocket API with global terrestrial coverage) |
-| Historical AIS (training, false-alarm tests) | Danish Maritime Authority AIS archive; NOAA MarineCadastre |
-| Satellite radar and optical | Copernicus Data Space Ecosystem (Sentinel-1 radar, Sentinel-2 optical); Global Fishing Watch radar vessel detections and AIS gap events (free for non-commercial use) |
-| Cables and pipelines | EMODnet Human Activities (telecom cables, power cables, pipelines) |
-| Seabed depth | EMODnet Bathymetry; INFOMAR (Irish seabed mapping) |
+| Live AIS | aisstream.io (free websocket API). **Record Irish traffic 24/7 from now on.** |
+| Historical AIS (normal behaviour) | Danish Maritime Authority AIS archive; NOAA MarineCadastre |
+| Satellite radar and optical | Copernicus Data Space Ecosystem (Sentinel-1 radar, Sentinel-2 optical); ESA's published Sentinel-1 acquisition plans; Global Fishing Watch radar vessel detections, with length estimates, and AIS gap events (free for non-commercial use) |
+| Cables and pipelines | EMODnet Human Activities (telecom cables, power cables, pipelines); TeleGeography's submarine cable map for telecom routes (non-commercial licence) |
+| Seabed depth | EMODnet Bathymetry; GEBCO; INFOMAR (Irish seabed mapping) |
 | Vessel risk | EU sanctions vessel annex (Reg. 833/2014), UK and OFAC lists |
 | Weather context | Met Éireann; Marine Institute weather buoys (ERDDAP) |
 | Satellite passes | CelesTrak orbit data (TLEs) + Skyfield |
 
 **Stack:** Python (FastAPI, Polars/DuckDB, GeoPandas/Shapely, H3), scikit-learn/LightGBM, Skyfield, and a MapLibre GL + deck.gl front end. Optionally, an OpenAI-compatible LLM endpoint (TensorX).
 
-### Build plan
-
-- **Before the event** (declare this as prior work): data connectors, the infrastructure and depth layers, a map UI skeleton with replay, a first rule-based detector, and a scenario generator.
-- **At the event:** the learned behaviour scoring, radar-satellite fusion and custody, prediction and course-of-action cards, the evidence pack, backtest numbers, polish and the pitch.
-
-### Team (4–6)
-
-- **Data engineer:** AIS streaming and storage.
-- **ML / analytics:** behaviour models and backtests.
-- **Geospatial / satellite radar:** Sentinel-1 detections and fusion.
-- **Front end:** map, replay and action cards.
-- **Lead (you):** the operator story, mentor interviews, business model, pitch.
-- **Bonus:** anyone with Naval Service, Coast Guard or shipping experience.
+**How to build each piece:** [05-build-guide.md](05-build-guide.md). **Who does what, and when:** [04-work-plan.md](04-work-plan.md).
 
 ### Market and follow-on
 
+**The market is real.** Commercial AIS "cable watch" services already exist: NKT, Sentinel Proactive, UltramapGlobal, Gatehouse Maritime, OSI. They mostly protect *one owner's* cables against *accidental* anchoring, by warning the ship's bridge. Argus Mara is different. It is **for national security**:
+- all seabed infrastructure at once;
+- *adversarial* behaviour (dark ships, false identities, the sanctioned fleet);
+- **response planning against a countdown**;
+- fusion with Sea-Scan;
+- sovereign deployment.
+
 **Buyers:**
-- The Department of Defence and Defence Forces (National Maritime Security Strategy).
-- The Irish Coast Guard.
-- Cable and energy asset owners (EirGrid interconnectors, Gas Networks Ireland, cable operators and hyperscalers).
-- Insurers and offshore wind (Ireland targets 5 GW by 2030 †).
-- EU coastal states (the Baltic especially) and EU security agencies. The EU Action Plan on Cable Security (Feb 2025 †) creates demand.
+- **The State:** the Department of Defence and Defence Forces, the planned national maritime security centre, the Irish Coast Guard, the Gardaí.
+- **Then asset owners:** EirGrid interconnectors, Gas Networks Ireland, cable operators and hyperscalers, offshore wind (Ireland targets 5 GW by 2030 †).
+- **EU coastal states**, the Baltic especially. The EU Action Plan on Cable Security (Feb 2025 †) creates demand.
 
-**Money:**
-- **Research Ireland Defence Innovation Challenge 2026:** Area 1 is space-based situational awareness. It **closes 29 Oct** and needs an eligible Irish research-body lead †.
-- **ESA BIC:** your product runs on space data.
-- EUDIS mentoring.
+**Money and support:**
+- EUDIS mentoring and the EU-wide final (if you win).
+- **ESA BIC:** the product runs on space data.
+- A **Defence Forces RTI** trial.
+- **TensorX** credits.
+- DCU incubation.
 - The European Defence Fund, which needs a consortium of 3+ entities from 3 countries.
-- TensorX credits and a Defence Forces RTI trial.
+- *Research Ireland Defence Innovation Challenge 2026:* the intent-to-apply deadline passed on **15 Sep 2026**. It is only an option if a partner (e.g. TCD) already registered. Otherwise, aim for the next round.
 
-**Model:** a subscription per protected asset or area, plus integration.
+**Model:** a State licence per region plus integration, and a commercial add-on per protected asset.
 
 ### Risks and mitigations
 
-- **AIS coverage thins far offshore.** Plan a satellite-AIS partner for the roadmap. In the demo, operate near the coast.
-- **Radar-satellite revisit gaps.** Recommend commercial tasking and fuse with fibre sensing.
+- **AIS coverage thins far offshore.** Plan a satellite-AIS partner for the roadmap. Sentinel-1C/1D also carry AIS receivers.
+- **Radar-satellite revisit gaps.** Recommend commercial tasking, and fuse with fibre sensing.
 - **False alarms.** Use an explainable ranking, contextual suppression, and a measured false-alarm rate.
-- **"Isn't this Windward, Kpler or Global Fishing Watch?"** Those are generic maritime-risk platforms. Your answer:
-  - ANCHOR WATCH is **infrastructure-centric**: segment-level risk with anchor-reach physics.
-  - It is **predictive, with feasibility-aware decision support**.
-  - It **fuses Irish in-situ sensors** like Sea-Scan.
-  - It is **sovereign and deployable on premises**.
-- **Sensitivity.** Use public data only. Fictional names in scenarios. Human decides; nothing kinetic.
+- **"Commercial cable-watch services already exist."** Yes, and that proves the market. They warn ships about accidental anchoring for one owner. Argus Mara adds dark vessels, identity checks, the countdown with response planning, and Sea-Scan fusion, for the State.
+- **"Isn't this Windward, Kpler or Global Fishing Watch?"** Those are generic maritime-risk platforms. Argus Mara works at cable-segment level with anchor-reach physics, is predictive with feasibility-aware decision support, fuses Irish in-situ sensors, and is sovereign.
+- **Sensitivity.** Use public data only. Fictional names in scenarios. The human decides; nothing is kinetic.
 
 ### Why it can win
 
 - **Technological maturity:** it is software-only, so it can be built for real in three weeks plus the event. It gives a live, end-to-end demo with real numbers.
-- **Operational relevance:** it is the Department of Defence's own challenge and maps to two strategy objectives. The shadow-fleet threat is topical in October 2026.
-- **Market potential:** defence *and* commercial buyers, since accidental damage alone justifies it, plus a sovereign angle.
-- **Every sponsor can say yes:** DoD (their challenge), DF RTI (a trial), ISA/ESA BIC and Ubotica (space data), TensorX (sovereign AI), Deloitte (buyer and integration), Research Ireland (Area 1).
+- **Operational relevance:**
+  - It is the Department of Defence's own challenge and maps to two strategy objectives.
+  - It prototypes the planned national maritime security centre.
+  - It sits exactly where the EU defence ministers' Wicklow agenda put space and maritime security.
+- **Market potential:** the State as first buyer, commercial asset owners as the second, and a sovereign angle.
+- **Every sponsor can say yes:**
+  - DoD: their challenge.
+  - DF RTI: a trial.
+  - ISA, ESA BIC and Ubotica: space data. Ubotica's satellites already detect dark ships on board.
+  - TensorX: sovereign AI.
+  - Deloitte: buyer and integration.
+  - TCD: Sea-Scan synergy.
 - **EU level:** the Baltic states lived this threat, so relevance is obvious to every Member State.
 
 **Stretch modules:**
-- **Threat forecast, like a weather forecast.** A watchlist of sanctioned vessels heading for Irish waters, built from their AIS departures and past routes. It shows who will pass the Irish shelf in the next few days and which satellite passes will cover them, so scarce ships and aircraft can be planned ahead.
+- **Threat forecast, like a weather forecast.** A watchlist of sanctioned vessels heading for Irish waters, built from their AIS departures and past routes. It shows who will pass the Irish shelf in the next few days and which satellite passes will cover them.
 - **A second mission on the same engine:** "Which vessels could have launched the drones seen at sea?" (see W2).
 
 ---
@@ -420,7 +443,7 @@ It is elegant and bridges both challenges. The risk is high: it needs ranging ha
 
 - **The incident.** On 1 Dec 2025, drones orbited LÉ William Butler Yeats off Dublin for about 2 hours, and the operator is still unidentified. In Denmark (Sep 2025), a tanker was suspected of launching drones †.
 - **The idea.** Fuse drone sightings (radar, camera or RF bearings, even eyewitness reports) with the AIS and satellite-radar vessel picture. From the drones' endurance and speed, compute which vessels were within launch range at launch time. Rank them by behaviour history, and produce an attribution lead with an evidence pack for the Gardaí.
-- **Caveats.** It is sensitive (the investigation is ongoing), and real drone-track data is scarce. It works best as a **second mission on the ANCHOR WATCH engine**.
+- **Caveats.** It is sensitive (the investigation is ongoing), and real drone-track data is scarce. It works best as a **second mission on the Argus Mara engine**.
 
 ---
 
@@ -437,7 +460,7 @@ It is elegant and bridges both challenges. The risk is high: it needs ranging ha
 
 ## Scorecard (5 = best)
 
-| | ★ ANCHOR WATCH | ONE SHIP, TWENTY EYES | MAGNAV ÉIRE |
+| | ★ ARGUS MARA | ONE SHIP, TWENTY EYES | MAGNAV ÉIRE |
 |---|---|---|---|
 | Operational relevance to an Irish jury | 5 | 4.5 | 3 |
 | Polished demo achievable (3 weeks + 2.5 days) | 5 | 4 | 3 |
@@ -449,7 +472,7 @@ It is elegant and bridges both challenges. The risk is high: it needs ranging ha
 
 ## Choosing
 
-- **Mostly software, data or AI people:** ANCHOR WATCH.
+- **Mostly software, data or AI people:** ARGUS MARA.
 - **Drone, robotics or simulation people, plus someone who enjoys optimisation:** ONE SHIP, TWENTY EYES.
 - **Someone who has built Kalman or particle filters, or a physicist or quantum person:** MAGNAV ÉIRE.
 - **The team already has a prototype of anything close:** adapt it to the nearest idea. Maturity beats novelty. Declare what existed before.
