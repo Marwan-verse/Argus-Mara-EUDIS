@@ -23,6 +23,14 @@ The briefs below are ranked. There is one recommendation (★), the best alterna
 
 In seamanship, an *anchor watch* is the lookout kept at night to catch a dragging anchor. This is that watch for the nation's seabed.
 
+### What makes it special: five things the judges will remember
+
+1. **A countdown, not a map.** Other teams will show ships on a map. Every ship ANCHOR WATCH flags gets a **timer to the cable it threatens**, and every response option shows whether it beats that timer.
+2. **Anchor physics.** An anchor can only reach the seabed where the water is shallow enough, roughly the continental shelf. So you watch only the segments that can physically be hit, which means far fewer false alarms.
+3. **An identity check from space.** Satellite radar gives a rough size for every ship, to within tens of metres. If a 250 m tanker claims in its AIS messages to be a 60 m fishing boat, it is lying, and you flag it.
+4. **Sea-Scan's partner, not its rival.** Sea-Scan listens to the cable itself. ANCHOR WATCH sees the ship hours earlier, from far away, and knows who it is.
+5. **Proof on a real case.** Replay the *Eagle S* incident and show when your alarm would have fired, well before the cable broke.
+
 ### The problem
 
 - **The assets are critical.** About 11 transatlantic fibre cables pass through or near Irish waters. So do the gas pipelines that bring most of Ireland's gas † and the power interconnectors (EWIC, Greenlink, and the Celtic Interconnector in about 2027–28 †).
@@ -62,6 +70,7 @@ In seamanship, an *anchor watch* is the lookout kept at night to catch a draggin
    - AIS switched off or on near infrastructure.
    - Ship-to-ship rendezvous.
    - Identity or position spoofing: impossible jumps, conflicting vessel IDs (MMSIs).
+   - **Identity check from space:** compare the ship length measured on satellite radar with the length the ship declares in AIS. A big mismatch means a false identity.
 4. **Risk that is aware of the infrastructure:**
    - Only count seabed an anchor can physically reach (a depth mask). The continental shelf matters; the deep Atlantic mostly doesn't.
    - Weight each cable or pipeline segment by how critical it is.
@@ -178,7 +187,9 @@ The scenario is *clearly labelled as simulated*, uses a fictional vessel name, a
 - **Every sponsor can say yes:** DoD (their challenge), DF RTI (a trial), ISA/ESA BIC and Ubotica (space data), TensorX (sovereign AI), Deloitte (buyer and integration), Research Ireland (Area 1).
 - **EU level:** the Baltic states lived this threat, so relevance is obvious to every Member State.
 
-**Stretch module:** a second mission on the same engine: "Which vessels could have launched the drones seen at sea?" (see W2).
+**Stretch modules:**
+- **Threat forecast, like a weather forecast.** A watchlist of sanctioned vessels heading for Irish waters, built from their AIS departures and past routes. It shows who will pass the Irish shelf in the next few days and which satellite passes will cover them, so scarce ships and aircraft can be planned ahead.
+- **A second mission on the same engine:** "Which vessels could have launched the drones seen at sea?" (see W2).
 
 ---
 
