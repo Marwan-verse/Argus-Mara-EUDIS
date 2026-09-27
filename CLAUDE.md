@@ -15,7 +15,9 @@ Decisions are recorded in `DECISIONS.md`. Read it first, and add new decisions t
 
 ## Where things are
 
-- `README.md`: overview and status.
+- `README.md`: the team landing page (what, plan, workstreams, open tasks, rules). Keep it current, because new teammates start there.
+- `recorder/`: the 24/7 AIS recorder (`recorder.py`), health check (`check.py`) and map preview (`map.py`). Data goes to `data/ais/`, which is git-ignored.
+- `docs/plan-ru.md`: the plan in Russian, in simple words.
 - `docs/01-hackathon-analysis.md`: event facts, judging, past winners, Irish context.
 - `docs/02-ideas.md`: idea briefs; §1 is Argus Mara.
 - `docs/03-playbook.md`: pitch script, Q&A, demo rules.

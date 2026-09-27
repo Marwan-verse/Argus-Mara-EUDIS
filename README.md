@@ -1,44 +1,104 @@
-# ARGUS MARA: EUDIS Defence Hackathon 2026, Ireland
-
-This is our team's workspace for **Ireland's first defence hackathon**: the EUDIS Defence Hackathon at DCU:Innovate Hub, Glasnevin, Dublin, **15–17 October 2026**. The theme is *Autonomy on the Battlefield*.
-
-## What we're building
-
-We are in **Challenge 3, the Department of Defence's "Space-Enabled Maritime Domain Awareness"**. Our product is **ARGUS MARA**, early warning for Ireland's undersea cables and pipelines.
+# ARGUS MARA: our EUDIS Defence Hackathon project
 
 > *"Ireland can crew two ships. Argus Mara gives them a hundred eyes."*
 
-It works in three steps:
-- **Watch:** it follows live ship traffic around Ireland. When a ship switches its transponder off, it keeps tracking it with satellite radar.
-- **Spot:** it picks out the few vessels whose behaviour matches past cable cuts, such as the *Eagle S* speed drop and anchor drag, or a false identity.
-- **Count down:** its heart is a **countdown to the threatened cable**, showing which response assets can get there in time. A human always decides.
+**What it is:** an AI early-warning system for Ireland's undersea internet cables and gas and power lines. It works like this:
+- It watches ships using their public AIS signals and satellite radar.
+- It spots dangerous behaviour: dragging an anchor, switching the transponder off, faking an identity.
+- It then starts a **countdown to the cable at risk** and shows which response can get there in time.
+- **A human always decides.**
 
-It is designed to **complement Trinity College's Sea-Scan**, which listens to the cable itself. Argus Mara sees the ship hours earlier and knows who it is.
+**Where and when:** the EUDIS Defence Hackathon at DCU:Innovate Hub, Dublin, **15–17 October 2026**. We are in **Challenge 3**, the Department of Defence's "Space-Enabled Maritime Domain Awareness".
 
-The name: *Argus* is the hundred-eyed watchman of Greek myth, and *Mara* is Irish for "of the sea".
+**Team:** the Cyber team, captained by Mykhailo.
 
-**Decisions so far:** [DECISIONS.md](DECISIONS.md)
+**Status:** we have applied and are waiting for the organisers to confirm our place. We are building now: work done before the event is allowed as long as we declare it.
 
-## Key facts
+---
 
-- **Prizes:** €20k in total. 1st €10k plus the EUDIS Mentoring Programme; 2nd €6k; 3rd €4k.
-- **Follow-on support:** DCU incubation, a route towards ESA BIC funding, test and validation with the Defence Forces RTI unit, TensorX compute credits.
-- **Teams:** 3–10 people, on site for all 2.5 days. Every member must be 18+ and a citizen of the EU, Norway or Ukraine.
-- **Prior work:** allowed, but it **must be declared**. Keep `PRIOR_WORK.md`, and run `git tag pre-hackathon` on 14 Oct.
+## New here? Start in 10 minutes
 
-## Documents
+1. **Read this page** (5 min). The full story is the [Argus Mara brief](docs/02-ideas.md).
+2. **Join our Discord** (ask Mykhailo for the link) and say which workstream you'd like (see below).
+3. **Pick an open task** from the list below and tell Mykhailo in Discord, so your name goes next to it.
+4. **Work in your own branch** and open a pull request when it's ready:
+   ```bash
+   git clone https://github.com/classified-mick/Defence-Hackaton.git
+   cd Defence-Hackaton
+   git checkout -b my-task-name
+   # …make your changes…
+   git add . && git commit -m "Short description" && git push -u origin my-task-name
+   ```
+   Then open a pull request on GitHub.
+5. **Follow the rules** at the bottom of this page.
 
-1. [Hackathon analysis](docs/01-hackathon-analysis.md): the event, challenges, judging, past winners, Irish context, strategic insights.
-2. [The ideas](docs/02-ideas.md): §1 is the full Argus Mara brief; the other ideas are kept for reference.
-3. [Playbook](docs/03-playbook.md): the 4-minute pitch, hard questions, demo rules.
-4. [**The plan**](docs/04-work-plan.md): phases with dates, checklists for each workstream, "done when" tests, and the Sea-Scan partnership plan with an email template.
-5. [**Build guide**](docs/05-build-guide.md): how to build each component, including the AIS recorder to start today.
-6. [**Challenge 3 deep dive**](docs/06-challenge-3-deep-dive.md): the challenge text phrase by phrase, a coverage matrix, what the Department wants, a timeline, the space and fibre layers, competitors, and jury questions.
-7. [Sources](docs/sources.md)
+## The demo the judges will see
 
-## Next 72 hours
+1. **A map of Ireland:** ships move live, cables lie on the seabed, and the shallow areas where an anchor can reach the seabed glow.
+2. **A tanker switches off its transponder.** The tanker is fictional; this is a simulated scenario.
+3. **A satellite radar image finds it again.** Its size doesn't match what it claimed, so Argus Mara flags an **identity mismatch**.
+4. **It heads for shallow water over a cable.** Its speed drops from 12 to 9 knots and its course wobbles. That is exactly what *Eagle S* did before it cut Baltic cables in December 2024.
+5. **An alert appears:** "cable in 1 h 20 min", with the responses that arrive in time (aircraft ✅, ship ❌…).
+6. **The officer approves**, and an evidence pack is generated.
 
-1. Hold the kickoff: give each workstream an owner, and commit the data contracts ([plan §4.1](docs/04-work-plan.md)).
-2. **Start the 24/7 AIS recorder** ([build guide §1](docs/05-build-guide.md)).
-3. Email the organisers and the Sea-Scan team (templates are in the playbook and the plan).
-4. Create the data accounts, and start `PRIOR_WORK.md`.
+## The plan
+
+| When | Goal | Done when… |
+|---|---|---|
+| **Now (27–28 Sep)** | Get started | Team call held; roles taken; **ship recorder running 24/7**; accounts created |
+| **Week 1 (28 Sep – 4 Oct)** | Skeleton | Ships and cables on the map; first simple alert with a countdown; first satellite image processed. *Check: Sun 4 Oct* |
+| **Week 2 (5 – 12 Oct)** | The countdown and space | The whole demo story plays end to end; identity check; evidence pack; our two numbers. *Check: Mon 12 Oct; anything not working is cut* |
+| **13 – 14 Oct** | Rehearse | Two dry runs with no internet; backup video; 4-minute pitch; `git tag pre-hackathon` |
+| **15 – 17 Oct** | The hackathon | Thu: talk to mentors first. Fri: polish, feature freeze at 17:00. Sat: pitch. |
+
+The detailed version is in [docs/04-work-plan.md](docs/04-work-plan.md), and the Russian version is in [docs/plan-ru.md](docs/plan-ru.md).
+
+## Workstreams: pick one
+
+| Workstream | In plain words | First tasks | Owner |
+|---|---|---|---|
+| **Data** | Collects everything: ships, cables, seabed depth, sanctions lists | Run the recorder; download cables and depth; load sanctions lists | *free* |
+| **Brain** | Notices suspicious behaviour and runs the countdown | Track builder; simple anchor-drag rule; countdown v1 | *free* |
+| **Space** | Satellite radar: finds ships with their transponder off and checks their size | Copernicus account; detect ships in one Sentinel-1 image; match them with AIS | *free* |
+| **Interface** | What the judges see: map, alert card, buttons | Map with ships and cables; alert card with a ticking countdown | *free* |
+| **Story** | Pitch, organisers, experts, partners | Emails to the organisers and to Sea-Scan; talk to a maritime expert | Mykhailo |
+
+"How to build it" for every piece is in [docs/05-build-guide.md](docs/05-build-guide.md).
+
+## Open tasks (this week)
+
+- [ ] **Start the ship recorder** on an always-on machine: [recorder/README.md](recorder/README.md). *Owner:* ___
+- [ ] Download cable and pipeline routes (EMODnet Human Activities, TeleGeography). *Owner:* ___
+- [ ] Download seabed depth (EMODnet Bathymetry or GEBCO) and mark the cable sections shallower than 250 m. *Owner:* ___
+- [ ] Write the data contracts (build guide §2). *Owner:* ___
+- [ ] Build the map skeleton: coastline, cables and ships (MapLibre + deck.gl). *Owner:* ___
+- [ ] Create a Copernicus account and open one Sentinel-1 radar image over Irish waters. *Owner:* ___
+- [ ] Get a Global Fishing Watch API token and pull radar vessel detections for Irish waters. *Owner:* ___
+- [ ] Collect public facts on *Eagle S*, *Yi Peng 3* and *Newnew Polar Bear* (speed, course, timeline). *Owner:* ___
+- [ ] Email the organisers our questions ([playbook §3.1](docs/03-playbook.md)). *Owner:* Mykhailo
+- [ ] Email the Sea-Scan team at Trinity ([template in plan §4.8](docs/04-work-plan.md)). *Owner:* Mykhailo
+- [ ] Find one maritime expert for a 20-minute chat. *Owner:* Mykhailo
+- [ ] Create `PRIOR_WORK.md`, our record of what we built before the event. *Owner:* Mykhailo
+
+## Rules we follow
+
+- **A human decides every action.** Nothing kinetic, and no weapons.
+- **Public data only.** Use fictional ship names in demo scenarios, and label everything *real*, *reconstructed* or *simulated*.
+- **Never commit secrets** such as API keys; use environment variables.
+- **Don't call Trinity's Sea-Scan our partner** unless their team agrees in writing.
+- **Always keep a demo that runs end to end**, even an ugly one. Cut, don't stretch.
+
+## What's in this repo
+
+| Path | What |
+|---|---|
+| [recorder/](recorder/) | The ship recorder (runs 24/7), plus a health check and a map preview |
+| [DECISIONS.md](DECISIONS.md) | Decisions we've made, and why |
+| [docs/01-hackathon-analysis.md](docs/01-hackathon-analysis.md) | The event, the judges, past winners, Irish context |
+| [docs/02-ideas.md](docs/02-ideas.md) | The full Argus Mara brief (§1) |
+| [docs/03-playbook.md](docs/03-playbook.md) | The 4-minute pitch, hard questions, demo rules |
+| [docs/04-work-plan.md](docs/04-work-plan.md) | The detailed plan with dates and checklists |
+| [docs/05-build-guide.md](docs/05-build-guide.md) | How to build each part |
+| [docs/06-challenge-3-deep-dive.md](docs/06-challenge-3-deep-dive.md) | Everything about our challenge |
+| [docs/plan-ru.md](docs/plan-ru.md) | The plan in Russian, in simple words |
+| [docs/sources.md](docs/sources.md) | Sources |

@@ -1,0 +1,7 @@
+# recorded data and generated files stay local
+data/
+map.html
+*.tmp
+__pycache__/
+.venv/
+.env

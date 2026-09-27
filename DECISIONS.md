@@ -12,6 +12,8 @@ This is the team's record of decisions. Add new ones at the bottom, and never si
 | D6 | 24 Sep 2026 | **Principles:** a human decides every action, and nothing is kinetic. Public data only. Fictional vessel names in scenarios. Everything is labelled *real*, *reconstructed* or *simulated*. | This fits Ireland's stance on meaningful human control, and it keeps the demo honest and legally safe. |
 | D7 | 24 Sep 2026 | **The team is organised by workstream, not by skill:** Data, Brain, Space, Interface, plus Story (the lead). | The team is versatile, and workstreams let everyone build in parallel against agreed data contracts. |
 | D8 | 24 Sep 2026 | **All pre-event work is declared.** Keep `PRIOR_WORK.md`, and run `git tag pre-hackathon` on 14 Oct. | The organisers require us to state clearly what existed before the event. |
+| D9 | 27 Sep 2026 | **Team and name origin.** We are our school's **Cyber team**, captained by **Mykhailo**; Mark coordinates both school teams. Mark suggested the name *Argus*. Mykhailo found it was already widely used and added *Mara*. | Keeps a record of roles and credits. |
+| D10 | 27 Sep 2026 | **Record Irish AIS traffic 24/7 from now on** with `recorder/` (via aisstream.io). Store both the parsed columns and each raw message as Parquet under `data/ais/`, which is git-ignored. | Our own weeks of Irish traffic are needed to learn "normal" behaviour and to measure false alarms, the headline numbers. |
 
 ## Open questions
 
