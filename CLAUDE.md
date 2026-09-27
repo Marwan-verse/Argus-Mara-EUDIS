@@ -29,6 +29,9 @@ Decisions are recorded in `DECISIONS.md`. Read it first, and add new decisions t
 ## Conventions
 
 - Docs are in English (the team language). The team lead prefers chat explanations **in Russian, in simple words**.
+- **Commits (the captain's request):**
+  - Author every commit as `Mykhailo Kholiev <235517639+classified-mick@users.noreply.github.com>`. At the start of a session, run `git config user.name "Mykhailo Kholiev"` and `git config user.email "235517639+classified-mick@users.noreply.github.com"`.
+  - Do not add `Co-Authored-By` or `Claude-Session` trailers.
 - The team is versatile. Plan by workstream (Data, Brain, Space, Interface, Story), not by skill.
 - **Principles:**
   - A human decides every action; nothing kinetic.
