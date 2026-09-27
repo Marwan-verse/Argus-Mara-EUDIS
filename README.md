@@ -16,22 +16,6 @@
 
 ---
 
-## New here? Start in 10 minutes
-
-1. **Read this page** (5 min). The full story is the [Argus Mara brief](docs/02-ideas.md).
-2. **Join our Discord** (ask Mykhailo for the link) and say which workstream you'd like (see below).
-3. **Pick an open task** from the list below and tell Mykhailo in Discord, so your name goes next to it.
-4. **Work in your own branch** and open a pull request when it's ready:
-   ```bash
-   git clone https://github.com/classified-mick/Defence-Hackaton.git
-   cd Defence-Hackaton
-   git checkout -b my-task-name
-   # …make your changes…
-   git add . && git commit -m "Short description" && git push -u origin my-task-name
-   ```
-   Then open a pull request on GitHub.
-5. **Follow the rules** at the bottom of this page.
-
 ## The demo the judges will see
 
 1. **A map of Ireland:** ships move live, cables lie on the seabed, and the shallow areas where an anchor can reach the seabed glow.
