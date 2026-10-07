@@ -1,0 +1,23 @@
+name: Improvement
+description: Suggest a focused improvement to the hackathon demo
+title: "Improvement: "
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Demo outcome
+      description: Which demo beat or workstream improves, and how?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Smallest useful change
+      description: Explain how this fits the current offline, file based v1 scope.
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Contract or team dependencies
+      description: Name any JSON contract, source data, or workstream affected.

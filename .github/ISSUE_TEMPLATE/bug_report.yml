@@ -1,0 +1,32 @@
+name: Bug report
+description: Report a reproducible problem in the prototype
+title: "Bug: "
+body:
+  - type: markdown
+    attributes:
+      value: "For vulnerabilities or exposed secrets, use the private route in SECURITY.md. Do not include raw AIS data or credentials here."
+  - type: dropdown
+    id: workstream
+    attributes:
+      label: Workstream
+      options:
+        - Data
+        - Brain
+        - Space
+        - Interface
+        - Recorder
+        - Integration
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Include steps to reproduce, expected result, and actual result.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Safe example and environment
+      description: Use fictional or public data only. Include Python and OS versions when relevant.
