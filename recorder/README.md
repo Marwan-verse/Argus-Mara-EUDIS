@@ -126,8 +126,11 @@ If `check.py` says *No data yet*, wait ten minutes — the first file takes that
   `sog` (speed in knots), `cog` (course), `heading`, `nav_status`, `time_utc`, and `raw` (the
   original message, so nothing is lost if we change the parser later).
 - **Area:** 49–57.5°N, 18–4.5°W — Irish waters, the Irish Sea and the western approaches.
-- **Disk:** a few hundred MB per day. Keep at least 20 GB free. Check the real figure with
-  `check.py` after the first day.
+- **Disk:** measured at **about 82 bytes per message** once Parquet and zstd have compressed it
+  — roughly 8× smaller than the raw JSON aisstream sends. So **1 million messages ≈ 82 MB**.
+  How many messages a day we actually get depends on how much traffic the coastal receivers hear;
+  at 2 million a day that is ~165 MB/day and ~1.3 GB over eight days. Keep a few GB free and get
+  the real figure from `check.py` after the first day.
 
 ## If something goes wrong
 
