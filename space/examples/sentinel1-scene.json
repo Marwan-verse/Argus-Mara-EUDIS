@@ -1,0 +1,73 @@
+{
+  "label": "real",
+  "source": "Copernicus Data Space Ecosystem",
+  "catalogue_url": "https://catalogue.dataspace.copernicus.eu/odata/v1/Products?%24filter=Name+eq+%27S1A_IW_GRDH_1SDV_20181113T181420_20181113T181445_024573_02B292_EE59.SAFE%27&%24expand=Assets",
+  "product": {
+    "@odata.mediaContentType": "application/octet-stream",
+    "Id": "5f8437b9-d4d4-5b85-b17c-2b85c60cc772",
+    "Name": "S1A_IW_GRDH_1SDV_20181113T181420_20181113T181445_024573_02B292_EE59.SAFE",
+    "ContentType": "application/octet-stream",
+    "ContentLength": 1713402056,
+    "OriginDate": "2018-11-13T23:37:32.126000Z",
+    "PublicationDate": "2018-11-13T23:33:54.586537Z",
+    "ModificationDate": "2025-10-25T16:24:30.316804Z",
+    "Online": true,
+    "EvictionDate": "9999-12-31T23:59:59.999999Z",
+    "S3Path": "/eodata/Sentinel-1/SAR/GRD/2018/11/13/S1A_IW_GRDH_1SDV_20181113T181420_20181113T181445_024573_02B292_EE59.SAFE",
+    "Checksum": [
+      {
+        "Value": "6bb90c2c91f9e6242fb82b69e9d94eeb",
+        "Algorithm": "MD5",
+        "ChecksumDate": "2025-10-25T16:24:27.356429Z"
+      },
+      {
+        "Value": "2903491a15a5404ad99b2ddd26893da715ba3c9e07763ee33257ce7d7e7db83a",
+        "Algorithm": "BLAKE3",
+        "ChecksumDate": "2025-10-25T16:24:29.851898Z"
+      }
+    ],
+    "ContentDate": {
+      "Start": "2018-11-13T18:14:20.484741Z",
+      "End": "2018-11-13T18:14:45.483428Z"
+    },
+    "Footprint": "geography'SRID=4326;POLYGON ((-8.6923 52.554783, -4.959835 52.95472, -4.589717 51.459335, -8.200594 51.061642, -8.6923 52.554783))'",
+    "GeoFootprint": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [
+            -8.6923,
+            52.554783
+          ],
+          [
+            -4.959835,
+            52.95472
+          ],
+          [
+            -4.589717,
+            51.459335
+          ],
+          [
+            -8.200594,
+            51.061642
+          ],
+          [
+            -8.6923,
+            52.554783
+          ]
+        ]
+      ]
+    },
+    "Assets": [
+      {
+        "Type": "QUICKLOOK",
+        "Id": "48e91ac8-db36-4529-9669-4f0c376a838c",
+        "DownloadLink": "https://catalogue.dataspace.copernicus.eu/odata/v1/Assets(48e91ac8-db36-4529-9669-4f0c376a838c)/$value",
+        "S3Path": "/eodata/Sentinel-1/SAR/GRD/2018/11/13/S1A_IW_GRDH_1SDV_20181113T181420_20181113T181445_024573_02B292_EE59.SAFE"
+      }
+    ]
+  },
+  "quicklook_url": "https://catalogue.dataspace.copernicus.eu/odata/v1/Assets(48e91ac8-db36-4529-9669-4f0c376a838c)/$value",
+  "caveat": "Metadata and whole-scene quicklook only. No calibrated image processing or ship-length measurement was performed.",
+  "verified_on": "2026-10-07"
+}

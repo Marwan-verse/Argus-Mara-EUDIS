@@ -180,6 +180,13 @@ For each option, `eta_min = readiness + distance / speed`:
 
 ## 8. Space: dark ships, custody, identity
 
+**The GFW shortcut is implemented:** [`argus/space.py`](../argus/space.py), the public-data
+importers, and two real unmatched contacts. Start with [Space's run instructions](../space/README.md).
+Space writes a separate JSON sidecar, keeping the two demo contract files intact. Current
+GFW API reports are gridded counts; use per-contact CSV downloads for scene IDs and length
+estimates. A public Sentinel-1 quicklook is available, but no calibrated GRD processing has
+been performed. Long-gap custody and nominal length discrepancies remain review candidates.
+
 1. **Get the radar scenes.**
    - Search and download Sentinel-1 IW GRD scenes from the Copernicus Data Space Ecosystem (OData API or openEO).
    - Choose scenes that overlap your recorded AIS.
