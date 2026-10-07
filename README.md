@@ -12,13 +12,13 @@
 
 **Team:** the Cyber team, eight of us, captained by Mykhailo.
 
-**Status (7 Oct 2026):** nothing is built yet, and **eight days** remain. The plan has been
-reset from today — see [DECISIONS.md](DECISIONS.md) D11. Work done before the event is allowed
-as long as we declare it.
+**Status (7 Oct 2026):** **our place is confirmed** — DCU wrote on 1 Oct, *"Congratulations on
+being accepted"*; over 20 teams are taking part. Nothing is built yet, and **eight days**
+remain. The plan has been reset from today — see [DECISIONS.md](DECISIONS.md) D11.
 
-> **The one rule: a demo that runs end to end by Friday 9 October, 20:00.** Ugly, on invented
-> data, but complete. Every day after that we replace one invented part with a real one. If a
-> replacement fails, we still have a working demo.
+> **The one rule: assemble the whole demo first, then make it good.** Ugly, on invented data,
+> but complete. Then replace one invented part per day with a real one. If a replacement fails,
+> the working demo is still there.
 
 ---
 
@@ -37,19 +37,19 @@ to see the exact numbers. Those two files are the contract the whole team builds
 
 ## The plan
 
-| When | Goal | Done when… |
-|---|---|---|
-| **Wed 7 Oct** (today) | Start | 40-minute call; roles taken; **the AIS recorder is recording**; emails sent; accounts created |
-| **Thu 8 Oct** | Four pieces, in parallel | Each workstream's piece runs on the sample files. Screens shared at 21:00 |
-| **Fri 9 Oct** | **DEMO v1** | The 7-step story plays end to end at 20:00. Phone video recorded |
-| **Sat 10 – Sun 11 Oct** | Make it real | Real cables, real depth, real traffic, countdown v2, one real space example. **DEMO v2** Sun 20:00 |
-| **Mon 12 Oct** | The two numbers | False alarms/day and *Eagle S* warning time, both on screen |
-| **Tue 13 Oct** | Freeze | **Feature freeze 20:00.** Anything not working is cut. Runs with the Wi-Fi off |
-| **Wed 14 Oct** | Rehearse | Two offline dry runs; backup video; pitch said aloud 5×; `git tag pre-hackathon` |
-| **Thu 15 – Sat 17 Oct** | The hackathon | Mentors first, then build. Freeze Fri 17:00. Pitch Sat |
+No hour-by-hour schedule — we do not yet know what will take how long. **Two hard deadlines
+only.**
 
-The detailed version is in [docs/04-work-plan.md](docs/04-work-plan.md), and the Russian
-version — the one to read daily — is in [docs/plan-ru.md](docs/plan-ru.md).
+| Stage | What happens |
+|---|---|
+| **1. Now** | Each workstream builds its own piece against the sample files. Nobody waits for anybody |
+| **2. ⬅ hard deadline: end of the weekend** | **The demo runs end to end.** All seven beats, on invented data. Phone video recorded. Until this works, no new work starts |
+| **3. Then** | Replace invented parts with real ones, one at a time. Real cables and depth, countdown v2, one real space example, and the two numbers |
+| **4. ⬅ hard deadline: Tue 13 Oct evening** | **Feature freeze.** Anything not working is cut. Wed: offline dry runs, backup video, `git tag pre-hackathon` |
+| **5. 15–17 Oct** | The hackathon. Mentors first, build second. Freeze Fri 17:00. Pitch Sat |
+
+Details in [docs/04-work-plan.md](docs/04-work-plan.md); the Russian version — the one to read
+daily — is [docs/plan-ru.md](docs/plan-ru.md).
 
 ## Who owns what
 
@@ -69,44 +69,54 @@ written by Data) and `demo/alerts.json` (*what Argus Mara noticed*, written by B
 interface reads both and plays them. **No backend in v1**, so there is nothing to deploy and
 nothing to break on stage. Full contract: [demo/README.md](demo/README.md).
 
+**Data we do not have to collect ourselves:** Global Fishing Watch (free, non-commercial) has
+satellite-radar detections over Irish waters including *unmatched* ones — real dark ships;
+EMODnet has shipping-density grids for Irish waters; the Danish Maritime Authority publishes
+free raw AIS, though for Danish waters. There is no free archive of raw *Irish* AIS, so we tune
+the detector on the Danish data and show on our own recording that it works on Irish traffic.
+Details and links: [plan §4.5](docs/04-work-plan.md).
+
 "How to build it" for every piece is in [docs/05-build-guide.md](docs/05-build-guide.md).
 
 ## Open tasks
 
-**Today (Wed 7 Oct) — these three block everything else**
+**Start now**
 
-- [ ] **Start the AIS recorder** on an always-on machine: [recorder/README.md](recorder/README.md).
-      Every hour of delay is an hour of traffic we can never get back. *Owner:* **Ihor**
-- [ ] Email the organisers our questions and **confirm our place is accepted**
-      ([playbook §3.1](docs/03-playbook.md)). *Owner:* **Mykhailo**
-- [ ] Email the Sea-Scan team at Trinity ([template in plan §4.13](docs/04-work-plan.md)).
-      *Owner:* **Mykhailo**
-
-**Thursday 8 Oct**
-
-- [ ] Download cable and pipeline routes (EMODnet, TeleGeography) and seabed depth (GEBCO or
-      EMODnet). Download only, no processing. *Owners:* **Ihor, Bohdan**
-- [ ] `argus/brain.py`: read `scenario.json` → write `alerts.json`. Slow-down rule + countdown v1
-      (take `project_to_cable()` from `demo/make_scenario.py`). *Owners:* **Nazar K., Myroslav**
+- [ ] Start the AIS recorder — about 20 minutes, [recorder/README.md](recorder/README.md).
+      *Owner:* **Ihor**
+- [ ] Get a Global Fishing Watch API token and pull its **radar detections for Irish waters**,
+      especially the *unmatched* ones — those are real dark ships, with no image processing
+      needed. *Owner:* **Nazariy**
+- [ ] Download cable and pipeline routes (EMODnet, TeleGeography), seabed depth (GEBCO or
+      EMODnet), and the EMODnet vessel-density grids. *Owners:* **Ihor, Bohdan**
+- [ ] `argus/brain.py`: read `scenario.json` → write `alerts.json`. Slow-down rule plus
+      countdown v1 — take `project_to_cable()` from `demo/make_scenario.py`.
+      *Owners:* **Nazar K., Myroslav**
 - [ ] `ui/index.html`: offline map, cable line, vessel moving through the scenario points.
       *Owners:* **Adam, Marwan**
-- [ ] Copernicus account; download and open **one** Sentinel-1 scene over the Irish Sea.
-      *Owner:* **Nazariy**
 - [ ] Pitch outline and the demo script as numbered beats. *Owner:* **Mykhailo**
 
-**Later in the week**
+**Then**
 
 - [ ] Mark the cable sections shallower than 250 m — the anchor-reach zone. *Owners:* **Ihor, Bohdan**
 - [ ] Countdown v2 with an uncertainty cone (≈50 futures). *Owners:* **Nazar K., Myroslav**
-- [ ] Find **one real** dark ship or length mismatch in the Sentinel-1 scene. *Owner:* **Nazariy**
-- [ ] Collect public facts on *Eagle S* (speed, course, timeline) for the warning-time number.
+- [ ] The two numbers: false alarms per day vs a geofence, and *Eagle S* warning time.
+      *Owners:* **Nazar K., Myroslav, Mykhailo**
+- [ ] Find **one real** dark ship or length mismatch. *Owner:* **Nazariy**
+- [ ] `PRIOR_WORK.md`, our record of what we built before the event. *Owner:* **Mykhailo**
+
+**Optional, ten minutes each — send and forget, nothing waits on these**
+
+- [ ] Email the Sea-Scan team at Trinity ([why, and the template](docs/04-work-plan.md#48-sea-scan-trinity-worth-sending-not-worth-waiting-for)).
+      Without any reply we may still say *"designed to complement Sea-Scan"*. *Owner:* **Mykhailo**
+- [ ] Ask CADFEM for the free Ansys STK licence (satellite passes) — needs an `@setu.ie`
+      address, not Gmail. *Owner:* **Mykhailo / Nazariy**
+- [ ] If we missed the 7 Oct organisers' webinar, ask Kevin Littlewood for the recording.
       *Owner:* **Mykhailo**
-- [ ] Find one maritime expert for a 20-minute chat. *Owner:* **Mykhailo**
-- [ ] Create `PRIOR_WORK.md`, our record of what we built before the event. *Owner:* **Mykhailo**
 
 **What we are deliberately NOT building:** a learned ML detector, an LLM brief, drones, new
 satellite tasking, a real Sea-Scan integration, a database or logins. If someone proposes one,
-the answer is "after the hackathon". ([plan §4.12](docs/04-work-plan.md))
+the answer is "after the hackathon". ([plan §4.6](docs/04-work-plan.md))
 
 ## Rules we follow
 
