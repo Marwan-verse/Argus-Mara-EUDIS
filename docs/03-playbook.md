@@ -36,7 +36,7 @@ Event questions go to the DCU:Innovate Hub contact on the official page.
 | D. Interface | Drives the demo |
 | B. Brain | Takes detection, metrics and false-alarm questions |
 | C. Space | Takes satellite and identity questions |
-| A. Data | Standby on the backup video; takes data-source questions |
+| A. Data | Standby on the backup screen recording; takes data-source questions |
 
 ## 3.4 The 4-minute pitch
 
@@ -73,7 +73,7 @@ Event questions go to the DCU:Innovate Hub contact on the official page.
 ## 3.6 Demo rules
 
 - **Have an offline replay mode.** Never depend on venue Wi-Fi, and cache every dataset locally.
-- **Keep a recorded backup video**, on a laptop and on a USB stick.
+- **Keep a screen recording of a working run** as the fallback, on a laptop and on a USB stick.
 - **Use fictional vessel names** in scenarios, and label everything *real*, *reconstructed* or *simulated*. That includes the fibre cue.
 - Show one screen, with big fonts, rehearsed clicks and a reset button.
 - Keep the headline numbers **on screen** at the end of the demo.
@@ -83,7 +83,7 @@ Event questions go to the DCU:Innovate Hub contact on the official page.
 
 - Passports or national ID cards for everyone.
 - Laptops and chargers, HDMI/USB-C adapters, and a 4G/5G hotspot.
-- Offline data copies and the backup video on USB.
+- Offline data copies and the backup screen recording on USB.
 - A printed one-page summary for judges, with a QR code to the demo video.
 
 ## 3.8 After the hackathon, where most of the value is

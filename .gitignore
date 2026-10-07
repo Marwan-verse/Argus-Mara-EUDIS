@@ -5,3 +5,6 @@ map.html
 __pycache__/
 .venv/
 .env
+
+# the aisstream.io key, saved locally by the recorder. NEVER commit this.
+recorder/.apikey

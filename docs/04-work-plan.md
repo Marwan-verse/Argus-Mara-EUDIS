@@ -27,8 +27,8 @@ hackathon with nothing that switches on.
 
 | Workstream | Owners | Scope |
 |---|---|---|
-| **Story + integration** | **Mykhailo** (captain) | Pitch, organisers, demo script. Checks every evening that the demo still runs end to end |
-| **Data** | **Ihor Maslovskyi** + **Bohdan** | Ships, cables, seabed depth, the scenario file |
+| **Story + integration** | **Mykhailo** (captain) | Pitch, organisers, demo script. **Runs the AIS recorder on his own machine.** Checks every evening that the demo still runs end to end |
+| **Data** | **Ihor Maslovskyi** + **Bohdan** | Cables, seabed depth, the scenario file |
 | **Brain** | **Nazar Kyrychenko** + **Myroslav** | Detectors, the countdown, response ETAs, the two numbers |
 | **Space** | **Nazariy Buryak** | Dark ships and the identity check from radar |
 | **Interface** | **Adam Pohořilský** + **Marwan** | Map, alert card with the live countdown, action panel, evidence page |
@@ -59,7 +59,7 @@ deadlines only**, in bold.
 
 Nobody waits for anybody; everyone already has the sample files.
 
-- **Data:** start the recorder; get the cable routes and bathymetry (see §4.5).
+- **Data:** get the cable routes and bathymetry (see §4.5).
 - **Brain:** `argus/brain.py` — read `scenario.json`, write `alerts.json`. One rule to start:
   *inside the anchor-reach zone and speed fell sharply with no reason*. Countdown v1: project
   the vessel straight ahead and find where it crosses the cable. A working implementation is
@@ -67,9 +67,9 @@ Nobody waits for anybody; everyone already has the sample files.
 - **Interface:** map of Ireland from a **local** coastline file (no web tiles — it must run
   offline), the cable as a line, a vessel moving through the scenario points.
 - **Space:** Copernicus account; download and open one Sentinel-1 scene over the Irish Sea.
-- **Mykhailo:** pitch outline, demo script as numbered beats.
+- **Mykhailo:** start the recorder (§4.5); pitch outline, demo script as numbered beats.
 
-### Stage 2 — **hard deadline: the demo runs end to end by the end of the weekend**
+### Stage 2 — **hard deadline: Sunday 11 October, evening — the demo runs end to end**
 
 Everyone joins and runs it together. The seven beats, in order:
 
@@ -82,7 +82,8 @@ Everyone joins and runs it together. The seven beats, in order:
 7. *Approve* is pressed.
 
 All on invented data — fine, and honest, because the screen says **simulated**. The moment it
-runs, **record it on a phone**. That video is the fallback for the rest of the week.
+runs, **make a screen recording**. That video is the fallback for the rest of the week: if
+anything refuses to start at the event, we play it and lose nothing.
 
 Until this works, no new work starts.
 
@@ -109,7 +110,7 @@ One at a time; the demo must not stay broken for more than about an hour.
 Anything not working is cut, without debate. Fixes only after that.
 
 Wednesday 14 October: two full dry runs **with the Wi-Fi off**, timed at 4 minutes for pitch
-plus demo; record the proper backup video onto two laptops and a USB stick; pitch said aloud
+plus demo; record the proper screen capture onto two laptops and a USB stick; pitch said aloud
 five times; fill in `PRIOR_WORK.md` and push `git tag pre-hackathon`; passports and chargers.
 
 ### Stage 5 — the hackathon, 15–17 October
@@ -130,7 +131,7 @@ we use more than one.
 | **Global Fishing Watch API** (globalfishingwatch.org/our-apis) | Free for non-commercial use. Vessels detected by **satellite radar**, including *unmatched* detections — radar contacts that are not broadcasting AIS. Covers Irish waters. Also AIS-derived vessel presence, 2012 to ~96 h ago | **Space** — real dark ships without processing a single scene. The single biggest shortcut available to us |
 | **EMODnet Human Activities** vessel density (emodnet-humanactivities.eu) | Free. Monthly 1×1 km shipping-density grids by ship type, all EU waters including Ireland. GeoTIFF | **Data** — map background, and "what is normal here" |
 | **Danish Maritime Authority** open AIS (dma.dk → AIS data) | Free raw per-vessel AIS as CSV. **Danish waters, not Irish** | **Brain** — a large, real dataset to tune the detector and count false alarms on. The Baltic is also where the cable incidents happened |
-| **Our own recorder** (`recorder/`, aisstream.io) | Live Irish traffic, right now | **Data** — the live picture in the demo |
+| **Our own recorder** (`recorder/`, aisstream.io) | Live Irish traffic, right now | **Mykhailo** — the live picture in the demo |
 | *Backup live feeds* | AISHub (free if you contribute a receiver); Open Waters AIS, which is aisstream-compatible, so `ARGUS_AIS_URL` can point the existing recorder straight at it | **Data**, if the aisstream key is slow to arrive |
 
 **We found no free archive of raw *Irish* AIS.** So we split it honestly:
@@ -140,9 +141,16 @@ we use more than one.
 
 Say exactly that to the judges. It is stronger than "we have a week of our own data".
 
-**Still start the recorder today** — it takes about 20 minutes ([recorder/README.md](../recorder/README.md)) —
-because it gives the demo a live picture and Global Fishing Watch lags by about four days, and
-because "we run our own receiver" is a good line. But it is no longer the week's critical task.
+**Still start the recorder** — Mykhailo has taken this and runs it on his own machine. It is
+about five minutes and needs no command line: get a free key at aisstream.io, download the repo,
+and double-click `recorder/START-WINDOWS.bat` or `recorder/START-MAC-LINUX.command`. It asks for
+the key once and never again. Full instructions, including the laptop-sleep caveat, are in
+[recorder/README.md](../recorder/README.md).
+
+It is worth doing because Global Fishing Watch lags by about four days and cannot drive a live
+demo, and because "we run our own receiver" is a good line in the pitch. But it is no longer the
+week's critical task, and gaps from a sleeping laptop cost us very little — the recorder
+reconnects by itself.
 
 > The Danish AIS page could not be opened from our build environment (the network policy blocks
 > it). Check the current download URL and date range from your own machine before relying on it.
@@ -216,7 +224,7 @@ pages.
 - [ ] Both numbers on screen: false alarms per day vs the geofence, and *Eagle S* warning time.
 - [ ] At least **one real example** of a dark ship or an identity mismatch.
 - [ ] The evidence pack opens.
-- [ ] The 4-minute pitch rehearsed 5+ times, the backup video, the one-pager.
+- [ ] The 4-minute pitch rehearsed 5+ times, the screen recording, the one-pager.
 - [ ] Prior work declared (`pre-hackathon` tag plus `PRIOR_WORK.md`).
 - [ ] Sea-Scan mentioned with the right, consent-based wording.
 

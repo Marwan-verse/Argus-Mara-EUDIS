@@ -43,9 +43,9 @@ only.**
 | Stage | What happens |
 |---|---|
 | **1. Now** | Each workstream builds its own piece against the sample files. Nobody waits for anybody |
-| **2. ⬅ hard deadline: end of the weekend** | **The demo runs end to end.** All seven beats, on invented data. Phone video recorded. Until this works, no new work starts |
+| **2. ⬅ hard deadline: Sun 11 Oct, evening** | **The demo runs end to end.** All seven beats, on invented data. Screen recording made. Until this works, no new work starts |
 | **3. Then** | Replace invented parts with real ones, one at a time. Real cables and depth, countdown v2, one real space example, and the two numbers |
-| **4. ⬅ hard deadline: Tue 13 Oct evening** | **Feature freeze.** Anything not working is cut. Wed: offline dry runs, backup video, `git tag pre-hackathon` |
+| **4. ⬅ hard deadline: Tue 13 Oct evening** | **Feature freeze.** Anything not working is cut. Wed: offline dry runs, final screen capture, `git tag pre-hackathon` |
 | **5. 15–17 Oct** | The hackathon. Mentors first, build second. Freeze Fri 17:00. Pitch Sat |
 
 Details in [docs/04-work-plan.md](docs/04-work-plan.md); the Russian version — the one to read
@@ -55,8 +55,8 @@ daily — is [docs/plan-ru.md](docs/plan-ru.md).
 
 | Workstream | Owners | In plain words | This week's job |
 |---|---|---|---|
-| **Story + integration** | **Mykhailo** (captain) | The pitch and the people | Organisers, Sea-Scan, demo script; every evening pulls it together and checks the demo still runs |
-| **Data** | **Ihor Maslovskyi** + **Bohdan** | Collects everything: ships, cables, seabed depth | Recorder running 24/7; cable routes and depth; the scenario file |
+| **Story + integration** | **Mykhailo** (captain) | The pitch and the people | Organisers, demo script, **the AIS recorder on his own machine**; every evening checks the demo still runs |
+| **Data** | **Ihor Maslovskyi** + **Bohdan** | Collects everything: cables, seabed depth, traffic | Cable routes and depth; vessel-density grids; the scenario file |
 | **Brain** | **Nazar Kyrychenko** + **Myroslav** | Notices suspicious behaviour and runs the countdown | Anchor-drag rule; countdown; response ETAs; the two numbers |
 | **Space** | **Nazariy Buryak** | Satellite radar: finds ships with the transponder off and checks their size | One Sentinel-1 scene; dark-ship detection; identity check |
 | **Interface** | **Adam Pohořilský** + **Marwan** | What the judges see | Map, moving vessels, alert card with the live countdown, action panel, evidence page |
@@ -82,8 +82,10 @@ Details and links: [plan §4.5](docs/04-work-plan.md).
 
 **Start now**
 
-- [ ] Start the AIS recorder — about 20 minutes, [recorder/README.md](recorder/README.md).
-      *Owner:* **Ihor**
+- [ ] Start the AIS recorder — about 5 minutes, no command line: get a key at aisstream.io,
+      download the repo, double-click `recorder/START-WINDOWS.bat` or
+      `recorder/START-MAC-LINUX.command`. [Full instructions](recorder/README.md).
+      *Owner:* **Mykhailo**
 - [ ] Get a Global Fishing Watch API token and pull its **radar detections for Irish waters**,
       especially the *unmatched* ones — those are real dark ships, with no image processing
       needed. *Owner:* **Nazariy**
@@ -132,7 +134,7 @@ the answer is "after the hackathon". ([plan §4.6](docs/04-work-plan.md))
 
 | Path | What |
 |---|---|
-| [recorder/](recorder/) | The ship recorder (runs 24/7), plus a health check and a map preview |
+| [recorder/](recorder/) | The ship recorder — double-click to start — plus a health check and a map preview |
 | [demo/](demo/) | **The contract everyone builds against:** the scenario and alert files, with a generator |
 | [DECISIONS.md](DECISIONS.md) | Decisions we've made, and why |
 | [docs/01-hackathon-analysis.md](docs/01-hackathon-analysis.md) | The event, the judges, past winners, Irish context |

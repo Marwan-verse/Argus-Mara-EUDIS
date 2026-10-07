@@ -19,7 +19,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import websockets
 
-API_KEY = os.environ.get("AISSTREAM_API_KEY", "").strip()
+KEY_FILE = Path(__file__).parent / ".apikey"
 URL = os.environ.get("ARGUS_AIS_URL", "wss://stream.aisstream.io/v0/stream")
 OUT = Path(os.environ.get("ARGUS_AIS_DIR", "data/ais"))
 FLUSH_SECONDS = float(os.environ.get("ARGUS_FLUSH_SECONDS", "600"))
@@ -49,6 +49,32 @@ SCHEMA = pa.schema([
     ("time_utc", pa.string()),
     ("raw", pa.string()),  # the full original message, so nothing is lost if parsing changes later
 ])
+
+
+def load_api_key():
+    """Find the aisstream.io key: the environment, then recorder/.apikey, then ask once and save it."""
+    key = os.environ.get("AISSTREAM_API_KEY", "").strip()
+    if key:
+        return key
+    if KEY_FILE.exists():
+        key = KEY_FILE.read_text(encoding="utf-8").strip()
+        if key:
+            return key
+    if not sys.stdin.isatty():
+        return ""  # running in the background: no one is there to type it
+    print("\nThis recorder needs a free key from https://aisstream.io")
+    print("Sign in there with GitHub, copy the API key, and paste it here.\n")
+    key = input("Paste the key and press Enter: ").strip()
+    if not key:
+        return ""
+    KEY_FILE.write_text(key + "\n", encoding="utf-8")
+    try:
+        KEY_FILE.chmod(0o600)
+    except OSError:
+        pass
+    print(f"\nSaved to {KEY_FILE}. You will not be asked again.")
+    print("That file is git-ignored - never share it or commit it.\n")
+    return key
 
 
 class FatalError(Exception):
@@ -117,10 +143,10 @@ class Buffer:
         self.started = time.time()
 
 
-async def stream(buf):
+async def stream(buf, api_key):
     async with websockets.connect(URL, ping_interval=20, ping_timeout=60) as ws:
         # aisstream expects the subscription within a few seconds of connecting
-        await ws.send(json.dumps({"APIKey": API_KEY, "BoundingBoxes": BOX, "FilterMessageTypes": TYPES}))
+        await ws.send(json.dumps({"APIKey": api_key, "BoundingBoxes": BOX, "FilterMessageTypes": TYPES}))
         print(f"connected to {URL}, recording…", flush=True)
         async for raw in ws:
             buf.add(to_row(raw))
@@ -131,15 +157,16 @@ def _stop(*_):
 
 
 def main():
-    if not API_KEY:
-        sys.exit("Set AISSTREAM_API_KEY first (a free key from https://aisstream.io).")
+    api_key = load_api_key()
+    if not api_key:
+        sys.exit("No API key. Get a free one at https://aisstream.io, then run this again.")
     signal.signal(signal.SIGTERM, _stop)  # `kill` or `systemctl stop` still saves the last batch
     buf = Buffer()
     backoff = 5
     try:
         while True:
             try:
-                asyncio.run(stream(buf))
+                asyncio.run(stream(buf, api_key))
                 print("stream closed by server; reconnecting in 5s", flush=True)
                 backoff = 5
             except FatalError as err:
