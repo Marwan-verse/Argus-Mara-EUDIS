@@ -1,5 +1,7 @@
 # 2. The ideas
 
+*Current implementation note, 7 October 2026:* the idea briefs retain their original wider stacks and follow-on concepts. For the chosen Argus Mara v1, decisions D14–D15 and the [architecture](07-architecture.md) narrow the build to Python, static browser JavaScript and two JSON files. FastAPI, learned models and an LLM brief in the original concept are future options, not current tasks. The new [research note](08-research-and-next-ideas.md) suggests a provenance drawer, uncertainty display and a separate reviewed real SAR example.
+
 The briefs below are ranked. There is one recommendation (★), the best alternative for each of the other two challenges, and two wildcards. Each brief covers the problem, what to build, the demo, how to prove it works, the data, the team it needs, the market, the risks, and why it can win.
 
 > **One story behind all three.**

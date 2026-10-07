@@ -14,7 +14,8 @@
 
 **Status (7 Oct 2026):** **our place is confirmed** — DCU wrote on 1 Oct, *"Congratulations on
 being accepted"*; over 20 teams are taking part. Nothing is built yet, and **eight days**
-remain. The plan has been reset from today — see [DECISIONS.md](DECISIONS.md) D11.
+remain. The plan has been reset from today — see [DECISIONS.md](DECISIONS.md) D11. The sample
+JSON and AIS recorder exist; the end-to-end product demo is still to be built.
 
 > **The one rule: assemble the whole demo first, then make it good.** Ugly, on invented data,
 > but complete. Then replace one invented part per day with a real one. If a replacement fails,
@@ -70,7 +71,7 @@ interface reads both and plays them. **No backend in v1**, so there is nothing t
 nothing to break on stage. Full contract: [demo/README.md](demo/README.md).
 
 **Data we do not have to collect ourselves:** Global Fishing Watch (free, non-commercial) has
-satellite-radar detections over Irish waters including *unmatched* ones — real dark ships;
+satellite-radar detections over Irish waters including *AIS-unmatched* contacts that need review;
 EMODnet has shipping-density grids for Irish waters; the Danish Maritime Authority publishes
 free raw AIS, though for Danish waters. There is no free archive of raw *Irish* AIS, so we tune
 the detector on the Danish data and show on our own recording that it works on Irish traffic.
@@ -89,7 +90,7 @@ Details and links: [plan §4.5](docs/04-work-plan.md).
 - [ ] Share a copy of `data/ais/` with Brain every couple of days (a zip in the team chat is
       fine — it is git-ignored and must never go to GitHub). *Owner:* **Mykhailo**
 - [ ] Get a Global Fishing Watch API token and pull its **radar detections for Irish waters**,
-      especially the *unmatched* ones — those are real dark ships, with no image processing
+      especially the *AIS-unmatched* ones — those are contacts for review, with no image processing
       needed. *Owner:* **Nazariy**
 - [ ] Download cable and pipeline routes (EMODnet, TeleGeography), seabed depth (GEBCO or
       EMODnet), and the EMODnet vessel-density grids. *Owners:* **Ihor, Bohdan**
@@ -138,6 +139,8 @@ the answer is "after the hackathon". ([plan §4.6](docs/04-work-plan.md))
 |---|---|
 | [recorder/](recorder/) | The ship recorder — double-click to start — plus a health check and a map preview |
 | [demo/](demo/) | **The contract everyone builds against:** the scenario and alert files, with a generator |
+| [argus/](argus/) | Python analysis package and shared contract checks; Brain implementation goes here |
+| [ui/](ui/) | Interface workstream's static browser entry point and offline assets |
 | [DECISIONS.md](DECISIONS.md) | Decisions we've made, and why |
 | [docs/01-hackathon-analysis.md](docs/01-hackathon-analysis.md) | The event, the judges, past winners, Irish context |
 | [docs/02-ideas.md](docs/02-ideas.md) | The full Argus Mara brief (§1) |
@@ -147,3 +150,8 @@ the answer is "after the hackathon". ([plan §4.6](docs/04-work-plan.md))
 | [docs/06-challenge-3-deep-dive.md](docs/06-challenge-3-deep-dive.md) | Everything about our challenge |
 | [docs/plan-ru.md](docs/plan-ru.md) | The plan in Russian, in simple words |
 | [docs/sources.md](docs/sources.md) | Sources |
+| [docs/07-architecture.md](docs/07-architecture.md) | The current code layout, language choices, contract units and workstream ownership |
+| [docs/08-research-and-next-ideas.md](docs/08-research-and-next-ideas.md) | Checked primary sources, caveats and suggested next improvements |
+| [docs/09-team-skills.md](docs/09-team-skills.md) | How teammates download the repository skills |
+| [skills/](skills/) | Portable codebase and interface skills for teammates |
+| [scripts/check_contracts.py](scripts/check_contracts.py) | Checks the two demo JSON files before integration |

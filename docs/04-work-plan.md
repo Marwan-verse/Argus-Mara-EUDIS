@@ -1,5 +1,7 @@
 # 4. The plan: Argus Mara, from today to the pitch
 
+*Integration addition, 7 October 2026:* use [07-architecture.md](07-architecture.md) for the Python/JavaScript layout and the two-file change protocol. The contract check is `python scripts/check_contracts.py` from the repository root. The optional data-source and UI ideas in [08-research-and-next-ideas.md](08-research-and-next-ideas.md) follow the complete seven-beat replay, not the other way around.
+
 *Rewritten 7 October 2026. The previous day-by-day schedule is superseded — see
 [DECISIONS.md](../DECISIONS.md) D11 and D17. The Russian short version, which is the one the
 team reads, is [plan-ru.md](plan-ru.md).*
@@ -128,7 +130,7 @@ we use more than one.
 
 | Source | What it gives | Who needs it |
 |---|---|---|
-| **Global Fishing Watch API** (globalfishingwatch.org/our-apis) | Free for non-commercial use. Vessels detected by **satellite radar**, including *unmatched* detections — radar contacts that are not broadcasting AIS. Covers Irish waters. Also AIS-derived vessel presence, 2012 to ~96 h ago | **Space** — real dark ships without processing a single scene. The single biggest shortcut available to us |
+| **Global Fishing Watch API** (globalfishingwatch.org/our-apis) | SAR vessel detections include *AIS-unmatched* contacts; review current access terms and [data caveats](https://api-doc.globalfishingwatch.org/our-apis/documentation/docs/v3/general-api-doc/data-caveats) before use. An unmatched contact does not prove the vessel was not broadcasting. | **Space** — a candidate real observation without processing a scene, subject to source and matching review |
 | **EMODnet Human Activities** vessel density (emodnet-humanactivities.eu) | Free. Monthly 1×1 km shipping-density grids by ship type, all EU waters including Ireland. GeoTIFF | **Data** — map background, and "what is normal here" |
 | **Danish Maritime Authority** open AIS (dma.dk → AIS data) | Free raw per-vessel AIS as CSV. **Danish waters, not Irish** | **Brain** — a large, real dataset to tune the detector and count false alarms on. The Baltic is also where the cable incidents happened |
 | **Our own recorder** (`recorder/`, aisstream.io) ✅ *running since 7 Oct* | Live Irish traffic, right now | **Mykhailo** — the live picture in the demo |

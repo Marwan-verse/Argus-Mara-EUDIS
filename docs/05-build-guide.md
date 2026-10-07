@@ -1,5 +1,7 @@
 # 5. Build guide: how to build Argus Mara
 
+*Scope note, 7 October 2026:* the broad layout and recipes below are a design backlog, not a request to create every module now. Decisions D14–D15 set a smaller v1: `demo/` JSON, Python `argus/`, and a static `ui/`. See [07-architecture.md](07-architecture.md) for the current structure and [08-research-and-next-ideas.md](08-research-and-next-ideas.md) for checked source caveats. The existing `recorder/recorder.py` is the maintained recorder; the short example in §1 is illustrative.
+
 These are practical recipes for each component, in the order you'll need them. The **what and when** is in [04-work-plan.md](04-work-plan.md).
 
 Everything here uses open data and open-source tools. Numbers marked *(assumption)* are placeholders: make them configurable and say so in the demo.
@@ -191,7 +193,7 @@ For each option, `eta_min = readiness + distance / speed`:
 4. **Match to AIS.**
    - Interpolate every AIS track to the image time.
    - Match with the Hungarian algorithm inside about 1 km.
-   - Detections left unmatched are **dark ships**.
+   - Detections left unmatched are **AIS-unmatched SAR contacts**. Check coverage, classification and matching before describing an individual vessel as deliberately dark.
 5. **Keep custody.** For each ship in an AIS gap, compute the area it could have reached (max speed × time since last fix). A dark detection inside that area, with a matching length and heading, gives "custody regained (p = …)".
 6. **Identity check.** Flag a mismatch if |L_radar − L_AIS| > max(40 m, 25%). Also flag flag/name changes and sanctions hits from the risk lists (e.g. *Blue*: four identities and six flags since 2020).
 7. **Next look.** ESA's Sentinel-1 acquisition-plan KML files show which areas get imaged when. Feed the next look into §7.
