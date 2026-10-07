@@ -1,0 +1,51 @@
+{
+ "generated_by": "demo/make_scenario.py (STUB - Brain replaces this)",
+ "scenario": "Scenario A",
+ "alerts": [
+  {
+   "id": "A1",
+   "t": 4500,
+   "mmsi": 999000001,
+   "vessel_name": "CORMORANT STAR",
+   "state": "ALERT",
+   "score": 0.82,
+   "reasons": [
+    "speed dropped 12.0 -> 9.1 kn with no reason (no port, no weather, no traffic)",
+    "inside the anchor-reach zone (seabed <= 250 m)",
+    "AIS gap of 20 min, 14 km from the cable",
+    "radar length 228 m vs AIS 180 m - identity mismatch"
+   ],
+   "segment_id": "cable-irish-sea-1",
+   "distance_km": 25.7,
+   "eta_expected_s": 4537,
+   "eta_earliest_s": 3781,
+   "options": [
+    {
+     "asset": "Maritime patrol aircraft (Casement)",
+     "eta_s": 2381,
+     "in_time": true,
+     "label": "assumption"
+    },
+    {
+     "asset": "Naval Service patrol ship (at sea)",
+     "eta_s": 13945,
+     "in_time": false,
+     "label": "assumption"
+    },
+    {
+     "asset": "VHF hail, Dublin coast radio",
+     "eta_s": null,
+     "in_time": false,
+     "label": "assumption"
+    },
+    {
+     "asset": "Next Sentinel-1 look",
+     "eta_s": 15000,
+     "in_time": false,
+     "label": "assumption"
+    }
+   ],
+   "evidence_url": "evidence/A1.html"
+  }
+ ]
+}

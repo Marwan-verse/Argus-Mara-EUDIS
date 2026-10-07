@@ -62,7 +62,7 @@ Event questions go to the DCU:Innovate Hub contact on the official page.
    - It works both ways: their fibre event triggers our identification, and our countdown tells their fibre where to listen. Our clean AIS tracks also improve their training labels.
 4. **"Satellite data isn't real time."** Correct. The countdown runs on real-time AIS. Space gives custody and identity checks at each pass, and we plan the next look.
 5. **"What if the ship turns off AIS or spoofs it?"** Custody through the dark with radar, the identity check (radar length vs AIS length, flag and name history), spoofing detectors, and fibre fusion.
-6. **"How many false alarms?"** Give the measured rate on your recorded weeks of Irish traffic, the ratio against the naive geofence, and explain the context suppression.
+6. **"How many false alarms?"** Give the measured rate on your **eight days** of recorded Irish traffic (say eight days — never round it up to "weeks"), the ratio against the naive geofence, and explain the context suppression.
 7. **"AIS coverage far offshore?"** Terrestrial AIS near the coast today. Satellite AIS (Sentinel-1C/1D carry AIS receivers too) and EMSA feeds through the Defence Forces are on the roadmap.
 8. **"What can Ireland legally do in its EEZ?"** The system informs and people decide. It supports hailing, notifying operators and partners, and evidence packs. Boarding-powers legislation is being drafted.
 9. **"How good are your incident reconstructions?"** They are built from public reporting and clearly labelled. Validation on real data is step one of the RTI trial.

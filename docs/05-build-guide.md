@@ -10,6 +10,7 @@ Everything here uses open data and open-source tools. Numbers marked *(assumptio
 
 ```
 argus-mara/
+  demo/            # the frozen contract: scenario.json + alerts.json (+ generator). START HERE
   recorder/        # AIS recorder (runs 24/7)
   data/            # local store (git-ignored): ais/, cables/, bathy/, sar/, lists/
   argus/
@@ -74,7 +75,14 @@ while True:                                                           # reconnec
 
 ## 2. Data contracts: agree them on day one
 
-Put them in `argus/contracts.py` (pydantic). Every workstream builds against these, with stub data at first.
+**For the v1 demo these are already frozen as two JSON files in [`demo/`](../demo/)** —
+`scenario.json` (*what happened*, owned by Data) and `alerts.json` (*what Argus Mara noticed*,
+owned by Brain). There is no backend in v1: the interface reads both files and plays them. Read
+[`demo/README.md`](../demo/README.md) before writing any code, and run
+`python3 demo/make_scenario.py` to see worked values.
+
+The richer schemas below are where those two files grow to once the demo runs. Put them in
+`argus/contracts.py` (pydantic). Every workstream builds against these, with stub data at first.
 
 - `positions(mmsi, ts, lat, lon, sog_kn, cog_deg, heading_deg, nav_status)`
 - `vessels(mmsi, imo, name, ship_type, length_m, flag, name_flag_history)`
