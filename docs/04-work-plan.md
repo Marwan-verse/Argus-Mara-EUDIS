@@ -5,7 +5,8 @@
 team reads, is [plan-ru.md](plan-ru.md).*
 
 **Where we are:** our place is confirmed (DCU, 1 Oct: *"Congratulations on being accepted"*;
-over 20 teams). Nothing is built yet. **Eight days** remain.
+over 20 teams). Space's offline tools and two real contact examples now work; the complete
+demo still needs integration. **Eight days** remain.
 
 **Goal:** win Dublin with a live demo of the Argus Mara countdown, two hard numbers, and a
 visible link to Trinity's Sea-Scan.
@@ -66,7 +67,9 @@ Nobody waits for anybody; everyone already has the sample files.
   already in `demo/make_scenario.py` → `project_to_cable()`; take it.
 - **Interface:** map of Ireland from a **local** coastline file (no web tiles — it must run
   offline), the cable as a line, a vessel moving through the scenario points.
-- **Space:** Copernicus account; download and open one Sentinel-1 scene over the Irish Sea.
+- **Space:** use the [working GFW shortcut](../space/README.md) for radar contacts and the
+  length check. A real Sentinel-1 scene's metadata and public preview have been downloaded
+  and inspected; a full GRD download still needs a Copernicus account.
 - **Mykhailo:** recorder running since 7 Oct (§4.5); pitch outline, demo script as numbered beats.
 
 ### Stage 2 — **hard deadline: Sunday 11 October, evening — the demo runs end to end**
@@ -128,7 +131,7 @@ we use more than one.
 
 | Source | What it gives | Who needs it |
 |---|---|---|
-| **Global Fishing Watch API** (globalfishingwatch.org/our-apis) | Free for non-commercial use. Vessels detected by **satellite radar**, including *unmatched* detections — radar contacts that are not broadcasting AIS. Covers Irish waters. Also AIS-derived vessel presence, 2012 to ~96 h ago | **Space** — real dark ships without processing a single scene. The single biggest shortcut available to us |
+| **Global Fishing Watch API and downloads** (globalfishingwatch.org/our-apis) | API: gridded radar-detection counts, filterable to *unmatched*, plus AIS-derived presence. Per-contact downloads: radar coordinates, scene IDs, estimated lengths and AIS associations. An unmatched contact does not prove AIS shutdown | **Space** — [importer and two verified public examples](../space/README.md), without processing a full scene |
 | **EMODnet Human Activities** vessel density (emodnet-humanactivities.eu) | Free. Monthly 1×1 km shipping-density grids by ship type, all EU waters including Ireland. GeoTIFF | **Data** — map background, and "what is normal here" |
 | **Danish Maritime Authority** open AIS (dma.dk → AIS data) | Free raw per-vessel AIS as CSV. **Danish waters, not Irish** | **Brain** — a large, real dataset to tune the detector and count false alarms on. The Baltic is also where the cable incidents happened |
 | **Our own recorder** (`recorder/`, aisstream.io) ✅ *running since 7 Oct* | Live Irish traffic, right now | **Mykhailo** — the live picture in the demo |
