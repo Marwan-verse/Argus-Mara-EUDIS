@@ -1,2 +1,2 @@
 websockets>=12
-pyarrow>=14
+pyarrow>=25.0.1
