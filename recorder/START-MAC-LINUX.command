@@ -48,11 +48,24 @@ echo "To stop: press Ctrl+C, or close the window."
 echo
 
 # caffeinate stops a Mac falling asleep while this runs
+RUN=(.venv/bin/python recorder/recorder.py)
 if command -v caffeinate >/dev/null 2>&1; then
-  caffeinate -i .venv/bin/python recorder/recorder.py
-else
-  .venv/bin/python recorder/recorder.py
+  RUN=(caffeinate -i "${RUN[@]}")
 fi
+
+# If it ever dies for a reason it cannot handle itself, start it again.
+# Exit 0 = you stopped it. Exit 1 = something it told you about, such as a bad key.
+while true; do
+  "${RUN[@]}"
+  code=$?
+  if [ "$code" -eq 0 ] || [ "$code" -eq 1 ]; then
+    break
+  fi
+  echo
+  echo "Recorder stopped unexpectedly (code $code). Starting it again in 10 seconds."
+  echo "Press Ctrl+C now if you want it to stay stopped."
+  sleep 10 || break
+done
 
 echo
 echo "Recorder stopped."

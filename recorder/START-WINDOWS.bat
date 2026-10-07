@@ -29,7 +29,18 @@ echo.
 echo LEAVE THIS WINDOW OPEN. That is all it needs.
 echo To stop: close the window.
 echo.
+
+:runloop
 .venv\Scripts\python.exe recorder\recorder.py
+if %errorlevel%==0 goto stopped
+if %errorlevel%==1 goto stopped
+echo.
+echo Recorder stopped unexpectedly. Starting it again in 10 seconds.
+echo Close this window if you want it to stay stopped.
+timeout /t 10 /nobreak >nul
+goto runloop
+
+:stopped
 echo.
 echo Recorder stopped.
 pause

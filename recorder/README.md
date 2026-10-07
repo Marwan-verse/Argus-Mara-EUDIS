@@ -41,18 +41,36 @@ To stop: close the window.
 > **Mac warning:** macOS may say it cannot verify the developer. Right-click the file →
 > **Open** → **Open** again. You only do this once.
 
-## Running it on your own laptop
+## Leaving it running for days on your own laptop
 
-That works. Two things to know:
+That works, and the script handles most of it:
 
-- **A sleeping laptop records nothing.** Turn sleep off while it runs: on Windows, Settings →
-  System → Power → *Screen and sleep* → set the sleep options to **Never** when plugged in. On a
-  Mac the script already prevents idle sleep by itself, but closing the lid still sleeps it.
-- **Gaps are not a disaster.** When the computer wakes up, the recorder reconnects on its own and
-  carries on. A few hours missing overnight costs us very little.
+- **Idle sleep, on a Mac:** handled. The start file runs the recorder under `caffeinate -i`, so
+  the machine will not fall asleep on its own while it records. Note this is macOS only, and
+  `-i` covers *idle* sleep — closing the lid still sleeps it.
+- **Idle sleep, on Windows:** **not** handled, there is no `caffeinate`. Do it once by hand:
+  Settings → System → Power → *Screen and sleep* → set the sleep options to **Never** when
+  plugged in. Thirty seconds, and it stays set.
+- **Crashes:** handled. If the recorder dies for a reason it cannot recover from itself, the
+  start file waits ten seconds and launches it again, forever.
+- **Dropped connections:** handled. The recorder reconnects by itself and keeps what it had.
 
-If you later want it to run without anyone watching, put it on a small cloud server (€4–6/month)
-— see *Keeping it running after reboots* below.
+**What is still on you, and what actually breaks a long run:**
+
+1. **The computer restarting itself for updates overnight.** This is the usual way a multi-day
+   recording dies quietly. On Windows: Settings → Windows Update → **Pause updates**. On a Mac:
+   System Settings → General → Software Update → turn off automatic install.
+2. **Power.** Keep it plugged in. A laptop that reaches a low battery will sleep whatever else
+   is set.
+3. **Nobody noticing.** Glance at the window once a day, or run `check.py` (below). It takes
+   five seconds and tells you when the last file was written.
+
+**And if it does stop for a while, nothing is ruined.** We measure false alarms on the Danish
+archive, not on this recording — this one only has to show the detector also works on Irish
+traffic. A missing night costs us very little.
+
+If you would rather not babysit it at all, a small cloud server is €4–6/month — see *Keeping it
+running after reboots* below.
 
 ## Check that it is working
 
@@ -83,6 +101,7 @@ If `check.py` says *No data yet*, wait ten minutes — the first file takes that
 | `Python is not installed` | Install it from <https://www.python.org/downloads/>. On Windows, **tick "Add python.exe to PATH"** on the first screen, then double-click the start file again |
 | `aisstream rejected the API key` | Wrong or expired key. Delete the file `recorder/.apikey` and start again — it will ask for a new one |
 | `connection lost … reconnecting` | Normal now and then. It reconnects by itself and keeps what it had |
+| `Recorder stopped unexpectedly. Starting it again…` | Also fine. Something killed the process; the start file is bringing it back |
 | Few ships far offshore | Also normal. Coastal receivers only hear ships near the coast |
 | `Could not download the two libraries` | No internet, or a firewall. Try again on a different network |
 
