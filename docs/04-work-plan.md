@@ -1,5 +1,7 @@
 # 4. The plan: Argus Mara, from today to the pitch
 
+*Integration addition, 7 October 2026:* use [07-architecture.md](07-architecture.md) for the Python/JavaScript layout and the two-file change protocol. The contract check is `python scripts/check_contracts.py` from the repository root. The optional data-source and UI ideas in [08-research-and-next-ideas.md](08-research-and-next-ideas.md) follow the complete seven-beat replay, not the other way around.
+
 *Rewritten 7 October 2026. The previous day-by-day schedule is superseded — see
 [DECISIONS.md](../DECISIONS.md) D11 and D17. The Russian short version, which is the one the
 team reads, is [plan-ru.md](plan-ru.md).*
@@ -131,7 +133,7 @@ we use more than one.
 
 | Source | What it gives | Who needs it |
 |---|---|---|
-| **Global Fishing Watch API and downloads** (globalfishingwatch.org/our-apis) | API: gridded radar-detection counts, filterable to *unmatched*, plus AIS-derived presence. Per-contact downloads: radar coordinates, scene IDs, estimated lengths and AIS associations. An unmatched contact does not prove AIS shutdown | **Space** — [importer and two verified public examples](../space/README.md), without processing a full scene |
+| **Global Fishing Watch API and downloads** (globalfishingwatch.org/our-apis) | API: gridded radar-detection counts, filterable to *AIS-unmatched*, plus AIS-derived presence. Per-contact downloads: radar coordinates, scene IDs, estimated lengths and AIS associations. Review current access terms and [data caveats](https://api-doc.globalfishingwatch.org/our-apis/documentation/docs/v3/general-api-doc/data-caveats); an unmatched contact does not prove AIS shutdown. | **Space** — [importer and two public examples](../space/README.md), without processing a full scene; review source and matching limits |
 | **EMODnet Human Activities** vessel density (emodnet-humanactivities.eu) | Free. Monthly 1×1 km shipping-density grids by ship type, all EU waters including Ireland. GeoTIFF | **Data** — map background, and "what is normal here" |
 | **Danish Maritime Authority** open AIS (dma.dk → AIS data) | Free raw per-vessel AIS as CSV. **Danish waters, not Irish** | **Brain** — a large, real dataset to tune the detector and count false alarms on. The Baltic is also where the cable incidents happened |
 | **Our own recorder** (`recorder/`, aisstream.io) ✅ *running since 7 Oct* | Live Irish traffic, right now | **Mykhailo** — the live picture in the demo |

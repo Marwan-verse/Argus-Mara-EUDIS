@@ -16,6 +16,8 @@ python3 demo/make_scenario.py
 
 Nothing to install, and no internet needed.
 
+After changing either JSON file, run `python scripts/check_contracts.py` from the repository root. It checks required fields, units-related invariants and references between the two files. The script uses only Python's standard library.
+
 ## Why files and not a server
 
 For the first demo there is **no backend**. The interface loads two JSON files and plays
@@ -85,3 +87,5 @@ alerts[]
   the interface must show it. This is a hackathon rule and a credibility win.
 - When Data has the real cable routes and real depth, only `scenario.json` changes.
 - When Brain has the real detector, only `alerts.json` changes.
+- `path` and `anchor_reachable` use `[lat, lon]`; GeoJSON uses `[lon, lat]`. `t` and all `eta_*_s` values are seconds. `distance_km` is kilometres and `sog_kn` is knots. See [architecture and change protocol](../docs/07-architecture.md).
+- `evidence_url` in the sample alert is a planned page, not a file that exists today. The interface should show that clearly until evidence export is built.

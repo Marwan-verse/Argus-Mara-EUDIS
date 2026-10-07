@@ -1,5 +1,7 @@
 # 1. Hackathon analysis
 
+*Current implementation note, 7 October 2026:* this document preserves earlier event analysis. Its pre-reset schedule and maturity suggestions are historical context; the current deadlines and code choices are in [04-work-plan.md](04-work-plan.md) and [07-architecture.md](07-architecture.md). Before a pitch, recheck any † claim and the exact Irish local challenge wording against an official source. A useful addition to the judging story is a one-screen provenance view that distinguishes the fictional replay from any real SAR observation; see [research and next ideas](08-research-and-next-ideas.md).
+
 *Research snapshot: 24 September 2026.*
 
 - **Sources.** The event facts come from the Irish edition's own website source (a public GitHub repo, `fergal-adams/eudis-hackathon-ireland`, last updated 8 Sep 2026). Everything else comes from search-result summaries of official and press pages.

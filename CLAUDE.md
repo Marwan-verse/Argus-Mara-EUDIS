@@ -17,6 +17,7 @@ Decisions are recorded in `DECISIONS.md`. Read it first, and add new decisions t
 
 - `README.md`: the team landing page (what, plan, workstreams, open tasks, rules). Keep it current, because new teammates start there.
 - `recorder/`: the 24/7 AIS recorder (`recorder.py`), health check (`check.py`) and map preview (`map.py`). Data goes to `data/ais/`, which is git-ignored.
+- `space/` and `argus/space.py`: offline radar/AIS sidecar, attributed examples and Space handoff. They do not change the two-file demo contract.
 - `docs/plan-ru.md`: the plan in Russian, in simple words.
 - `docs/01-hackathon-analysis.md`: event facts, judging, past winners, Irish context.
 - `docs/02-ideas.md`: idea briefs; §1 is Argus Mara.
@@ -25,6 +26,10 @@ Decisions are recorded in `DECISIONS.md`. Read it first, and add new decisions t
 - `docs/05-build-guide.md`: how to build each component.
 - `docs/06-challenge-3-deep-dive.md`: Challenge 3 analysis.
 - `docs/sources.md`: sources.
+- `docs/07-architecture.md`: current code layout, contract units, ownership and change rules.
+- `docs/08-research-and-next-ideas.md`: checked source findings and proposed next improvements.
+- `skills/`: portable teammate skills; `docs/09-team-skills.md` explains installation.
+- `scripts/check_contracts.py`: local integration check for both JSON files.
 
 ## Conventions
 
@@ -33,6 +38,7 @@ Decisions are recorded in `DECISIONS.md`. Read it first, and add new decisions t
   - Author every commit as `Mykhailo Kholiev <235517639+classified-mick@users.noreply.github.com>`. At the start of a session, run `git config user.name "Mykhailo Kholiev"` and `git config user.email "235517639+classified-mick@users.noreply.github.com"`.
   - Do not add `Co-Authored-By` or `Claude-Session` trailers.
 - The team is versatile. Plan by workstream (Data, Brain, Space, Interface, Story), not by skill.
+- For v1, use Python 3 for Data/Brain/Space and browser JavaScript, HTML and CSS for Interface. Keep the JSON boundary and run `python scripts/check_contracts.py` after changing either file.
 - **Principles:**
   - A human decides every action; nothing kinetic.
   - Public data only.

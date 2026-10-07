@@ -1,5 +1,7 @@
 # 6. Challenge 3 deep dive: "Space-Enabled Maritime Domain Awareness"
 
+*Evidence note, 7 October 2026:* the [EU-wide EUDIS challenge page](https://eudis-hackathon.eu/challenges/) calls Challenge 3 a local-organiser-defined challenge; the maritime wording here is specific to the Irish edition. Verify that wording from Irish organiser material before quoting it as current. When presenting the space layer, distinguish the fictional radar beat from a separate sourced observation and call an unmatched SAR detection a contact for review. See [08-research-and-next-ideas.md](08-research-and-next-ideas.md).
+
 *Research snapshot: 24 Sep 2026. † = not re-verified. Links are in [sources.md](sources.md).*
 
 ## 6.1 The challenge text, phrase by phrase

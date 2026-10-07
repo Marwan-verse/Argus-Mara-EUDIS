@@ -1,1 +1,1 @@
-"""ARGUS MARA's offline analysis tools."""
+"""Argus Mara's offline analysis tools and shared file-contract checks."""

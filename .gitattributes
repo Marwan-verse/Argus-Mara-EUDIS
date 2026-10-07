@@ -1,0 +1,2 @@
+# The provenance manifest hashes this committed CSV's exact LF bytes.
+space/examples/*.csv text eol=lf
