@@ -1,5 +1,14 @@
 # Sources
 
+## Source checks for the current build (7 October 2026)
+
+- [EUDIS 2026 challenge page](https://eudis-hackathon.eu/challenges/) — EU-wide Challenge 3 is defined by each local organiser; the Irish maritime text needs an Irish source for direct quotation.
+- [EMODnet Human Activities](https://emodnet.ec.europa.eu/en/human-activities-1) — cables, pipelines and shipping-density themes, with query/download services.
+- [EMODnet service documentation](https://emodnet.ec.europa.eu/en/emodnet-web-service-documentation) and [Bathymetry](https://emodnet.ec.europa.eu/en/bathymetry) — vector and gridded depth access; record exact layer/version and licence when importing.
+- [Global Fishing Watch API key concepts](https://globalfishingwatch.org/our-apis/documentation/docs/v3/general-api-doc/key-concepts) — SAR dataset and `matched='false'` filter; [data caveats](https://api-doc.globalfishingwatch.org/our-apis/documentation/docs/v3/general-api-doc/data-caveats) cover false positives, coverage and vessel-length limits.
+
+The conclusions and proposed implementation choices from these checks are in [08-research-and-next-ideas.md](08-research-and-next-ideas.md). The older source list below is retained for historical reference; it is not a blanket verification of each claim.
+
 This research was done on 24 Sep 2026. Most official sites couldn't be opened directly from the research environment. Event facts therefore come from the Irish edition's website source code, and the other facts come from search-result summaries of the pages below. Anything marked † in the docs was not re-verified.
 
 ## The event

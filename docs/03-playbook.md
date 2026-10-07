@@ -1,5 +1,7 @@
 # 3. Playbook: pitch, questions, demo rules
 
+*Demo honesty addition, 7 October 2026:* the tanker, cable geometry, radar length and response speeds in `demo/` are simulated or assumed. Show those labels on screen. If a separate real SAR contact is added, introduce it with source, acquisition time and matching caveats; an AIS-unmatched detection does not establish deliberate transponder shutdown. The expected and earliest countdowns are model outputs, not guaranteed arrival times. The proposed provenance and uncertainty UI are described in [08-research-and-next-ideas.md](08-research-and-next-ideas.md).
+
 This playbook is for **Argus Mara** (Challenge 3). The dated plan and checklists are in [04-work-plan.md](04-work-plan.md), and the build recipes are in [05-build-guide.md](05-build-guide.md).
 
 ## 3.1 Questions for the organisers (send this week)

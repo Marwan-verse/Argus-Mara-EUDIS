@@ -1,5 +1,7 @@
 # Ship recorder ("the tracker")
 
+This recorder is independent of the v1 stage replay. Its Parquet files stay under the ignored `data/` directory; only reviewed, attributed extracts should enter a committed scenario. See the [codebase architecture](../docs/07-architecture.md) and [research notes](../docs/08-research-and-next-ideas.md). A missing or incomplete live recording must not stop the simulated demo.
+
 Records the live position of every ship around Ireland and saves it to files on your computer.
 
 **Is this spying?** No. Ships broadcast their position publicly by radio (AIS) — that is how
