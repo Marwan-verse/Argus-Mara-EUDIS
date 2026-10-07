@@ -13,7 +13,8 @@
 **Team:** the Cyber team, eight of us, captained by Mykhailo.
 
 **Status (7 Oct 2026):** **our place is confirmed** — DCU wrote on 1 Oct, *"Congratulations on
-being accepted"*; over 20 teams are taking part. Nothing is built yet, and **eight days**
+being accepted"*; over 20 teams are taking part. The [Space tools](space/README.md) now run
+offline with two published radar contacts; the full demo still needs integration. **Eight days**
 remain. The plan has been reset from today — see [DECISIONS.md](DECISIONS.md) D11.
 
 > **The one rule: assemble the whole demo first, then make it good.** Ugly, on invented data,
@@ -89,8 +90,12 @@ Details and links: [plan §4.5](docs/04-work-plan.md).
 - [ ] Share a copy of `data/ais/` with Brain every couple of days (a zip in the team chat is
       fine — it is git-ignored and must never go to GitHub). *Owner:* **Mykhailo**
 - [ ] Get a Global Fishing Watch API token and pull its **radar detections for Irish waters**,
-      especially the *unmatched* ones — those are real dark ships, with no image processing
-      needed. *Owner:* **Nazariy**
+      especially the *unmatched* ones. **The request/fetch CLI is ready; the account step is
+      pending.** The selected public-data path already supplies two historical contacts.
+      API reports contain grid counts; per-contact downloads supply scene IDs and lengths.
+      [Space instructions](space/README.md). *Owner:* **Nazariy**
+- [x] Offline radar/AIS matching, custody candidates and the vessel-length review check:
+      [`argus/space.py`](argus/space.py), with tests. *Owner:* **Nazariy**
 - [ ] Download cable and pipeline routes (EMODnet, TeleGeography), seabed depth (GEBCO or
       EMODnet), and the EMODnet vessel-density grids. *Owners:* **Ihor, Bohdan**
 - [ ] `argus/brain.py`: read `scenario.json` → write `alerts.json`. Slow-down rule plus
@@ -106,7 +111,10 @@ Details and links: [plan §4.5](docs/04-work-plan.md).
 - [ ] Countdown v2 with an uncertainty cone (≈50 futures). *Owners:* **Nazar K., Myroslav**
 - [ ] The two numbers: false alarms per day vs a geofence, and *Eagle S* warning time.
       *Owners:* **Nazar K., Myroslav, Mykhailo**
-- [ ] Find **one real** dark ship or length mismatch. *Owner:* **Nazariy**
+- [x] Find **one real** unmatched radar contact: **two published GFW contacts**, with original
+      rows, source attribution and checksums. These are review candidates, not proof of AIS
+      shutdown. [Examples and limitations](space/README.md#two-verified-real-contacts).
+      *Owner:* **Nazariy**
 - [ ] `PRIOR_WORK.md`, our record of what we built before the event. *Owner:* **Mykhailo**
 
 **Optional, ten minutes each — send and forget, nothing waits on these**
@@ -138,6 +146,8 @@ the answer is "after the hackathon". ([plan §4.6](docs/04-work-plan.md))
 |---|---|
 | [recorder/](recorder/) | The ship recorder — double-click to start — plus a health check and a map preview |
 | [demo/](demo/) | **The contract everyone builds against:** the scenario and alert files, with a generator |
+| [space/](space/) | Nazariy's offline radar/AIS tools, real contact examples, and Space handoff instructions |
+| [argus/](argus/) | Space analysis and public GFW / Sentinel-1 importers |
 | [DECISIONS.md](DECISIONS.md) | Decisions we've made, and why |
 | [docs/01-hackathon-analysis.md](docs/01-hackathon-analysis.md) | The event, the judges, past winners, Irish context |
 | [docs/02-ideas.md](docs/02-ideas.md) | The full Argus Mara brief (§1) |
