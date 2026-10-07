@@ -12,8 +12,16 @@ sites like MarineTraffic work. aisstream.io relays those public broadcasts for f
 **1. Get a free key.** Open <https://aisstream.io>, sign in with GitHub, copy the API key.
 Keep it to yourself: never commit it, never paste it in chat.
 
-**2. Download this project.** [Download ZIP](https://github.com/classified-mick/Defence-Hackaton/archive/refs/heads/main.zip)
-and unzip it. (Or `git clone` it if you prefer.)
+**2. Get this project onto your computer.**
+
+- **On a Mac, prefer `git clone`** — files that arrive through git carry no quarantine flag, so
+  macOS will not block them:
+  ```bash
+  git clone https://github.com/classified-mick/Defence-Hackaton.git
+  ```
+- Otherwise [download the ZIP](https://github.com/classified-mick/Defence-Hackaton/archive/refs/heads/main.zip)
+  and unzip it. On a Mac this triggers the Gatekeeper block described below — fixable in about
+  ten seconds, but cloning avoids it entirely.
 
 **3. Open the `recorder` folder and double-click:**
 
@@ -34,12 +42,39 @@ for your key **once**. Paste it, press Enter. It never asks again.
 
 To stop: close the window.
 
-> **Windows warning:** Windows may say "Windows protected your PC". That is because the file is
-> not signed, not because it is dangerous — it is a six-line text file you can open in Notepad.
-> Click **More info → Run anyway**.
->
-> **Mac warning:** macOS may say it cannot verify the developer. Right-click the file →
-> **Open** → **Open** again. You only do this once.
+### If your computer refuses to open the file
+
+Both operating systems block files downloaded from the internet that nobody has paid to sign.
+It is not a sign that anything is wrong — these launchers are short text files you can open in
+Notepad or TextEdit and read in full.
+
+**Windows:** "Windows protected your PC" → **More info** → **Run anyway**.
+
+**Mac:** *"Apple could not verify that this file is free of malware"*, with the buttons *Move to
+Trash* and *Done*.
+
+> **Do not click *Move to Trash*** — that deletes the file. Click **Done**.
+
+The old trick of right-clicking and choosing *Open* **no longer works**; Apple removed it in
+macOS 15 (Sequoia). Two ways out:
+
+**Fastest, and it fixes the whole folder at once.** Open Terminal (Spotlight → type `Terminal`),
+type this with a space at the end, then **drag the project folder from Finder into the Terminal
+window** so the path fills itself in, and press Enter:
+
+```bash
+xattr -r -d com.apple.quarantine 
+```
+
+That strips the "downloaded from the internet" flag. Double-clicking works normally afterwards,
+for good.
+
+**Without Terminal:**
+1. Double-click the file, let it fail, click **Done**.
+2. Straight away, open **System Settings → Privacy & Security**, scroll to the **Security**
+   section. A line names the blocked file with an **Open Anyway** button. *(It only appears if
+   you tried to open the file in the last hour, so do this right after step 1.)*
+3. Click it, enter your password, then double-click the file again and choose **Open**.
 
 ## Leaving it running for days on your own laptop
 
@@ -99,6 +134,7 @@ If `check.py` says *No data yet*, wait ten minutes — the first file takes that
 | You see | What it means |
 |---|---|
 | `Python is not installed` | Install it from <https://www.python.org/downloads/>. On Windows, **tick "Add python.exe to PATH"** on the first screen, then double-click the start file again |
+| macOS: *Apple could not verify…* | Gatekeeper. See *If your computer refuses to open the file* above. Do not click *Move to Trash* |
 | `aisstream rejected the API key` | Wrong or expired key. Delete the file `recorder/.apikey` and start again — it will ask for a new one |
 | `connection lost … reconnecting` | Normal now and then. It reconnects by itself and keeps what it had |
 | `Recorder stopped unexpectedly. Starting it again…` | Also fine. Something killed the process; the start file is bringing it back |
