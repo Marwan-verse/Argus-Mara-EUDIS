@@ -1,0 +1,13 @@
+{
+  "dataset": "industrial_vessels_v20240102.csv",
+  "article": "https://doi.org/10.6084/m9.figshare.24309475.v4",
+  "download_url": "https://ndownloader.figshare.com/files/43882980",
+  "license": "CC BY 4.0",
+  "attribution": "Paolo, Kroodsma, Davis and Hochberg (2024), Global Fishing Watch",
+  "bytes_read": 10485760,
+  "prefix_sha256": "90b5795dddc6e260330448ff99f76d1d01bd74a10f15129d4049d04c22c5460c",
+  "selection": "Unmatched contacts from two pinned scenes inside the Irish-region bounding box; not a regional census.",
+  "source_rows_sha256": "0f598890ce65b11a7b143cc021ed0fbcdbb0cf0f86279af8411858495b7d5b66",
+  "contact_count": 2,
+  "catalogue_verified_scene": "S1A_IW_GRDH_1SDV_20181113T181420_20181113T181445_024573_02B292_EE59"
+}
