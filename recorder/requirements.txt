@@ -1,2 +1,2 @@
-websockets>=12
+websockets>=17.2
 pyarrow>=14
