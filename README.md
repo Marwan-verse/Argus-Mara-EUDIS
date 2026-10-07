@@ -56,10 +56,10 @@ daily — is [docs/plan-ru.md](docs/plan-ru.md).
 | Workstream | Owners | In plain words | This week's job |
 |---|---|---|---|
 | **Story + integration** | **Mykhailo** (captain) | The pitch and the people | Organisers, demo script, **the AIS recorder on his own machine**; every evening checks the demo still runs |
-| **Data** | **Ihor Maslovskyi** + **Bohdan** | Collects everything: cables, seabed depth, traffic | Cable routes and depth; vessel-density grids; the scenario file |
+| **Data** | **Adam Pohořilský** + **Marwan** | Collects everything: cables, seabed depth, traffic | Cable routes and depth; vessel-density grids; the scenario file |
 | **Brain** | **Nazar Kyrychenko** + **Myroslav** | Notices suspicious behaviour and runs the countdown | Anchor-drag rule; countdown; response ETAs; the two numbers |
 | **Space** | **Nazariy Buryak** | Satellite radar: finds ships with the transponder off and checks their size | One Sentinel-1 scene; dark-ship detection; identity check |
-| **Interface** | **Adam Pohořilský** + **Marwan** | What the judges see | Map, moving vessels, alert card with the live countdown, action panel, evidence page |
+| **Interface** | **Ihor Maslovskyi** + **Bohdan** | What the judges see | Map, moving vessels, alert card with the live countdown, action panel, evidence page |
 
 **Why pairs.** One person who gets stuck goes quiet for two days; two people talk, and talking
 unsticks them. Space has a single owner because it is the one piece nobody else depends on.
