@@ -82,10 +82,12 @@ Details and links: [plan §4.5](docs/04-work-plan.md).
 
 **Start now**
 
-- [ ] Start the AIS recorder — about 5 minutes, no command line: get a key at aisstream.io,
-      download the repo, double-click `recorder/START-WINDOWS.bat` or
-      `recorder/START-MAC-LINUX.command`. [Full instructions](recorder/README.md).
-      *Owner:* **Mykhailo**
+- [x] ~~Start the AIS recorder.~~ **Done — running since 7 Oct**, on Mykhailo's own Mac.
+      It stays on until we leave for the event. [Instructions, if anyone else needs them](recorder/README.md).
+- [ ] Confirm it is actually writing: `.venv/bin/python recorder/check.py` about fifteen minutes
+      after starting, then once a day. *Owner:* **Mykhailo**
+- [ ] Share a copy of `data/ais/` with Brain every couple of days (a zip in the team chat is
+      fine — it is git-ignored and must never go to GitHub). *Owner:* **Mykhailo**
 - [ ] Get a Global Fishing Watch API token and pull its **radar detections for Irish waters**,
       especially the *unmatched* ones — those are real dark ships, with no image processing
       needed. *Owner:* **Nazariy**

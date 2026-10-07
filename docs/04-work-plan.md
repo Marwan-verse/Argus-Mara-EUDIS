@@ -67,7 +67,7 @@ Nobody waits for anybody; everyone already has the sample files.
 - **Interface:** map of Ireland from a **local** coastline file (no web tiles — it must run
   offline), the cable as a line, a vessel moving through the scenario points.
 - **Space:** Copernicus account; download and open one Sentinel-1 scene over the Irish Sea.
-- **Mykhailo:** start the recorder (§4.5); pitch outline, demo script as numbered beats.
+- **Mykhailo:** recorder running since 7 Oct (§4.5); pitch outline, demo script as numbered beats.
 
 ### Stage 2 — **hard deadline: Sunday 11 October, evening — the demo runs end to end**
 
@@ -131,7 +131,7 @@ we use more than one.
 | **Global Fishing Watch API** (globalfishingwatch.org/our-apis) | Free for non-commercial use. Vessels detected by **satellite radar**, including *unmatched* detections — radar contacts that are not broadcasting AIS. Covers Irish waters. Also AIS-derived vessel presence, 2012 to ~96 h ago | **Space** — real dark ships without processing a single scene. The single biggest shortcut available to us |
 | **EMODnet Human Activities** vessel density (emodnet-humanactivities.eu) | Free. Monthly 1×1 km shipping-density grids by ship type, all EU waters including Ireland. GeoTIFF | **Data** — map background, and "what is normal here" |
 | **Danish Maritime Authority** open AIS (dma.dk → AIS data) | Free raw per-vessel AIS as CSV. **Danish waters, not Irish** | **Brain** — a large, real dataset to tune the detector and count false alarms on. The Baltic is also where the cable incidents happened |
-| **Our own recorder** (`recorder/`, aisstream.io) | Live Irish traffic, right now | **Mykhailo** — the live picture in the demo |
+| **Our own recorder** (`recorder/`, aisstream.io) ✅ *running since 7 Oct* | Live Irish traffic, right now | **Mykhailo** — the live picture in the demo |
 | *Backup live feeds* | AISHub (free if you contribute a receiver); Open Waters AIS, which is aisstream-compatible, so `ARGUS_AIS_URL` can point the existing recorder straight at it | **Data**, if the aisstream key is slow to arrive |
 
 **We found no free archive of raw *Irish* AIS.** So we split it honestly:
@@ -141,11 +141,13 @@ we use more than one.
 
 Say exactly that to the judges. It is stronger than "we have a week of our own data".
 
-**Still start the recorder** — Mykhailo has taken this and runs it on his own machine. It is
-about five minutes and needs no command line: get a free key at aisstream.io, download the repo,
-and double-click `recorder/START-WINDOWS.bat` or `recorder/START-MAC-LINUX.command`. It asks for
-the key once and never again. Full instructions, including the laptop-sleep caveat, are in
-[recorder/README.md](../recorder/README.md).
+**The recorder is running** — started **7 October**, on Mykhailo's own Mac, and it stays on
+until we leave for the event. Setup instructions, for anyone who needs to restart it or run a
+second one, are in [recorder/README.md](../recorder/README.md).
+
+Two things still owed on it: check it is actually writing (`recorder/check.py`, fifteen minutes
+after the start and once a day after that), and pass a copy of `data/ais/` to Brain every couple
+of days — zipped into the team chat, never into GitHub.
 
 It is worth doing because Global Fishing Watch lags by about four days and cannot drive a live
 demo, and because "we run our own receiver" is a good line in the pitch. But it is no longer the
