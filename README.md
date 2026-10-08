@@ -25,7 +25,9 @@ Windows, include **Tcl/Tk and IDLE** in the Python installer. Use
 `python run_gui.py --check` to validate the local inputs without opening a window.
 CustomTkinter styles the native dashboard and Pillow displays NASA JPEG imagery; the
 same two JSON files drive the replay. The application starts no web server.
-The map is draggable and zoomable. **Offline coastline** covers the world without
+The map is draggable and zoomable. Use the mouse wheel or scroll vertically with
+two fingers on a trackpad over the map to zoom around the pointer; the `+` and `−`
+buttons also remain available. **Offline coastline** covers the world without
 internet; **NASA Blue Marble · online** requests only visible imagery tiles. Use
 **World** to fit the globe and the map layers panel to show NGA World Port Index
 points and historical, stylized submarine cable routes. These reference layers are
