@@ -82,8 +82,10 @@ The console follows the chart-first operational hierarchy seen in
 and [Wärtsilä Navi-Harbour](https://www.wartsila.com/marine/products/port-optimisation/vtms):
 geographic context, a selected contact, sensor observations, and explicit operator
 actions. No vendor screenshots, icons or branded assets are included. Compact
-rows, restrained colours, thin dividers, local system fonts and tabular numerals
-keep this a working console rather than a marketing page.
+rows, thin dividers, local system fonts and tabular numerals keep this a working
+console rather than a marketing page. The current presentation uses a plain light
+theme, a neutral map, standard grey controls and sentence-case labels. D27 records
+the user's preference for basic utility software over the original dark theme.
 
 ## Checks
 

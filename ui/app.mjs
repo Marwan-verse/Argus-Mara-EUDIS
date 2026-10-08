@@ -36,7 +36,8 @@ function utc(time, short = false) {
 
 function labelState(text, colour) {
   for (const id of ['contact-state', 'assessment-state']) {
-    $(id).textContent = id === 'assessment-state' && text === 'ALERT' ? 'ALERT · REVIEW REQUIRED' : text;
+    const names = { ALERT: 'Alert', WATCH: 'Watching', APPROACHING: 'Approaching', 'AIS GAP': 'AIS gap' };
+    $(id).textContent = id === 'assessment-state' && text === 'ALERT' ? 'Alert · review required' : (names[text] || text);
     $(id).className = `badge ${colour}`;
   }
 }
@@ -57,26 +58,26 @@ function staticMap() {
     // Natural Earth GeoJSON is [lon, lat]; the scenario is [lat, lon].
     $('land').append(node('path', { d: path(ring.map(([lon, lat]) => [lat, lon])) + ' Z', class: 'land-shape' }));
   }
-  for (const [name, lat, lon] of [['DUBLIN', 53.3498, -6.2603], ['HOLYHEAD', 53.309, -4.633], ['BELFAST', 54.597, -5.93], ['WEXFORD', 52.336, -6.463], ['LIVERPOOL', 53.408, -2.992]]) {
+  for (const [name, lat, lon] of [['Dublin', 53.3498, -6.2603], ['Holyhead', 53.309, -4.633], ['Belfast', 54.597, -5.93], ['Wexford', 52.336, -6.463], ['Liverpool', 53.408, -2.992]]) {
     const [x, y] = project(lat, lon);
     $('places').append(node('circle', { cx: x, cy: y, r: 2.5, class: 'place-dot' }),
       node('text', { x: x + 10, y: y - 6, class: 'place-text' }, name));
   }
-  for (const [name, lat, lon, style] of [['IRELAND', 53.66, -7.9, 'region-text'], ['WALES', 52.65, -3.75, 'region-text'], ['IRISH SEA', 53.96, -5.48, 'sea-text']]) {
+  for (const [name, lat, lon, style] of [['Ireland', 53.66, -7.9, 'region-text'], ['Wales', 52.65, -3.75, 'region-text'], ['Irish Sea', 53.96, -5.48, 'sea-text']]) {
     const [x, y] = project(lat, lon);
     $('places').append(node('text', { x, y, class: style, 'text-anchor': 'middle' }, name));
   }
   for (const cable of scenario.cables) {
     $('reach-layer').append(node('path', { d: path(cable.anchor_reachable), class: 'reach-line' }));
     $('cables-layer').append(node('path', { d: path(cable.path), class: 'cable-line' }));
-    mapText($('cables-layer'), {lat: cable.path[2][0], lon: cable.path[2][1]}, 'TELECOM LINK / ILLUSTRATIVE', 'teal', 30, -46);
-    mapText($('reach-layer'), {lat: cable.path[2][0], lon: cable.path[2][1]}, 'ANCHOR REACH · ASSUMPTION', 'muted', 30, 27);
+    mapText($('cables-layer'), {lat: cable.path[2][0], lon: cable.path[2][1]}, 'Telecom link · illustrative', 'teal', 30, -46);
+    mapText($('reach-layer'), {lat: cable.path[2][0], lon: cable.path[2][1]}, 'Anchor reach · assumption', 'muted', 30, 27);
   }
   for (const asset of scenario.assets) {
     if (asset.lat === undefined) continue;
     const [x, y] = project(asset.lat, asset.lon);
     $('assets-layer').append(node('path', { d: `M${x - 5},${y}H${x + 5}M${x},${y - 5}V${y + 5}`, class: 'asset-symbol' }));
-    mapText($('assets-layer'), asset, asset.id === 'mpa' ? 'MPA' : asset.id === 'lev' ? 'PATROL / AT SEA' : 'VHF', 'muted', asset.id === 'vhf' ? -34 : 10, asset.id === 'vhf' ? 23 : 17);
+    mapText($('assets-layer'), asset, asset.id === 'mpa' ? 'Aircraft' : asset.id === 'lev' ? 'Patrol ship' : 'VHF', 'muted', asset.id === 'vhf' ? -34 : 10, asset.id === 'vhf' ? 23 : 17);
   }
   const atAlert = fixAt(vessel.track, alert.t);
   if (atAlert) {
@@ -88,7 +89,7 @@ function staticMap() {
     $('projection-layer').append(node('path', { d: path([[atAlert.lat, atAlert.lon], [crossing.lat, crossing.lon]]), class: 'projection-line' }));
     const [x, y] = project(crossing.lat, crossing.lon);
     $('projection-layer').append(node('circle', { cx: x, cy: y, r: 6, class: 'crossing-symbol' }));
-    mapText($('projection-layer'), crossing, 'PROJECTED CROSSING', 'amber', 12, -11);
+    mapText($('projection-layer'), crossing, 'Projected crossing', 'amber', 12, -11);
   }
 }
 
@@ -101,8 +102,8 @@ function renderMap(fix) {
   if (fix) {
     const [x, y] = project(fix.lat, fix.lon);
     const active = state.time >= alert.t;
-    $('vessel-layer').append(node('circle', { cx: x, cy: y, r: 21, class: 'selected-ring', style: active ? '' : 'stroke:#7dc9be' }),
-      node('path', { d: 'M0,-12 L6,8 L0,4 L-6,8 Z', transform: `translate(${x},${y}) rotate(${fix.cog_deg})`, class: 'vessel-symbol', style: active ? '' : 'fill:#7dc9be' }));
+    $('vessel-layer').append(node('circle', { cx: x, cy: y, r: 21, class: 'selected-ring' }),
+      node('path', { d: 'M0,-12 L6,8 L0,4 L-6,8 Z', transform: `translate(${x},${y}) rotate(${fix.cog_deg})`, class: 'vessel-symbol' }));
     mapText($('vessel-layer'), fix, vessel.name, active ? 'amber' : 'teal', 28, 0);
     mapText($('vessel-layer'), fix, `${fix.sog_kn.toFixed(1)} kn / ${fix.cog_deg.toFixed(0)}°`, 'muted', 28, 17);
   }
@@ -111,7 +112,7 @@ function renderMap(fix) {
     const [x, y] = project(detection.lat, detection.lon);
     $('radar-layer').append(node('path', { d: `M${x},${y - 9}L${x + 9},${y}L${x},${y + 9}L${x - 9},${y}Z`, class: 'radar-symbol' }));
     mapText($('radar-layer'), detection, `SAR / ${detection.length_m} m`, 'amber', 18, 0);
-    mapText($('radar-layer'), detection, `OBSERVED ${utc(detection.t, true)} · ${detection.label.toUpperCase()}`, 'muted', 18, 16);
+    mapText($('radar-layer'), detection, `Observed ${utc(detection.t, true)} · ${detection.label}`, 'muted', 18, 16);
   }
   $('projection-layer').style.display = state.time >= alert.t ? '' : 'none';
 }
@@ -133,7 +134,7 @@ function render() {
   $('timeline').value = state.time;
   $('play').textContent = state.playing ? 'Ⅱ Pause' : '▶ Play';
   $('contact-speed').textContent = fix ? `${fix.sog_kn.toFixed(1)} kn` : 'No AIS fix';
-  $('contact-source').textContent = fix ? 'AIS' : 'AIS GAP';
+  $('contact-source').textContent = fix ? 'AIS' : 'AIS gap';
   $('speed-value').textContent = fix ? `${fix.sog_kn.toFixed(1)} kn` : '—';
   $('course-value').textContent = fix ? `${fix.cog_deg.toFixed(1)}°` : '—';
   labelState(left ? 'ALERT' : !fix ? 'AIS GAP' : state.time >= beats[3].t ? 'APPROACHING' : 'WATCH', left || !fix ? 'amber' : 'teal');
@@ -206,7 +207,7 @@ function view() {
   const chartWidth = $('map').getBoundingClientRect().width;
   const unitsToPixels = Math.max(chartWidth / width, $('map').getBoundingClientRect().height / height);
   const barWidth = Math.round(10 / 111.2 * mapUnitsPerDegree * unitsToPixels);
-  $('map-scale').innerHTML = `10 km <span style="display:inline-block;width:${barWidth}px;border-top:2px solid #91a5ad;vertical-align:middle;margin-left:7px"></span>`;
+  $('map-scale').innerHTML = `10 km <span style="display:inline-block;width:${barWidth}px;border-top:2px solid #666;vertical-align:middle;margin-left:7px"></span>`;
 }
 
 function bind() {
@@ -244,7 +245,7 @@ function bind() {
     if (!available) return;
     $('confirm-review').checked = false;
     $('confirm-approve').disabled = true;
-    $('approval-content').innerHTML = `<p><strong>${escape(available.asset)}</strong></p><p>Assumed arrival: ${Math.ceil(available.eta_s / 60)} minutes. Earliest cable crossing: ${clock(left.earliest)} remaining.</p><p style="margin-top:12px;color:#a1afb5">This records an exercise decision. Vessel identity, intent, cable geometry and response capabilities require verification before any operational use.</p>`;
+    $('approval-content').innerHTML = `<p><strong>${escape(available.asset)}</strong></p><p>Assumed arrival: ${Math.ceil(available.eta_s / 60)} minutes. Earliest cable crossing: ${clock(left.earliest)} remaining.</p><p class="approval-note">This records an exercise decision. Vessel identity, intent, cable geometry and response capabilities require verification before any operational use.</p>`;
     $('approval-dialog').showModal();
   });
   $('confirm-review').addEventListener('change', event => {$('confirm-approve').disabled = !event.target.checked;});
@@ -258,7 +259,7 @@ function bind() {
   });
   $('export-evidence').addEventListener('click', () => {
     if (state.time < alert.t) return;
-    const html = `<!doctype html><html lang="en"><meta charset="utf-8"><title>Argus Mara — exercise evidence A1</title><style>body{max-width:800px;margin:50px auto;font:14px/1.7 system-ui;padding:20px;color:#172127}h1{font-size:26px}h3{margin-top:25px}dl>div{display:flex;justify-content:space-between}dd{margin:0}.evidence-warning{background:#fff5dd;padding:16px}code{font-size:12px}</style><h1>Argus Mara · Exercise evidence A1</h1><p>SIMULATED EXERCISE · Scenario time ${utc(state.time)} UTC · ${escape(scenario.t0_utc.slice(0,10))}</p>${evidenceHtml()}<h3>Decision record</h3><pre>${escape(JSON.stringify(state.approved || {approval:'not recorded'}, null, 2))}</pre><h3>Original alert contract</h3><pre style="white-space:pre-wrap">${escape(JSON.stringify(alert,null,2))}</pre></html>`;
+    const html = `<!doctype html><html lang="en"><meta charset="utf-8"><title>Argus Mara — exercise evidence A1</title><style>body{max-width:800px;margin:50px auto;font:14px/1.7 system-ui;padding:20px;color:#222}h1{font-size:26px}h3{margin-top:25px}dl>div{display:flex;justify-content:space-between}dd{margin:0}.evidence-warning{background:#f2f2f2;padding:16px}code{font-size:12px}</style><h1>Argus Mara · Exercise evidence A1</h1><p>SIMULATED EXERCISE · Scenario time ${utc(state.time)} UTC · ${escape(scenario.t0_utc.slice(0,10))}</p>${evidenceHtml()}<h3>Decision record</h3><pre>${escape(JSON.stringify(state.approved || {approval:'not recorded'}, null, 2))}</pre><h3>Original alert contract</h3><pre style="white-space:pre-wrap">${escape(JSON.stringify(alert,null,2))}</pre></html>`;
     const url = URL.createObjectURL(new Blob([html], {type:'text/html;charset=utf-8'}));
     const link = document.createElement('a'); link.href = url; link.download = 'argus-mara-A1-exercise-evidence.html'; link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -330,7 +331,7 @@ async function start() {
       timelineLabels.append(label);
     }
     $('vessel-name').textContent = vessel.name;
-    $('vessel-id').textContent = `MMSI ${vessel.mmsi} · ${vessel.type.toUpperCase()}`;
+    $('vessel-id').textContent = `MMSI ${vessel.mmsi} · ${vessel.type[0].toUpperCase()}${vessel.type.slice(1)}`;
     $('length-value').textContent = `${vessel.ais_length_m} m`;
     $('depth').textContent = `${scenario.cables[0].min_depth_m} m`;
     staticMap(); bind(); render(); view(); requestAnimationFrame(animate);
