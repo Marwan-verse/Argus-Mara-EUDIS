@@ -2,7 +2,10 @@
 
 The static HTML/CSS/JavaScript console reads `demo/scenario.json` and
 `demo/alerts.json`. It starts paused at the alert so the assessment is immediately
-reviewable. Press Restart, then Play, for the complete seven-beat story.
+reviewable. Press Restart, then Play, for the complete seven-beat story. The v1
+stage view presents the earliest alert and its vessel; multi-contact navigation
+is outside this frozen replay scope. Beat times and reason text come from the
+shared files rather than fixed stub phrases.
 
 ## Run
 
@@ -26,8 +29,9 @@ presenting; opening `index.html` directly is not supported.
 - Zoom controls and Reset chart view operate on the local vector map.
 - Evidence review explains provenance and uncertainty. After the alert fires,
   Export saves a self-contained HTML evidence record.
-- Review response pauses the replay. An explicit acknowledgement is required
-  before approving the simulated response. Approval opens its evidence record.
+- Review response pauses the replay. The operator chooses one currently timely
+  assumed response and explicitly acknowledges uncertainty before approving the
+  simulated decision. Approval opens its evidence record.
 - Seeking or restarting clears approval. Approval otherwise survives forward
   playback for that run. Decisions are session-local and are lost on reload.
 - Space toggles playback and arrow keys step a minute when a form, button or
@@ -40,25 +44,24 @@ mobile layout remains outside v1 scope.
 ## Honesty of the replay
 
 Long AIS gaps stay empty, and trails are split across the gap. Radar is a separate,
-timestamped historical observation; it does not become a moving AIS marker. The
+timestamped simulated observation; it does not become a moving AIS marker. The
 countdowns display the supplied alert ETAs minus replay time, and response arrival
 durations are compared against the remaining earliest crossing time. This does
 not recalculate the vessel's prediction or run a detector in the browser.
 
-The sample alert is a stub. It cites 9.1 kn at 75 minutes even though that speed
-first appears at 90 minutes in the committed track. The console reports observed
-speed up to the current time and retains the original claim, explicitly qualified,
-in the evidence record. Claims about an unexplained slowdown or being inside an
-anchor-reach zone also remain unvalidated scenario assertions. No contract files
-have been changed by this interface.
+Brain generates the alert at the first observed 9.1 kn fix, minute 90. Its four
+rule cues are documented in `argus/brain.py`; the score counts cues and is not a
+threat probability. The cause of the slowdown and the anchor-reach applicability
+remain unverified scenario assumptions.
 
 The 228 m radar observation has no confirmed AIS association. Its possible length
 discrepancy does not survive the Space module's assumed ±30 m radar uncertainty.
 The review describes it accordingly. An unmatched radar contact or AIS gap is not
 proof of hostile intent.
 
-The contract's `evidence/A1.html` target remains unavailable. The working export is
-a separate local record, not a claim that the target page exists.
+The alert links to the bundled fictional Space review at
+`evidence/contacts/contact-0001.html`. The interface checks that the page exists.
+The operator's downloaded decision record is a separate self-contained HTML file.
 
 ## Space evidence handoff
 
@@ -69,10 +72,11 @@ JSON fetch, map tiles or network access. Contact pages show source labels, catal
 matching limitations, length uncertainty and a page-local review form. Review notes do not
 survive a reload and do not authorize an operational response.
 
-The exporter also supports `--scenario demo/scenario.json --output data/sar/demo-review`
-for a separate fictional pack. Brain/Interface can resolve each sidecar `evidence_url` against
-that pack root. The existing alert's `evidence/A1.html` placeholder is still unavailable;
-connect it only when integrating the stage replay. See [Space instructions](../space/README.md).
+The committed fictional pack is generated with
+`python3 -m argus.evidence --scenario demo/scenario.json --output ui/evidence`.
+Regenerate it after scenario changes. Historical or downloaded packs stay under
+ignored `data/` and never share this fictional evidence URL. See
+[Space instructions](../space/README.md).
 
 ## Local map asset
 

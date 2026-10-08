@@ -258,6 +258,9 @@ h1 span { color: var(--muted); font-size: 12px; font-weight: 400; }
 .dialog-actions { display: flex; justify-content: space-between; gap: 10px; padding: 16px 22px; border-top: 1px solid var(--line); }
 .dialog-actions button { padding: 9px 13px; }
 #evidence-content, #approval-content { padding: 20px 22px; font-size: 13px; line-height: 1.7; }
+#approval-content fieldset { border: 1px solid var(--line); margin: 0 0 14px; padding: 10px 14px; }
+#approval-content legend { font-weight: 600; padding: 0 5px; }
+#approval-content .response-choice { display: block; padding: 5px 0; cursor: pointer; }
 #evidence-content h3 { font-size: 13px; margin: 20px 0 6px; color: #333; }
 #evidence-content h3:first-child { margin-top: 0; }
 #evidence-content p { color: #555; }

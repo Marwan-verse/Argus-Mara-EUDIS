@@ -42,16 +42,21 @@ Event questions go to the DCU:Innovate Hub contact on the official page.
 
 ## 3.4 The 4-minute pitch
 
-| Time | Beat | Talk track (adapt freely) |
-|---|---|---|
-| 0:00–0:30 | **Hook** | "August 2025. A sanctioned tanker called *Blue* switched off its transponder before entering Irish waters. It has had four identities and six flags in five years. Since March, an unprecedented number of ships like it have sailed past our west coast. On Christmas Day 2024, a ship like that, the *Eagle S*, slowed from 12 to 9 knots in the Gulf of Finland and dragged its anchor about 90 kilometres across the seabed. It cut a power cable and several data cables. The signal was there. **Nobody was counting down.**" |
-| 0:30–0:55 | **Irish stakes** | "About eleven transatlantic cables. The pipelines that bring most of our gas. A sea area seven times our land. And crews for two ships at sea. The new Maritime Security Strategy asks for three things: protecting undersea infrastructure, better maritime awareness, and a national maritime security centre for faster decisions. The problem isn't data. It's attention and time." |
-| 0:55–1:10 | **Solution** | "**Ireland can crew two ships. Argus Mara gives them a hundred eyes.** It watches every ship, every minute. When one becomes a threat, it starts a **countdown to the cable it threatens**, and it shows what can get there in time." |
-| 1:10–2:40 | **Live demo** | The 8 steps in [02-ideas.md](02-ideas.md): dark tanker → radar regains it → identity mismatch → it turns towards the shelf → the countdown → *Eagle S* signature → action panel → "confirmed by fibre" → evidence pack. |
-| 2:40–3:10 | **Proof** | False alarms per day against the geofence baseline, warning time on the *Eagle S* replay, and the dark-period custody rate. |
-| 3:10–3:35 | **Fit and path** | "Argus Mara complements Trinity's Sea-Scan. They hear the cable; we see the ship coming and name it. It runs on open and space data and on sovereign EU compute. Next: a trial with the RTI unit on historical data, and a joint pilot with Sea-Scan on the Dublin–Holyhead link." *Say "joint pilot" only if they agreed; otherwise say "designed to complement Sea-Scan".* |
-| 3:35–3:50 | **Honesty and team** | What existed before (the `pre-hackathon` tag) vs what was built here, and who you are. |
-| 3:50–4:00 | **Ask** | "Six weeks with the RTI unit on historical data, and your help connecting Argus Mara to the future national maritime security centre." |
+Use the current [four-minute demonstration runbook](demo-runbook.md) for exact clicks,
+timing and words. The earlier *Eagle S* and identity-mismatch talk track is superseded:
+the fictional radar association is unconfirmed, the rule alert fires at minute 90,
+and measured performance claims are pending validation.
+
+| Time | Beat |
+|---|---|
+| 0:00–0:30 | State the operator decision and label the exercise fictional. |
+| 0:30–1:05 | Show the AIS gap and separate radar contact without claiming identity. |
+| 1:05–1:35 | Show the observed speed and course changes and the four review cues. |
+| 1:35–2:15 | Explain expected and earliest countdown assumptions. |
+| 2:15–2:45 | Compare assumed response arrival times. |
+| 2:45–3:20 | Review uncertainty and record a simulated human decision. |
+| 3:20–3:45 | Open the fictional Space review and export the decision record. |
+| 3:45–4:00 | State what operational validation is still needed. |
 
 ## 3.5 Hard questions to rehearse
 
@@ -63,8 +68,8 @@ Event questions go to the DCU:Innovate Hub contact on the official page.
    - Sea-Scan hears it *at the cable*. We see the ship coming hours earlier, name it, cover pipelines and power cables, and plan the response.
    - It works both ways: their fibre event triggers our identification, and our countdown tells their fibre where to listen. Our clean AIS tracks also improve their training labels.
 4. **"Satellite data isn't real time."** Correct. The countdown runs on real-time AIS. Space gives custody and identity checks at each pass, and we plan the next look.
-5. **"What if the ship turns off AIS or spoofs it?"** Custody through the dark with radar, the identity check (radar length vs AIS length, flag and name history), spoofing detectors, and fibre fusion.
-6. **"How many false alarms?"** Give the measured rate and the ratio against the naive geofence, then say plainly where it was measured: tuned and counted on the Danish Maritime Authority's free raw AIS archive, which is large and real, and confirmed on our own live recording of Irish traffic. Never inflate our own recording into "weeks" — it is days, and the split is more credible than the claim would be. Then explain the context suppression.
+5. **"What if the ship turns off AIS or spoofs it?"** A reception gap is a review cue, not proof of switch-off. A separate radar contact can support a custody hypothesis only after time, position and measurement uncertainty are checked. The current fictional exercise does not demonstrate confirmed identity.
+6. **"How many false alarms?"** No verified false-alarm rate is available yet. The rule produces review alerts in the fictional replay; measured rates require a labelled evaluation set. Do not turn an unlabelled alert count into a false-alarm claim.
 7. **"AIS coverage far offshore?"** Terrestrial AIS near the coast today. Satellite AIS (Sentinel-1C/1D carry AIS receivers too) and EMSA feeds through the Defence Forces are on the roadmap.
 8. **"What can Ireland legally do in its EEZ?"** The system informs and people decide. It supports hailing, notifying operators and partners, and evidence packs. Boarding-powers legislation is being drafted.
 9. **"How good are your incident reconstructions?"** They are built from public reporting and clearly labelled. Validation on real data is step one of the RTI trial.
@@ -78,7 +83,7 @@ Event questions go to the DCU:Innovate Hub contact on the official page.
 - **Keep a screen recording of a working run** as the fallback, on a laptop and on a USB stick.
 - **Use fictional vessel names** in scenarios, and label everything *real*, *reconstructed* or *simulated*. That includes the fibre cue.
 - Show one screen, with big fonts, rehearsed clicks and a reset button.
-- Keep the headline numbers **on screen** at the end of the demo.
+- Keep the calculated countdown and response times on screen; do not display unmeasured performance numbers as results.
 - **Never transmit radio signals** of any kind for testing. Use recorded data only.
 
 ## 3.7 What to bring
