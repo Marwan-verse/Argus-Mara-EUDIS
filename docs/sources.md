@@ -173,3 +173,9 @@ This research was done on 24 Sep 2026. Most official sites couldn't be opened di
   - pyins: https://github.com/nmayorov/pyins
   - kshana (young; check its outputs): https://github.com/ashfordeOU/kshana
 - **Drone autopilots:** PX4 https://px4.io, ArduPilot https://ardupilot.org
+
+## Offline interface display sources (8 October 2026)
+
+- **Natural Earth 1:10m admin-0 countries**, Ireland and United Kingdom exterior rings simplified for the demo chart. Source: https://github.com/nvkelso/natural-earth-vector/blob/master/geojson/ne_10m_admin_0_countries.geojson. Terms: https://www.naturalearthdata.com/about/terms-of-use/ (public domain). The raw file stays under ignored `data/maps/`; the prepared asset `ui/assets/coastline.json` records its SHA-256. Preparation: `scripts/prepare_demo_map.py`. This is display geometry, not a navigational chart, cable route or bathymetry source.
+- **Kongsberg Foresight Traffic Display**, visual and workflow reference only: https://www.kongsberg.com/what-we-do/ocean-space/surveillance-monitoring/foresight/traffic-display/. Its chart-first view, selected-contact information and operational controls informed the console layout. No vendor assets copied.
+- **Wärtsilä Navi-Harbour VTMS**, operator workflow reference only: https://www.wartsila.com/marine/products/port-optimisation/vtms. Sensor observations, traffic context and reviewable alerts informed the layout. No vendor assets copied.
