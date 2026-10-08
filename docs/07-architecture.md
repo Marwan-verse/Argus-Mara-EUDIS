@@ -29,6 +29,13 @@ splitters can be resized; drag tabs to reorder them or move them between panes, 
 right-click a tab to move or close it. The Situation tab stays in the right pane.
 Notes are session-local.
 
+*Reference navigation (D35):* the native app adds searchable port and cable
+directories to either dock. Port filters combine name/WPI search, country code
+and an optional current-view restriction. Map markers select reference ports;
+clusters zoom in. Selected historical cable routes can be framed across the date
+line. `argus/map_view.py` holds display-only search and geographic extent helpers;
+it is independent of Brain's countdown and changes neither shared JSON file.
+
 ```text
 recorder/       live AIS capture; independent from the stage demo
 data/           ignored local recordings and downloaded datasets
