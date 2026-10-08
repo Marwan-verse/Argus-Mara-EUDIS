@@ -1,3 +1,0 @@
-# Native desktop dashboard (Python 3.10+ with Tkinter/Tcl-Tk)
-customtkinter==6.0.0
-Pillow==12.3.0
