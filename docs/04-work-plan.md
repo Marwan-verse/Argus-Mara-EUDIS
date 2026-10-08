@@ -1,5 +1,11 @@
 # 4. The plan: Argus Mara, from today to the pitch
 
+*Implementation update, 8 October 2026:* the seven-beat offline console, rule-generated
+minute-90 alert and bundled fictional Space evidence page now run together (D29).
+Use [the current demo runbook](demo-runbook.md) for the pitch. The older sample
+minute-75/identity-mismatch wording below is superseded; external-data validation
+and measured performance numbers remain future work.
+
 *Integration addition, 7 October 2026:* use [07-architecture.md](07-architecture.md) for the Python/JavaScript layout and the two-file change protocol. The contract check is `python scripts/check_contracts.py` from the repository root. The optional data-source and UI ideas in [08-research-and-next-ideas.md](08-research-and-next-ideas.md) follow the complete seven-beat replay, not the other way around.
 
 *Rewritten 7 October 2026. The previous day-by-day schedule is superseded — see
@@ -79,11 +85,11 @@ Nobody waits for anybody; everyone already has the sample files.
 Everyone joins and runs it together. The seven beats, in order:
 
 1. A map of Ireland with the cable on it.
-2. The tanker sails, switches off AIS, disappears.
-3. A radar detection appears — it is still there.
+2. The tanker sails into a simulated AIS reception gap; the AIS marker disappears.
+3. A separate simulated radar detection appears; association remains unconfirmed.
 4. AIS returns; it has turned toward the shallow stretch over the cable.
-5. It slows. **The alert card appears, countdown ticking: 1:15:00 to the cable.**
-6. Options: aircraft ✅ 39 min · patrol ship ❌ 232 min · VHF ❌ out of range · next satellite ❌ 250 min.
+5. The first observed 9.1 kn fix arrives at minute 90. **The rule alert appears: 1:13:31 expected to the illustrative cable.**
+6. Assumed options: aircraft and VHF ✅ in time · patrol ship and next satellite look ❌ late.
 7. *Approve* is pressed.
 
 All on invented data — fine, and honest, because the screen says **simulated**. The moment it

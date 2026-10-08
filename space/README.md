@@ -29,7 +29,7 @@ delay; current regional availability and account access still need verification.
 |---|---|
 | Data | Can normalize CSV fixes or the existing recorder's CSV/Parquet using `argus.ingest.ais`; see the schema below. Infrastructure, depth and the optional EMODnet extract remain Data's inputs. |
 | Brain | Can consume the sidecar's association, custody candidates, length checks and unavailable reasons. Each exported contact has an `evidence_url`; Brain owns alert scores, countdowns and response ETAs. |
-| Interface | Can link generated contact pages or reuse the local templates in `ui/space/`. The demo alert's existing placeholder is still unavailable until its owner connects it to the generated fictional pack. |
+| Interface | Links the bundled fictional contact page under `ui/evidence/`; historical review packs stay separate under `data/`. The operator's decision export remains a distinct record. |
 | Story/integration | Can use the two real contacts as historical examples, separate from the fictional tanker. Retain matching caveats and visible operator approval. |
 
 Shared adapters and evidence handoffs can be developed together when they directly support
@@ -139,8 +139,9 @@ python3 -m argus.evidence --contacts data/sar/contacts.json --ais data/ais/hando
 
 Each contact page permits a **page-local** operator review note and printing. The note is not
 persisted after reload and authorizes no operational action. Historical and fictional packs
-stay separate. This export supplies the evidence handoff; the seven-beat stage replay and
-connecting `demo/alerts.json` remain with Brain and Interface.
+stay separate. Generate the fictional stage pack with
+`--scenario demo/scenario.json --output ui/evidence`; Brain's rule-generated alert links its
+contact page from the seven-beat replay.
 
 ## Two verified real contacts
 
@@ -231,7 +232,7 @@ download fields](https://globalfishingwatch.org/platform-update/2024-may-global-
 | Mentor dataset comparison and implementation plan | Documented 8 Oct; [plan and handoffs](../docs/10-space-dataset-plan.md) |
 | Coverage manifest and AIS handoff | Implemented; CSV/recorder adapter and hashes, sampled coverage, timestamp/dimension safeguards |
 | Newer GFW export adapter and recent combined replay | Pending actual export schema, access and overlapping data; no fabricated integration |
-| Offline evidence pages for Brain and Interface | Implemented in `argus.evidence` and `ui/space/`; stage replay connection remains with its owners |
+| Offline evidence pages for Brain and Interface | Implemented in `argus.evidence` and `ui/space/`; the fictional stage replay links its bundled page |
 | Small EMODnet traffic-context extract | Planned after the core evidence handoff; coordinate with Data |
 | Calibrated Sentinel-1 area crop | Optional account step; whole-scene preview already supported |
 | Own ship detector or model training | Outside v1 under D15; published GFW detections remain the selected path |
