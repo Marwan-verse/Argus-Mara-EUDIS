@@ -1,0 +1,39 @@
+:root { color-scheme: light; font: 16px/1.5 system-ui, sans-serif; color: #142b3b; background: #eef2f3; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+header, nav, main, footer { max-width: 1100px; margin: auto; padding: 1rem 1.5rem; }
+header { display: flex; justify-content: space-between; gap: 1rem; border-bottom: 2px solid #142b3b; }
+header strong { letter-spacing: .1em; }
+nav { display: flex; align-items: center; flex-wrap: wrap; gap: 1rem; }
+main { background: white; padding-bottom: 2.5rem; }
+h1 { font-size: clamp(1.7rem, 4vw, 2.4rem); line-height: 1.15; }
+h2 { font-size: 1.2rem; }
+h3 { font-size: 1rem; }
+.lead { color: #425968; }
+.notice { border-left: 4px solid #92610b; background: #fff4df; padding: 1rem; }
+section { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #c9d3d9; }
+a { color: #005b83; text-underline-offset: .15em; overflow-wrap: anywhere; }
+dl { display: grid; gap: .45rem; }
+dl div { display: grid; grid-template-columns: minmax(150px, 1fr) 2fr; gap: 1rem; }
+dt { color: #425968; }
+dd { margin: 0; overflow-wrap: anywhere; }
+table { width: 100%; border-collapse: collapse; }
+caption { text-align: left; margin-bottom: .75rem; }
+th, td { padding: .75rem .5rem; text-align: left; border-bottom: 1px solid #c9d3d9; overflow-wrap: anywhere; }
+th { background: #eef2f3; }
+svg { width: 100%; max-height: 360px; background: #edf5fa; border: 1px solid #c9d3d9; }
+svg text { font-size: 12px; fill: #425968; }
+.footprint { fill: #cae3ef; stroke: #226889; stroke-width: 2; }
+.contact { fill: #ac540c; stroke: white; stroke-width: 2; }
+figure { margin: 1rem 0; }
+img { max-width: 100%; height: auto; }
+figcaption, footer { color: #425968; font-size: .9rem; }
+label { display: block; margin: .75rem 0; }
+textarea { display: block; width: 100%; min-height: 90px; font: inherit; padding: .5rem; }
+.check { display: flex; align-items: baseline; gap: .5rem; }
+button { border: 1px solid #142b3b; background: #142b3b; color: white; padding: .6rem 1rem; font: inherit; cursor: pointer; }
+:focus-visible { outline: 3px solid #ac540c; outline-offset: 3px; }
+.skip { position: absolute; top: -100px; padding: .75rem; background: white; }
+.skip:focus { top: 0; }
+@media (max-width: 600px) { header { flex-direction: column; } dl div { grid-template-columns: 1fr; gap: 0; } th, td { padding: .5rem .25rem; font-size: .85rem; } }
+@media print { :root { background: white; } nav, form, .skip { display: none; } section { break-inside: avoid; } }

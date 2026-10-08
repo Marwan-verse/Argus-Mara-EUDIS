@@ -2,9 +2,9 @@
 
 > *"Ireland can crew two ships. Argus Mara gives them a hundred eyes."*
 
-**What it is:** an AI early-warning system for Ireland's undersea internet cables and gas and power lines. It works like this:
+**What it is:** a rule-based early-warning demonstration for Ireland's undersea internet cables and gas and power lines. It works like this:
 - It watches ships using their public AIS signals and satellite radar.
-- It spots dangerous behaviour: dragging an anchor, switching the transponder off, faking an identity.
+- It flags review cues such as speed changes, reception gaps and uncertain radar associations.
 - It then starts a **countdown to the cable at risk** and shows which response can get there in time.
 - **A human always decides.**
 
@@ -12,11 +12,28 @@
 
 **Team:** the Cyber team, eight of us, captained by Mykhailo.
 
-**Status (7 Oct 2026):** **our place is confirmed** — DCU wrote on 1 Oct, *"Congratulations on
-being accepted"*; over 20 teams are taking part. The [Space tools](space/README.md) now run
-offline with two published radar contacts; the full demo still needs integration. **Eight days**
-remain. The sample JSON and AIS recorder exist, and the plan has been reset from today — see
-[DECISIONS.md](DECISIONS.md) D11.
+**Status (8 Oct 2026):** **our place is confirmed**. The seven-beat offline interface,
+rule-generated alert and fictional Space evidence page run together. The two published
+historical radar contacts remain a separate review example; measured evaluation numbers
+and external data replacement are pending. See [DECISIONS.md](DECISIONS.md) D29–D30.
+
+**Run the native desktop application:** double-click `RUN-GUI-WINDOWS.bat` on Windows.
+It creates an ignored `.venv` and installs the UI packages on first run. Alternatively,
+create a virtual environment, run `python -m pip install -r requirements.txt`, then
+`python run_gui.py`. The app needs Python 3.10+ with Tkinter (Tcl/Tk) enabled; on
+Windows, include **Tcl/Tk and IDLE** in the Python installer. Use
+`python run_gui.py --check` to validate the local inputs without opening a window.
+CustomTkinter styles the native dashboard and Pillow displays NASA JPEG imagery; the
+same two JSON files drive the replay. The application starts no web server.
+The map is draggable and zoomable. **Offline coastline** covers the world without
+internet; **NASA Blue Marble · online** requests only visible imagery tiles. Use
+**World** to fit the globe and the map layers panel to show NGA World Port Index
+points and historical, stylized submarine cable routes. These reference layers are
+display context only; they do not feed the alert or countdown. The cable layer is
+CC BY-NC-SA 3.0 and must be replaced or licensed for commercial distribution.
+The right `+` opens tabs in a resizable side pane; the bottom `+` opens panels in a
+resizable lower pane. Drag tabs to reorder or move them between panes, or right-click
+a tab to move or close it. The lower-pane menu also includes map tools.
 
 > **The one rule: assemble the whole demo first, then make it good.** Ugly, on invented data,
 > but complete. Then replace one invented part per day with a real one. If a replacement fails,
@@ -27,15 +44,16 @@ remain. The sample JSON and AIS recorder exist, and the plan has been reset from
 ## The demo the judges will see
 
 1. **A map of Ireland:** ships move, cables lie on the seabed, and the shallow areas where an anchor can reach the seabed glow.
-2. **A tanker switches off its transponder** and vanishes. The tanker is fictional; the scenario is simulated.
-3. **A satellite radar image finds it again.** It measures 228 m but declared 180 m, so Argus Mara flags an **identity mismatch**.
-4. **It heads for shallow water over a cable.** Its speed drops from 12 to 9.1 knots and its course wobbles. That is exactly what *Eagle S* did before it cut Baltic cables in December 2024.
-5. **An alert appears, with a ticking countdown:** "cable in 1 h 15 min (earliest 1 h 03)".
-6. **The response panel:** aircraft ✅ 39 min · patrol ship ❌ 232 min · VHF ❌ out of range · next satellite ❌ 250 min.
+2. **A fictional tanker enters a simulated AIS reception gap** and disappears from the AIS layer.
+3. **A separate simulated radar contact appears.** Its 228 m length estimate and the tanker's 180 m AIS declaration warrant review; association and identity are unconfirmed.
+4. **AIS returns and the vessel turns toward an illustrative cable.** Its observed speed reaches 9.1 kn at minute 90; the cause is unknown.
+5. **The rule-generated alert appears, with a ticking countdown:** expected cable crossing in 1 h 13 min 31 s; earliest planning estimate 1 h 1 min 15 s.
+6. **The response panel:** assumed aircraft and VHF responses arrive in time; the patrol ship and next satellite look do not.
 7. **The officer approves**, and an evidence pack is generated.
 
-Beats 1–7 are already pinned down as data in [`demo/`](demo/) — run `python3 demo/make_scenario.py`
-to see the exact numbers. Those two files are the contract the whole team builds against.
+Beats 1–7 are pinned down in [`demo/`](demo/). Regenerate with
+`python3 demo/make_scenario.py`, then `python3 -m argus.brain`, and run
+`python3 scripts/check_contracts.py`. The generator does not overwrite Brain's alert.
 
 ## The plan
 
@@ -58,10 +76,10 @@ daily — is [docs/plan-ru.md](docs/plan-ru.md).
 | Workstream | Owners | In plain words | This week's job |
 |---|---|---|---|
 | **Story + integration** | **Mykhailo** (captain) | The pitch and the people | Organisers, demo script, **the AIS recorder on his own machine**; every evening checks the demo still runs |
-| **Data** | **Adam Pohořilský** + **Marwan** | Collects everything: cables, seabed depth, traffic | Cable routes and depth; vessel-density grids; the scenario file |
+| **Data** | **Ihor Maslovskyi** + **Bohdan** | Collects everything: cables, seabed depth, traffic | Cable routes and depth; vessel-density grids; the scenario file |
 | **Brain** | **Nazar Kyrychenko** + **Myroslav** | Notices suspicious behaviour and runs the countdown | Anchor-drag rule; countdown; response ETAs; the two numbers |
 | **Space** | **Nazariy Buryak** | Satellite radar: reviews AIS-unmatched contacts and checks vessel size with uncertainty | Offline evidence packs, provenance manifest, AIS handoff and two real contacts implemented; [instructions and remaining dataset access](space/README.md#update-for-teammates--8-october-2026) |
-| **Interface** | **Ihor Maslovskyi** + **Bohdan** | What the judges see | Map, moving vessels, alert card with the live countdown, action panel, evidence page |
+| **Interface** | **Adam Pohořilský** + **Marwan** | What the judges see | Map, moving vessels, alert card with the live countdown, action panel, evidence page |
 
 **Why pairs.** One person who gets stuck goes quiet for two days; two people talk, and talking
 unsticks them. Space has a single owner because it is the one piece nobody else depends on.
@@ -110,12 +128,12 @@ Details and links: [plan §4.5](docs/04-work-plan.md).
       *Owner:* **Nazariy**, with Data, Brain and Interface handoffs
 - [ ] Download cable and pipeline routes (EMODnet, TeleGeography), seabed depth (GEBCO or
       EMODnet), and the EMODnet vessel-density grids. *Owners:* **Ihor, Bohdan**
-- [ ] `argus/brain.py`: read `scenario.json` → write `alerts.json`. Slow-down rule plus
-      countdown v1 — take `project_to_cable()` from `demo/make_scenario.py`.
+- [x] `argus/brain.py`: read `scenario.json` → write `alerts.json` from four review cues;
+      countdown v1 and response options are in `argus/countdown.py`.
       *Owners:* **Nazar K., Myroslav**
-- [ ] `ui/index.html`: offline map, cable line, vessel moving through the scenario points.
+- [x] `ui/index.html`: offline map, cable line, vessel replay, approval and evidence export.
       *Owners:* **Adam, Marwan**
-- [ ] Pitch outline and the demo script as numbered beats. *Owner:* **Mykhailo**
+- [x] Four-minute [demo runbook](docs/demo-runbook.md) and [one-pager](docs/one-pager.md) drafted; live rehearsal and recording still required. *Owner:* **Mykhailo**
 
 **Then**
 
@@ -127,7 +145,7 @@ Details and links: [plan §4.5](docs/04-work-plan.md).
       rows, source attribution and checksums. These are review candidates, not proof of AIS
       shutdown. [Examples and limitations](space/README.md#two-verified-real-contacts).
       *Owner:* **Nazariy**
-- [ ] `PRIOR_WORK.md`, our record of what we built before the event. *Owner:* **Mykhailo**
+- [x] [`PRIOR_WORK.md`](PRIOR_WORK.md) drafted from the pre-event repository; review and create the planned tag on 14 Oct. *Owner:* **Mykhailo**
 
 **Optional, ten minutes each — send and forget, nothing waits on these**
 
@@ -174,5 +192,9 @@ the answer is "after the hackathon". ([plan §4.6](docs/04-work-plan.md))
 | [docs/08-research-and-next-ideas.md](docs/08-research-and-next-ideas.md) | Checked primary sources, caveats and suggested next improvements |
 | [docs/09-team-skills.md](docs/09-team-skills.md) | How teammates download the repository skills |
 | [docs/10-space-dataset-plan.md](docs/10-space-dataset-plan.md) | Space dataset comparison, implementation sequence and handoffs to Data, Brain and Interface |
+| [docs/demo-runbook.md](docs/demo-runbook.md) | Four-minute click and talk script, offline acceptance and fallback steps |
+| [docs/one-pager.md](docs/one-pager.md) | Current demonstrated capability and explicit validation limits |
+| [docs/ui-skills-survey.md](docs/ui-skills-survey.md) | UI skills and tools ranked for this static offline console |
+| [PRIOR_WORK.md](PRIOR_WORK.md) | Draft declaration of work completed before the event |
 | [skills/](skills/) | Portable codebase and interface skills for teammates |
 | [scripts/check_contracts.py](scripts/check_contracts.py) | Checks the two demo JSON files before integration |
