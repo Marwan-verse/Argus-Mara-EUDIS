@@ -47,6 +47,14 @@ route, including systems crossing the date line. **Fit exercise** frames the
 scenario track and cable. The scale bar and cursor coordinates help orientation.
 These additions remain offline and preserve the white desktop interface.
 
+**Optional shared live AIS:** [live/README.md](live/README.md) explains the single
+Railway collector, private persistent archive, English browser map and live mode
+of the team's native dashboard. Run `python run_live_gui.py --server https://YOUR-SERVER`
+to receive the shared observations; `run_gui.py` remains the offline exercise.
+Deploy the separate `feat/shared-live-ais` branch with a `/data` volume and put the
+AIS key only in Railway Variables. A tested local service is not a confirmed
+cloud deployment or proof of a working real feed. See decision D36.
+
 > **The one rule: assemble the whole demo first, then make it good.** Ugly, on invented data,
 > but complete. Then replace one invented part per day with a real one. If a replacement fails,
 > the working demo is still there.
