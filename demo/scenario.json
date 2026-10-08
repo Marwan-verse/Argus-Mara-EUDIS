@@ -1,12 +1,6 @@
 {
- "name": "Scenario A - fictional cable approach in the Irish Sea",
+ "name": "Scenario A - anchor drag over the Irish Sea cable",
  "label": "simulated",
- "provenance": {
-  "dataset": "Argus Mara fictional exercise",
-  "license": "Team-created simulated content",
-  "attribution": "Argus Mara team",
-  "selection": "One invented vessel, radar contact and illustrative cable; not a regional census"
- },
  "t0_utc": "2026-10-16T08:00:00Z",
  "replay_speed": 60,
  "cables": [
@@ -14,7 +8,7 @@
    "id": "cable-irish-sea-1",
    "name": "Dublin-Holyhead telecom link (illustrative route)",
    "kind": "telecom",
-   "label": "simulated",
+   "label": "reconstructed",
    "criticality": 0.8,
    "path": [
     [
