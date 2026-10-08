@@ -2,6 +2,11 @@
 
 This package holds shared contract validation and the Space workstream's offline radar/AIS analysis (`space.py` and `ingest/`). The Brain workstream's detector, countdown and response calculations belong here next; `demo/make_scenario.py` still generates the sample alert stub. See the [Space handoff](../space/README.md) for its current sidecar and examples.
 
+Space additions: `ingest/ais.py` normalizes attributed CSV/recorder positions and timestamped
+dimensions; `provenance.py` supplies UTC, coverage and checksum helpers; `evidence.py` exports
+hashed offline evidence packs using browser templates in `ui/space/`. These write under ignored
+`data/` and preserve both shared demo files.
+
 Suggested next files, when their owners implement them:
 
 - `brain.py`: command line entry point that reads a scenario and writes alerts.

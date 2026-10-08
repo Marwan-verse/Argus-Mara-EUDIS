@@ -12,9 +12,11 @@ The mentor-suggested dataset sources have been reviewed. The recommendation is t
 acceptance checks are in [the Space dataset plan](../docs/10-space-dataset-plan.md).
 
 **Available now:** the offline association and length-review tools, two attributed historical
-contacts, the Sentinel-1 catalogue importer, and the separate 4Wings grid-report CLI.
-**Planned:** a coverage manifest, an adapter for the newer GFW export, AIS input handoff and
-offline evidence pages. These additions are not implemented by this documentation update.
+contacts, the Sentinel-1 catalogue importer, the separate 4Wings grid-report CLI, a normalized
+AIS handoff, and offline evidence packs with hashed sources and explicit coverage.
+**Still pending:** an adapter for the newer GFW export, actual overlapping Irish SAR/AIS
+data, and a bounded EMODnet context extract. No newer export schema or account token was
+available for this implementation; the verified historical CSV remains the supported source.
 
 The two real contacts are from **2018 and 2021**; our Irish AIS recording began in **October
 2026**. Keep them in separate historical examples. A real combined replay needs overlapping
@@ -25,9 +27,9 @@ delay; current regional availability and account access still need verification.
 
 | Workstream | What Space supplies or needs |
 |---|---|
-| Data | Needs AIS fixes with UTC times, coordinates, speed/course and sourced vessel dimensions. Infrastructure and depth remain Data's inputs; a small EMODnet context extract is planned. |
-| Brain | Can consume the existing sidecar's association, custody candidates and length checks. Space supplies review evidence; Brain owns alert scores, cable countdowns and response ETAs. |
-| Interface | Can display the existing contact fields and provenance. An offline evidence page is planned; until it exists, keep the unavailable-evidence state visible. |
+| Data | Can normalize CSV fixes or the existing recorder's CSV/Parquet using `argus.ingest.ais`; see the schema below. Infrastructure, depth and the optional EMODnet extract remain Data's inputs. |
+| Brain | Can consume the sidecar's association, custody candidates, length checks and unavailable reasons. Each exported contact has an `evidence_url`; Brain owns alert scores, countdowns and response ETAs. |
+| Interface | Can link generated contact pages or reuse the local templates in `ui/space/`. The demo alert's existing placeholder is still unavailable until its owner connects it to the generated fictional pack. |
 | Story/integration | Can use the two real contacts as historical examples, separate from the fictional tanker. Retain matching caveats and visible operator approval. |
 
 Shared adapters and evidence handoffs can be developed together when they directly support
@@ -51,9 +53,19 @@ a **separate sidecar** with `detections`, retaining the existing contact fields 
 |---|---|
 | `association` | `source_reported`, `local_ais_match`, or `unmatched` |
 | `matched_mmsi` | A source-reported or locally associated MMSI; otherwise `null` |
+| `provider_matched_mmsi` | The original provider association, unchanged by local matching |
+| `association_label` | `reconstructed` for derived observed evidence; `simulated` for fictional/simulated input, or `assumption` |
+| `association_evidence` | Association method, supplied/eligible AIS counts, position age or interpolation bracket, timestamp sources and receipt-time assumption |
 | `dark_candidate` | No AIS association was found; review the contact |
 | `length_check` | Check against the associated vessel's `ais_length_m`, or unavailable |
 | `custody_candidates` | Reachable last-known vessels, each with a tentative length check |
+| `unavailable_reasons` | Plain-language explanations of missing association, dimensions or scene evidence |
+| `scene_evidence` | Evidence export only: scene acquisition interval and catalogue GeoJSON footprint, or an unavailable state |
+| `evidence_url` | Evidence export only: page path relative to the generated pack root |
+
+The sidecar also adds top-level `coverage`, `provenance`, `selection` and documented
+`assumptions`. Readers may ignore these additive fields. `evidence_url` must be resolved
+against the pack root; it is not relative to `demo/alerts.json`.
 
 Brain can read these results; Interface can display the radar contact and review cue. This
 command does not write alerts, change response ETAs or append historical contacts to the
@@ -65,6 +77,10 @@ fictional 2026 scenario. Real examples are a separate replay.
   project a past fix for at most 300 seconds. Never match against a future-only fix.
 - Associate contacts within 1 km with a **one-to-one Hungarian assignment**, independently
   for each acquisition time and scene. Keep source-reported GFW associations.
+- Real/reconstructed observations cannot locally associate with fictional/simulated AIS.
+  Imported dimensions must be recorded at or before acquisition, no more than 24 hours old,
+  and share the vessel's provenance. This expiry is an assumption, not an AIS standard.
+  Legacy scenario dimensions require a past track fix within 30 minutes.
 - A long AIS gap stays unmatched. For at most 30 minutes, list vessels reachable from their
   last fix assuming a maximum 30 kn speed. These are candidates, without a probability or
   a claim of regained identity. The speed, time limits and distance gate are assumptions.
@@ -74,6 +90,57 @@ fictional 2026 scenario. Real examples are a separate replay.
 - In the fictional demo, the 228 m contact has a plausible last-known candidate declaring
   180 m. The 48 m difference exceeds the 45 m nominal threshold, but does **not** survive
   the assumed radar uncertainty. It remains a tentative review cue.
+
+## AIS handoff for Data
+
+Normalized CSV columns are `mmsi,ts,lat,lon,sog_kn,cog_deg`. Optional columns are `name`,
+`ais_length_m` and `label`. MMSI is nine digits; `ts` is ISO 8601 with an explicit UTC offset.
+Lengths are metres and their row timestamps become the dimension observation times. Missing
+dimensions stay unavailable. The default provenance label is required on the command line.
+
+```bash
+python3 -m argus.ingest.ais data/ais/fixes.csv --label real --output data/ais/handoff.json
+python3 -m argus.ingest.ais data/ais/recording.parquet --schema recorder --label real --output data/ais/handoff.json
+```
+
+The recorder adapter selects position messages only. It uses `time_utc` where available,
+otherwise labels `recv_utc` as an assumed observation time. Raw messages are excluded from
+the handoff. AIS unavailable speed/course sentinels become `null`. Identical fixes are
+deduplicated; conflicting fixes for one MMSI/time are rejected. Parquet uses the recorder's
+existing optional `pyarrow` dependency; normalized CSV needs no packages. Mixed labels remain
+visible per vessel and in `provenance_labels`; do not attach today's recording to the historical
+contacts expecting an identity match.
+
+## Generate an offline evidence pack
+
+```bash
+python3 -m argus.evidence
+python3 -m argus.evidence --quicklook data/sar/sentinel1-quicklook.png
+python3 -m argus.evidence --scenario demo/scenario.json --output data/sar/demo-review
+```
+
+The default pack is `data/sar/review/index.html`, with two historical contacts, source
+attribution, scene coverage, length uncertainty and explicit unavailable states. The 2018
+contact has bundled catalogue metadata; the 2021 contact does not. The quicklook must belong
+to the single supplied scene. It is optional and must already exist locally.
+
+`manifest.json` records input/output SHA-256 hashes, code hashes, filtering, acquisition ranges,
+assumptions and licence/attribution. Source retrieval time is `null` when not recorded; the
+export timestamp is separate. Coverage is sampled and never described as continuous. The
+catalogue footprint is not GFW's processed detection footprint. Pages use local CSS/JS and
+inline schematic maps, without external tiles or libraries. Open the generated `index.html`
+directly or serve the repository root with `python3 -m http.server 8000`.
+
+For an already normalized, contemporaneous contact file and AIS handoff:
+
+```bash
+python3 -m argus.evidence --contacts data/sar/contacts.json --ais data/ais/handoff.json --provenance data/sar/provenance.json --scene data/sar/scene.json --output data/sar/combined-review
+```
+
+Each contact page permits a **page-local** operator review note and printing. The note is not
+persisted after reload and authorizes no operational action. Historical and fictional packs
+stay separate. This export supplies the evidence handoff; the seven-beat stage replay and
+connecting `demo/alerts.json` remain with Brain and Interface.
 
 ## Two verified real contacts
 
@@ -104,6 +171,11 @@ The importer also accepts the full published per-contact CSV or a ZIP containing
 It validates the source category, preserves real timestamps and scene IDs, and filters to
 `WEST SOUTH EAST NORTH` (default `-18 49 -4.5 57.5`). Other download schemas need an explicit
 adapter; gridded reports are rejected as per-contact input.
+
+The verified CSV adapter also supports `--start 2021-09-05 --end 2021-09-06` (start inclusive,
+end exclusive, calendar dates mean midnight UTC). Contact IDs remain stable across filters.
+Identical scene/time/position rows are deduplicated; conflicting records are rejected. Optional
+matching, fishing and presence scores are preserved only when supplied by the source.
 
 ## Sentinel-1 scene preview
 
@@ -157,8 +229,9 @@ download fields](https://globalfishingwatch.org/platform-update/2024-may-global-
 | Sentinel-1 scene | Catalogue verified; public preview downloaded and inspected locally |
 | GFW token and current Irish-region API pull | Request/fetch CLI ready; account step pending. Public-data path selected |
 | Mentor dataset comparison and implementation plan | Documented 8 Oct; [plan and handoffs](../docs/10-space-dataset-plan.md) |
-| Coverage manifest, newer GFW export adapter and AIS handoff | Planned; account/export schema and overlapping data remain to be verified |
-| Offline evidence pages for Brain and Interface | Planned; existing sidecar remains available |
+| Coverage manifest and AIS handoff | Implemented; CSV/recorder adapter and hashes, sampled coverage, timestamp/dimension safeguards |
+| Newer GFW export adapter and recent combined replay | Pending actual export schema, access and overlapping data; no fabricated integration |
+| Offline evidence pages for Brain and Interface | Implemented in `argus.evidence` and `ui/space/`; stage replay connection remains with its owners |
 | Small EMODnet traffic-context extract | Planned after the core evidence handoff; coordinate with Data |
 | Calibrated Sentinel-1 area crop | Optional account step; whole-scene preview already supported |
 | Own ship detector or model training | Outside v1 under D15; published GFW detections remain the selected path |

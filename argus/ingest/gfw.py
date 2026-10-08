@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from argus.space import coordinates, finite, timestamp
+from argus.provenance import now_utc, sha256, time_range
 
 
 ARCHIVE_URL = "https://ndownloader.figshare.com/files/43882980"
@@ -56,7 +57,7 @@ def normalise(row):
     mmsi_text = row["mmsi"].strip()
     mmsi = None
     if category != "unmatched":
-        if not (mmsi_text.isdigit() and len(mmsi_text) == 9):
+        if not (mmsi_text.isdigit() and len(mmsi_text) == 9 and int(mmsi_text) != 0):
             raise ValueError("a matched contact must have a 9-digit MMSI")
         mmsi = int(mmsi_text)
     length = finite(row["length_m"], "length_m") if row["length_m"].strip() else None
@@ -68,43 +69,76 @@ def normalise(row):
             "source": "gfw", "scene_id": row["scene_id"], "matched_mmsi": mmsi,
             "label": "real", "provider_match_category": category,
             "matching_score": finite(row["matching_score"], "matching_score") if row.get("matching_score") else None,
-            "fishing_score": finite(row["fishing_score"], "fishing_score") if row.get("fishing_score") else None}
+            "fishing_score": finite(row["fishing_score"], "fishing_score") if row.get("fishing_score") else None,
+            "presence_score": finite(row["presence_score"], "presence_score") if row.get("presence_score") else None}
 
 
-def import_rows(rows, bbox=IRISH_BBOX, unmatched_only=False):
+def date_bound(value):
+    if value is None:
+        return None
+    # Calendar dates are explicitly midnight UTC; timestamp inputs need an offset.
+    return timestamp(value + "T00:00:00Z" if len(value) == 10 else value)
+
+
+def import_rows(rows, bbox=IRISH_BBOX, unmatched_only=False, start=None, end=None):
     west, south, east, north = bbox_values(bbox)
-    detections = []
+    first, last = date_bound(start), date_bound(end)
+    if first is not None and last is not None and first >= last:
+        raise ValueError("start must precede end (end is exclusive)")
+    detections, seen, duplicates, input_rows = [], {}, 0, 0
     if isinstance(rows, csv.DictReader):
         validate_columns(rows.fieldnames or [])
     for line, row in enumerate(rows, 2):
         try:
+            input_rows += 1
             validate_columns(row)
             lat, lon = coordinates(row)
             if not (south <= lat <= north and west <= lon <= east):
                 continue
             detection = normalise(row)
-            if not unmatched_only or detection["provider_match_category"] == "unmatched":
-                detections.append(detection)
+            when = timestamp(detection["ts"])
+            if (first is not None and when < first) or (last is not None and when >= last):
+                continue
+            if unmatched_only and detection["provider_match_category"] != "unmatched":
+                continue
+            # Stable identity across filters; do not turn the row number into an ID.
+            identity = (detection["scene_id"], detection["ts"], detection["lat"], detection["lon"])
+            if identity in seen:
+                if seen[identity] != detection:
+                    raise ValueError("conflicting records for the same scene/time/position")
+                duplicates += 1
+                continue
+            seen[identity] = dict(detection)
+            digest = hashlib.sha256(json.dumps(identity, separators=(",", ":")).encode()).hexdigest()
+            detection["id"] = "gfw-" + digest[:20]
+            detections.append(detection)
         except (ValueError, KeyError, TypeError) as exc:
             raise ValueError(f"CSV row {line}: {exc}") from exc
     return {"name": "GFW historical radar contacts in the Irish-region bounding box",
             "label": "real", "bbox_west_south_east_north": list(bbox), "vessels": [],
             "caveat": "Unmatched means no AIS association in GFW's dataset; it does not establish deliberate AIS shutdown.",
+            "source_schema": "gfw-analysis-csv-v1",
+            "selection": {"start": start, "end_exclusive": end, "unmatched_only": unmatched_only,
+                          "input_rows": input_rows, "duplicates_removed": duplicates,
+                          "complete_regional_census": False},
+            "coverage": time_range(detections),
             "detections": detections}
 
 
-def import_file(path, bbox=IRISH_BBOX, unmatched_only=False):
+def import_file(path, bbox=IRISH_BBOX, unmatched_only=False, start=None, end=None):
+    path = Path(path)
     if zipfile.is_zipfile(path):
         with zipfile.ZipFile(path) as archive:
             names = [n for n in archive.namelist() if n.lower().endswith(".csv") and not n.startswith("__MACOSX/")]
             if len(names) != 1:
                 raise ValueError("ZIP must contain one per-contact CSV; extract and import monthly files separately")
             with archive.open(names[0]) as member, io.TextIOWrapper(member, encoding="utf-8-sig", newline="") as stream:
-                result = import_rows(csv.DictReader(stream), bbox, unmatched_only)
+                result = import_rows(csv.DictReader(stream), bbox, unmatched_only, start, end)
     else:
         with path.open(encoding="utf-8-sig", newline="") as stream:
-            result = import_rows(csv.DictReader(stream), bbox, unmatched_only)
+            result = import_rows(csv.DictReader(stream), bbox, unmatched_only, start, end)
     result["source_file"] = path.name
+    result["source_sha256"] = sha256(path)
     return result
 
 
@@ -138,6 +172,7 @@ def public_example():
                             "attribution": "Paolo, Kroodsma, Davis and Hochberg (2024), Global Fishing Watch",
                             "bytes_read": len(prefix), "prefix_sha256": hashlib.sha256(prefix).hexdigest(),
                             "selection": "Unmatched contacts from two pinned scenes inside the Irish-region bounding box; not a regional census."}
+    result["provenance"]["retrieved_at_utc"] = now_utc()
     return result, rows
 
 
@@ -186,6 +221,8 @@ def main():
     importer.add_argument("--output", type=Path, default=Path("data/sar/gfw-contacts.json"))
     importer.add_argument("--bbox", nargs=4, type=float, default=IRISH_BBOX, metavar=("WEST", "SOUTH", "EAST", "NORTH"))
     importer.add_argument("--unmatched-only", action="store_true")
+    importer.add_argument("--start", help="inclusive UTC timestamp or YYYY-MM-DD")
+    importer.add_argument("--end", help="exclusive UTC timestamp or YYYY-MM-DD")
     example = commands.add_parser("public-example", help="retrieve pinned historical contacts without an account")
     example.add_argument("--output", type=Path, default=Path("data/sar/gfw-example.json"))
     example.add_argument("--raw-csv", type=Path, help="also save the original source rows")
@@ -201,7 +238,7 @@ def main():
         if args.command == "import":
             if args.input.resolve() == args.output.resolve():
                 raise ValueError("output must differ from the source CSV")
-            result = import_file(args.input, args.bbox, args.unmatched_only)
+            result = import_file(args.input, args.bbox, args.unmatched_only, args.start, args.end)
             write_json(args.output, result)
         elif args.command == "public-example":
             if args.raw_csv and args.raw_csv.resolve() == args.output.resolve():
