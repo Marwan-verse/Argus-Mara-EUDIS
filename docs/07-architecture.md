@@ -50,6 +50,14 @@ Add optional fields without breaking readers. To rename, remove or reinterpret a
 
 ## Next code tasks, by dependency
 
+*Interface update, 8 October 2026 (D27):* `ui/index.html`, `styles.css`, `app.mjs`
+and `replay.mjs` now implement the seven-beat offline console. Run
+`python scripts/serve_demo.py` and open `/ui/`. Natural Earth display geometry is
+bundled locally. Evidence review and HTML export work; the old stub evidence URL
+is still unavailable. Operator decisions are simulated, session-local, and clear
+when the replay is sought or restarted. The Brain detector and updated countdown
+calculations remain pending.
+
 1. Interface owns a local coastline asset and a static replay that handles the AIS gap, radar contact, alert and approval.
 2. Brain moves the projection helper from `demo/make_scenario.py` into a reusable `argus/countdown.py`, while writing the same `alerts.json` shape.
 3. Data replaces the illustrative cable and depth only after source, licence and provenance are recorded.
