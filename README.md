@@ -35,6 +35,16 @@ The right `+` opens tabs in a resizable side pane; the bottom `+` opens panels i
 resizable lower pane. Drag tabs to reorder or move them between panes, or right-click
 a tab to move or close it. The lower-pane menu also includes map tools.
 
+**Browse reference data:** open **Port directory** to search all 3,805 local ports
+by name, WPI ID or country code. Filter by country or restrict the list to the
+current map view. Select a row for coordinates and provenance; double-click it,
+press Enter or choose **Center selected port** to locate it. Click a port marker
+to inspect it, or a numbered cluster to zoom in. Port names appear at closer zooms.
+**Cable directory** searches 497 historical route records and fits a selected
+route, including systems crossing the date line. **Fit exercise** frames the
+scenario track and cable. The scale bar and cursor coordinates help orientation.
+These additions remain offline and preserve the white desktop interface.
+
 > **The one rule: assemble the whole demo first, then make it good.** Ugly, on invented data,
 > but complete. Then replace one invented part per day with a real one. If a replacement fails,
 > the working demo is still there.

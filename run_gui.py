@@ -31,6 +31,7 @@ from urllib.request import Request, urlopen
 
 from argus.contracts import validate_alerts, validate_scenario
 from argus.countdown import step
+from argus.map_view import coordinates, find_ports, geographic_extent, route_name, search_text
 
 
 ROOT = Path(__file__).resolve().parent
@@ -174,6 +175,10 @@ class ArgusApp:
         self.world_land, ports, cables = load_world_assets()
         self.world_ports = ports["ports"]
         self.world_cables = cables["cables"]
+        self.selected_port = None
+        self.selected_cable = None
+        self._port_clusters = {}
+        self._port_refresh_after = None
         self.land_rings = {}
         for level, rings in self.world_land["levels"].items():
             self.land_rings[level] = []
@@ -216,6 +221,7 @@ class ArgusApp:
             "contacts": "Vessel details", "timeline": "Timeline and events",
             "responses": "Response board", "layers": "Map layers",
             "world_data": "Global map data",
+            "ports": "Port directory", "cables": "Cable directory",
             "notes": "Map notes", "evidence": "Evidence review",
             "decision": "Decision review",
         }
@@ -291,6 +297,8 @@ class ArgusApp:
         nav("◉   Vessel details", lambda: self.open_window("contacts"))
         nav("◷   Timeline", lambda: self.open_window("timeline"))
         nav("◇   Map layers", lambda: self.open_window("layers"))
+        nav("⚓   Port directory", lambda: self.open_window("ports"))
+        nav("⌁   Cable directory", lambda: self.open_window("cables"))
         nav("▣   Evidence review", self.review_evidence)
         nav("✓   Response board", lambda: self.open_window("responses"))
         ctk.CTkFrame(sidebar, height=1, fg_color=LINE).pack(fill="x", padx=22, pady=23)
@@ -298,6 +306,7 @@ class ArgusApp:
                      font=ctk.CTkFont("Segoe UI", 10, "bold")).pack(anchor="w", padx=23, pady=(0, 8))
         nav("⌖   Center vessel", self.center_vessel)
         nav("⊞   Fit exercise", self.fit_map)
+        nav("◎   World overview", self.fit_world)
         ctk.CTkLabel(sidebar, text="SIMULATED EXERCISE\nNo operational action sent",
                      text_color=MUTED, justify="left", font=ctk.CTkFont("Segoe UI", 10)).pack(
                          side="bottom", anchor="w", padx=23, pady=24)
@@ -365,6 +374,10 @@ class ArgusApp:
                                               button_hover_color="#d5e4f8", text_color=INK,
                                               dropdown_fg_color=CARD, dropdown_text_color=INK)
         self.map_selector.pack(side="left")
+        ctk.CTkButton(map_bar, text="Ports", command=lambda: self.open_window("ports"),
+                      width=58, height=31, fg_color="#edf3fb", text_color=TEAL).pack(side="left", padx=6)
+        ctk.CTkButton(map_bar, text="Layers", command=lambda: self.open_window("layers"),
+                      width=58, height=31, fg_color="#edf3fb", text_color=TEAL).pack(side="left")
         for text, action in (("−", lambda: self._zoom_by(-1)), ("+", lambda: self._zoom_by(1)),
                              ("⌂", self.fit_map), ("World", self.fit_world)):
             ctk.CTkButton(map_bar, text=text, command=action, width=53 if text == "World" else 32, height=31,
@@ -620,7 +633,11 @@ class ArgusApp:
         titles = self._panel_titles
         ttk.Label(frame, text=titles[key], style="Title.TLabel").pack(anchor="w", pady=(0, 10))
 
-        if key == "evidence":
+        if key == "ports":
+            self._build_port_directory(frame)
+        elif key == "cables":
+            self._build_cable_directory(frame)
+        elif key == "evidence":
             ttk.Label(frame, text="Evidence review · simulated exercise", style="Muted.TLabel").pack(anchor="w", pady=(0, 10))
             text = tk.Text(frame, wrap="word", padx=15, pady=12, font=("Segoe UI", 10), bg="white", fg=INK)
             text.pack(fill="both", expand=True)
@@ -785,6 +802,182 @@ class ArgusApp:
 
             ttk.Button(actions, text="Remove selected", command=remove_selected).pack(side="left", padx=8)
             ttk.Button(actions, text="Clear all", command=self.clear_map_notes).pack(side="left")
+
+    def _build_port_directory(self, frame) -> None:
+        ttk.Label(frame, text="Search all local NGA reference ports by name, country code or WPI ID.",
+                  style="Muted.TLabel", wraplength=340).pack(anchor="w")
+        self.port_query = tk.StringVar()
+        ttk.Label(frame, text="Search ports").pack(anchor="w", pady=(10, 0))
+        entry = ttk.Entry(frame, textvariable=self.port_query)
+        entry.pack(fill="x", pady=(10, 6))
+        self.port_country = tk.StringVar(value="All countries")
+        ttk.Label(frame, text="Country code").pack(anchor="w")
+        ttk.Combobox(frame, textvariable=self.port_country, state="readonly",
+                     values=["All countries"] + sorted({p[4] for p in self.world_ports})).pack(fill="x")
+        self.port_visible = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frame, text="Only ports in the current map view", variable=self.port_visible,
+                        command=self._refresh_port_directory).pack(anchor="w", pady=8)
+        self.port_count = ttk.Label(frame, style="Muted.TLabel")
+        self.port_count.pack(anchor="w", pady=(0, 6))
+        holder = ttk.Frame(frame)
+        holder.pack(fill="both", expand=True)
+        self.port_table = ttk.Treeview(holder, columns=("name", "country", "wpi"), show="headings",
+                                       selectmode="browse", height=8)
+        for column, title, width in (("name", "Port", 170), ("country", "Country", 65), ("wpi", "WPI", 60)):
+            self.port_table.heading(column, text=title)
+            self.port_table.column(column, width=width, minwidth=50, stretch=column == "name")
+        scroll = ttk.Scrollbar(holder, orient="vertical", command=self.port_table.yview)
+        self.port_table.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        self.port_table.pack(fill="both", expand=True)
+        self.port_detail = ttk.Label(frame, text="Select a port to inspect its reference location.",
+                                     wraplength=340, justify="left")
+        self.port_detail.pack(anchor="w", pady=10)
+        ttk.Button(frame, text="Center selected port", command=self._center_selected_port).pack(anchor="w")
+        ttk.Label(frame, text="Real reference data · NGA World Port Index\nPositions are not precise berths or navigation fixes.",
+                  style="Muted.TLabel", wraplength=340).pack(anchor="w", pady=(10, 0))
+        self.port_table.bind("<<TreeviewSelect>>", self._port_table_selected)
+        self.port_table.bind("<Double-1>", lambda _event: self._center_selected_port())
+        self.port_table.bind("<Return>", lambda _event: self._center_selected_port())
+        self.port_query.trace_add("write", lambda *_: self._schedule_port_directory())
+        self.port_country.trace_add("write", lambda *_: self._refresh_port_directory())
+        self._refresh_port_directory()
+        if self.selected_port is not None:
+            self._select_port(self.selected_port)
+
+    def _schedule_port_directory(self) -> None:
+        if self._port_refresh_after:
+            self.root.after_cancel(self._port_refresh_after)
+        self._port_refresh_after = self.root.after(150, self._refresh_port_directory)
+
+    def _visible_port_indices(self):
+        width, height = self._map_size
+        return {i for i, port in enumerate(self.world_ports)
+                if 0 <= self._project(port[2], port[3])[0] <= width
+                and 0 <= self._project(port[2], port[3])[1] <= height}
+
+    def _refresh_port_directory(self) -> None:
+        self._port_refresh_after = None
+        if not hasattr(self, "port_table") or not self.port_table.winfo_exists():
+            return
+        visible = self._visible_port_indices() if self.port_visible.get() else None
+        indices = find_ports(self.world_ports, self.port_query.get(), self.port_country.get(), visible)
+        self.port_table.delete(*self.port_table.get_children())
+        for index in indices:
+            number, name, _lat, _lon, country = self.world_ports[index]
+            self.port_table.insert("", "end", iid=str(index), values=(name, country, number))
+        self.port_count.configure(text=f"{len(indices):,} of {len(self.world_ports):,} ports" +
+                                  (" · current view" if visible is not None else " · worldwide"))
+        if self.selected_port in indices:
+            self.port_table.selection_set(str(self.selected_port))
+            self.port_table.see(str(self.selected_port))
+
+    def _port_table_selected(self, _event=None) -> None:
+        selected = self.port_table.selection()
+        if selected:
+            self._select_port(int(selected[0]))
+
+    def _select_port(self, index) -> None:
+        changed = self.selected_port != index
+        self.selected_port = index
+        number, name, lat, lon, country = self.world_ports[index]
+        if hasattr(self, "port_detail") and self.port_detail.winfo_exists():
+            self.port_detail.configure(text=f"{name} · {country} · WPI {number}\n{coordinates(lat, lon)}\nReal · reference location")
+        if changed:
+            self._draw_map(force_static=True)
+
+    def _center_selected_port(self) -> None:
+        if self.selected_port is None:
+            return
+        port = self.world_ports[self.selected_port]
+        self.map_layers["World ports"].set(True)
+        self.map_zoom = min(10, MAX_IMAGERY_ZOOM if self.map_mode.get() == ONLINE_MAP else MAX_MAP_ZOOM)
+        self._change_map_center((port[2], port[3]))
+        self._refresh_port_directory()
+
+    def _build_cable_directory(self, frame) -> None:
+        ttk.Label(frame, text="Historical, stylized routes · reconstructed\nCC BY-NC-SA 3.0 · display only, never used for alerts.",
+                  style="Muted.TLabel", wraplength=340).pack(anchor="w")
+        unnamed = sum(c.get('name') == 'Unnamed cable' or not c.get('name') for c in self.world_cables)
+        ttk.Label(frame, text=f"{unnamed} records have no supplied system name. Route IDs distinguish them.",
+                  style="Muted.TLabel", wraplength=340).pack(anchor="w", pady=(5, 0))
+        query = tk.StringVar()
+        ttk.Label(frame, text="Search cable systems").pack(anchor="w", pady=(10, 0))
+        ttk.Entry(frame, textvariable=query).pack(fill="x", pady=10)
+        count = ttk.Label(frame, style="Muted.TLabel")
+        count.pack(anchor="w")
+        holder = ttk.Frame(frame)
+        holder.pack(fill="both", expand=True, pady=8)
+        table = ttk.Treeview(holder, columns=("name",), show="headings", selectmode="browse", height=8)
+        table.heading("name", text="Cable system")
+        table.column("name", width=240)
+        scroll = ttk.Scrollbar(holder, orient="vertical", command=table.yview)
+        table.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        table.pack(fill="both", expand=True)
+        detail = ttk.Label(frame, text="Select a system, then fit its route on the map.", wraplength=340)
+        detail.pack(anchor="w", pady=8)
+        def refresh(*_):
+            tokens = search_text(query.get()).split()
+            indices = sorted((i for i, c in enumerate(self.world_cables)
+                              if all(t in search_text(f'{route_name(c, i)} {i + 1:03d}') for t in tokens)),
+                             key=lambda i: search_text(route_name(self.world_cables[i], i)))
+            table.delete(*table.get_children())
+            for i in indices:
+                table.insert("", "end", iid=str(i), values=(f'{route_name(self.world_cables[i], i)} · #{i + 1:03d}',))
+            count.configure(text=f"{len(indices)} of {len(self.world_cables)} route records")
+            if self.selected_cable in indices:
+                table.selection_set(str(self.selected_cable))
+                table.see(str(self.selected_cable))
+        def select(_event=None):
+            if table.selection():
+                self.selected_cable = int(table.selection()[0])
+                cable = self.world_cables[self.selected_cable]
+                detail.configure(text=self._cable_description(self.selected_cable))
+                self.map_layers["Historical cable routes"].set(True)
+                self._draw_map(force_static=True)
+        self.cable_table = table
+        self.cable_detail = detail
+        ttk.Button(frame, text="Fit selected route", command=self._fit_selected_cable).pack(anchor="w")
+        table.bind("<<TreeviewSelect>>", select)
+        table.bind("<Double-1>", lambda _event: self._fit_selected_cable())
+        table.bind("<Return>", lambda _event: self._fit_selected_cable())
+        query.trace_add("write", refresh)
+        refresh()
+
+    def _fit_selected_cable(self) -> None:
+        if self.selected_cable is None:
+            return
+        points = [(lat, lon) for segment in self.world_cables[self.selected_cable]['segments'] for lon, lat in segment]
+        self._fit_points(points)
+
+    def _cable_description(self, index) -> str:
+        cable = self.world_cables[index]
+        points = [(lat, lon) for segment in cable['segments'] for lon, lat in segment]
+        center, lat_span, lon_span = geographic_extent(points)
+        return (f"{route_name(cable, index)} · record #{index + 1:03d}\n"
+                f"{len(cable['segments'])} route sections · reconstructed\n"
+                f"Extent center: {coordinates(*center)}\n"
+                f"Span: {lat_span:.1f}° latitude / {lon_span:.1f}° longitude")
+
+    def _fit_points(self, points) -> None:
+        if not points:
+            return
+        center, lat_span, lon_span = geographic_extent(points)
+        width, height = self._map_size
+        maximum = MAX_IMAGERY_ZOOM if self.map_mode.get() == ONLINE_MAP else MAX_MAP_ZOOM
+        for zoom in range(maximum, MIN_MAP_ZOOM - 1, -1):
+            _, top = geo_to_world(center[0] + lat_span / 2, center[1], zoom)
+            _, bottom = geo_to_world(center[0] - lat_span / 2, center[1], zoom)
+            if TILE_SIZE * 2 ** zoom * lon_span / 360 <= max(100, width - 100) and bottom - top <= max(100, height - 100):
+                break
+        self.map_zoom = zoom
+        _, top = geo_to_world(center[0] + lat_span / 2, center[1], zoom)
+        x, bottom = geo_to_world(center[0] - lat_span / 2, center[1], zoom)
+        self.map_center = world_to_geo(x, (top + bottom) / 2, zoom)
+        self._draw_map(force_static=True)
+        self._schedule_tile_refresh()
+        self._refresh_port_directory()
 
     def _panel_key_for_widget(self, widget_path: str) -> str | None:
         return next((key for key, widget in self._panel_widgets.items() if str(widget) == widget_path), None)
@@ -976,6 +1169,8 @@ class ArgusApp:
         width, height = self._map_size
         point_x, point_y = geo_to_world(lat, lon, self.map_zoom)
         center_x, center_y = geo_to_world(*self.map_center, self.map_zoom)
+        world = TILE_SIZE * 2 ** self.map_zoom
+        point_x += round((center_x - point_x) / world) * world
         return width / 2 + point_x - center_x, height / 2 + point_y - center_y
 
     def _points(self, points: list) -> list[float]:
@@ -989,7 +1184,8 @@ class ArgusApp:
             "radar": ((14, 14, "nw"), (16, -22, "nw"), (-14, 15, "ne"),
                       (20, 34, "nw"), (-14, -24, "ne"), (22, -42, "nw")),
             "asset": ((12, 8, "nw"), (12, -23, "nw"), (-12, 10, "ne"),
-                      (12, 27, "nw"), (-12, -24, "ne"), (20, 44, "nw"), (20, -40, "nw")),
+                       (12, 27, "nw"), (-12, -24, "ne"), (20, 44, "nw"), (20, -40, "nw")),
+            "port": ((10, -18, "nw"), (10, 7, "nw"), (-10, -18, "ne"), (-10, 7, "ne")),
         }
         font = ("Segoe UI Semibold", 9) if kind == "vessel" else ("Segoe UI", 8)
         width, height = self._map_size
@@ -1178,6 +1374,8 @@ class ArgusApp:
     def _map_resized(self, _event=None) -> None:
         self._draw_map(force_static=True)
         self._schedule_tile_refresh()
+        if hasattr(self, "port_visible") and self.port_visible.get():
+            self._schedule_port_directory()
 
     def _change_map_mode(self, _event=None) -> None:
         if self.map_mode.get() == ONLINE_MAP:
@@ -1216,11 +1414,15 @@ class ArgusApp:
         self.map.configure(cursor="hand2" if self.map_tool else "")
         if was_drag:
             self._schedule_tile_refresh()
+            if hasattr(self, "port_visible") and self.port_visible.get():
+                self._schedule_port_directory()
+        if not was_drag and not self.map_tool:
+            self._inspect_map_item(event)
         if not was_drag and self.map_tool:
             point = world_to_geo(*self._world_at(event.x, event.y), self.map_zoom)
             if self.map_tool == "pin":
                 self.map_note_points.append(point)
-                self.map_status_label.configure(text=f"Map note added · {point[0]:.4f}°N, {abs(point[1]):.4f}°W")
+                self.map_status_label.configure(text=f"Map note added · {coordinates(*point)}")
                 self.map_tool = None
             elif self.map_tool == "measure":
                 self.measure_points.append(point)
@@ -1239,22 +1441,54 @@ class ArgusApp:
     def _map_motion(self, event) -> None:
         if self.map_tool:
             lat, lon = world_to_geo(*self._world_at(event.x, event.y), self.map_zoom)
-            self.map_status_label.configure(text=f"{self.map_tool.title()} · {lat:.4f}°N, {abs(lon):.4f}°W")
+            self.map_status_label.configure(text=f"{self.map_tool.title()} · {coordinates(lat, lon)}")
             return
         for item in reversed(self.map.find_overlapping(event.x - 3, event.y - 3, event.x + 3, event.y + 3)):
             for tag in self.map.gettags(item):
                 if tag.startswith("world-port-cluster:"):
-                    count = int(tag.split(":")[1])
-                    self.map_status_label.configure(text=f"NGA World Port Index · {count} ports in this map cluster · zoom in for names")
+                    cluster = self._port_clusters[tag]
+                    self.map_status_label.configure(text=f"NGA · {len(cluster)} ports · click to zoom into cluster")
                     return
                 if tag.startswith("world-port:"):
                     number, name, lat, lon, country = self.world_ports[int(tag.split(":")[1])]
                     self.map_status_label.configure(text=f"NGA port · {name} ({country}) · WPI {number} · {lat:.3f}, {lon:.3f}")
                     return
                 if tag.startswith("world-cable:"):
-                    name = self.world_cables[int(tag.split(":")[1])]["name"]
+                    index = int(tag.split(":")[1])
+                    name = route_name(self.world_cables[index], index)
                     self.map_status_label.configure(text=f"Historical stylized cable route · {name} · reconstructed, display only")
                     return
+        lat, lon = world_to_geo(*self._world_at(event.x, event.y), self.map_zoom)
+        self.map_status_label.configure(text=f"{coordinates(lat, lon)} · drag to pan / click a port to inspect")
+
+    def _inspect_map_item(self, event) -> None:
+        tags = [tag for item in reversed(self.map.find_overlapping(event.x - 5, event.y - 5, event.x + 5, event.y + 5))
+                for tag in self.map.gettags(item)]
+        for tag in tags:
+            if tag.startswith("world-port-cluster:"):
+                members = self._port_clusters[tag]
+                x = sum(p[1] for p in members) / len(members)
+                y = sum(p[2] for p in members) / len(members)
+                point = world_to_geo(*self._world_at(x, y), self.map_zoom)
+                self.map_zoom = min(self.map_zoom + 2, MAX_IMAGERY_ZOOM if self.map_mode.get() == ONLINE_MAP else MAX_MAP_ZOOM)
+                self._change_map_center(point)
+                self._refresh_port_directory()
+                return
+            if tag.startswith("world-port:"):
+                self._select_port(int(tag.split(":")[1]))
+                self.open_window("ports")
+                self._refresh_port_directory()
+                return
+        for tag in tags:
+            if tag.startswith("world-cable:"):
+                self.selected_cable = int(tag.split(":")[1])
+                self.open_window("cables")
+                if self.cable_table.exists(str(self.selected_cable)):
+                    self.cable_table.selection_set(str(self.selected_cable))
+                    self.cable_table.see(str(self.selected_cable))
+                self.cable_detail.configure(text=self._cable_description(self.selected_cable))
+                self._draw_map(force_static=True)
+                return
 
     def _mouse_wheel(self, event) -> str:
         self._zoom_at(1 if event.delta > 0 else -1, event.x, event.y)
@@ -1274,6 +1508,9 @@ class ArgusApp:
         self._draw_map(force_static=True)
         self._schedule_tile_refresh()
 
+        if hasattr(self, "port_visible") and self.port_visible.get():
+            self._schedule_port_directory()
+
     def _zoom_by(self, amount: int) -> None:
         self._zoom_at(amount, self._map_size[0] / 2, self._map_size[1] / 2)
 
@@ -1281,18 +1518,19 @@ class ArgusApp:
         self.map_center = point
         self._draw_map(force_static=True)
         self._schedule_tile_refresh()
+        self._refresh_port_directory()
 
     def fit_map(self) -> None:
-        self.map_center = (53.15, -5.55)
-        self.map_zoom = 8
-        self._draw_map(force_static=True)
-        self._schedule_tile_refresh(0)
+        points = [(p['lat'], p['lon']) for p in self.vessel['track']]
+        points += [tuple(p) for p in self.cable['path']]
+        self._fit_points(points)
 
     def fit_world(self) -> None:
         self.map_center = (0.0, 0.0)
         self.map_zoom = 1
         self._draw_map(force_static=True)
         self._schedule_tile_refresh(0)
+        self._refresh_port_directory()
 
     def _draw_global_land(self, width: int, height: int) -> None:
         z = self.map_zoom
@@ -1376,17 +1614,22 @@ class ArgusApp:
                     if max(xs) < 0 or min(xs) > width or max(ys) < 0 or min(ys) > height:
                         continue
                     coords = [coordinate for x, y in points for coordinate in (x + shift, y)]
-                    self.map.create_line(coords, fill="#8979bd", width=1.3 if z < 6 else 1.8,
+                    selected = index == self.selected_cable
+                    self.map.create_line(coords, fill=PURPLE if selected else "#8979bd",
+                                         width=3.5 if selected else 1.3 if z < 6 else 1.8,
                                          tags=(f"world-cable:{index}",))
 
-    def _draw_world_ports(self, width: int, height: int) -> None:
+    def _draw_world_ports(self, width: int, height: int) -> list:
         z = self.map_zoom
         world = TILE_SIZE * 2 ** z
         center_x, center_y = geo_to_world(*self.map_center, z)
         clusters: dict[tuple[int, int], list[tuple[int, float, float]]] = {}
+        labels = []
+        self._port_clusters = {}
         for index, port in enumerate(self.world_ports):
             _number, _name, lat, lon, _country = port
             wx, wy = geo_to_world(lat, lon, z)
+            wx += round((center_x - wx) / world) * world
             x = wx - center_x + width / 2
             y = wy - center_y + height / 2
             if y < -5 or y > height + 5:
@@ -1398,19 +1641,29 @@ class ArgusApp:
                 if z <= 5:
                     clusters.setdefault((int(sx // 25), int(y // 25)), []).append((index, sx, y))
                 else:
-                    self.map.create_oval(sx - 2.5, y - 2.5, sx + 2.5, y + 2.5,
-                                         fill="#156d83", outline="white", width=0.7,
+                    selected = index == self.selected_port
+                    radius = 6 if selected else 3.5
+                    self.map.create_oval(sx - radius, y - radius, sx + radius, y + radius,
+                                         fill=TEAL if selected else "#156d83", outline="white", width=1.3,
                                          tags=(f"world-port:{index}",))
+                    if selected or (z >= 8 and len(labels) < 40):
+                        labels.append((-1 if selected else 3, "port", _name, sx, y))
         if z <= 5:
             for members in clusters.values():
                 count = len(members)
-                index, x, y = members[0]
+                index = members[0][0]
+                x = sum(m[1] for m in members) / count
+                y = sum(m[2] for m in members) / count
+                tag = f"world-port-cluster:{len(self._port_clusters)}" if count > 1 else f"world-port:{index}"
+                if count > 1:
+                    self._port_clusters[tag] = members
                 radius = 3.5 if count == 1 else 7
                 self.map.create_oval(x - radius, y - radius, x + radius, y + radius,
                                      fill="#156d83", outline="white", width=1,
-                                     tags=(f"world-port-cluster:{count}" if count > 1 else f"world-port:{index}",))
+                                     tags=(tag,))
                 if count > 1:
-                    self.map.create_text(x, y, text=str(count), fill="white", font=("Segoe UI", 7, "bold"))
+                    self.map.create_text(x, y, text=str(count), fill="white", font=("Segoe UI", 7, "bold"), tags=(tag,))
+        return labels
 
     def _draw_map(self, force_static: bool = False) -> None:
         size = (self.map.winfo_width(), self.map.winfo_height())
@@ -1446,7 +1699,7 @@ class ArgusApp:
         if self.map_layers["Historical cable routes"].get():
             self._draw_world_cables(width, height)
         if self.map_layers["World ports"].get():
-            self._draw_world_ports(width, height)
+            map_labels.extend(self._draw_world_ports(width, height))
 
         if self.map_layers["Anchor reach"].get():
             for cable in self.scenario["cables"]:
@@ -1487,7 +1740,7 @@ class ArgusApp:
             self.map.create_oval(x - 13, y - 13, x + 13, y + 13, fill="white", outline="white", width=2)
             self.map.create_oval(x - 9, y - 9, x + 9, y + 9, fill=TEAL, outline="white", width=2)
             map_labels.append((0, "vessel", f"{self.vessel['name']}\n{fix['sog_kn']:.1f} kn · {fix['cog_deg']:.0f}°", x, y))
-        elif self.position_s < self.vessel["track"][-1]["t"]:
+        elif not fix_at(self.vessel["track"], self.position_s) and self.position_s < self.vessel["track"][-1]["t"]:
             self.map.create_text(width / 2, 42, text="AIS RECEPTION GAP · marker withdrawn", fill=AMBER, font=("Segoe UI Semibold", 10))
         for index, (lat, lon) in enumerate(self.map_note_points, 1):
             x, y = self._project(lat, lon)
@@ -1511,6 +1764,16 @@ class ArgusApp:
         self.map.create_text(10, height - 13,
                              text="● NGA world ports · violet: historical stylized cables · exercise overlays fictional",
                              anchor="w", fill="#33465b", font=("Segoe UI", 8))
+        if width >= 350:
+            lat = self.map_center[0]
+            km_per_pixel = math.cos(math.radians(lat)) * 40075.017 / (TILE_SIZE * 2 ** self.map_zoom)
+            target = km_per_pixel * 80
+            power = 10 ** math.floor(math.log10(max(target, .00001)))
+            km = next(v * power for v in (1, 2, 5, 10) if v * power >= target)
+            pixels = km / km_per_pixel
+            self.map.create_rectangle(width - pixels - 24, height - 56, width - 8, height - 27, fill="white", outline=LINE)
+            self.map.create_line(width - pixels - 16, height - 35, width - 16, height - 35, width=2, fill=INK)
+            self.map.create_text(width - 16, height - 48, text=f"{km:g} km · z{self.map_zoom}", anchor="e", fill=INK, font=("Segoe UI", 8))
 
     def _utc(self, position_s: float) -> str:
         start = datetime.fromisoformat(self.scenario["t0_utc"].replace("Z", "+00:00"))
