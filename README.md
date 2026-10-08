@@ -60,7 +60,7 @@ daily — is [docs/plan-ru.md](docs/plan-ru.md).
 | **Story + integration** | **Mykhailo** (captain) | The pitch and the people | Organisers, demo script, **the AIS recorder on his own machine**; every evening checks the demo still runs |
 | **Data** | **Adam Pohořilský** + **Marwan** | Collects everything: cables, seabed depth, traffic | Cable routes and depth; vessel-density grids; the scenario file |
 | **Brain** | **Nazar Kyrychenko** + **Myroslav** | Notices suspicious behaviour and runs the countdown | Anchor-drag rule; countdown; response ETAs; the two numbers |
-| **Space** | **Nazariy Buryak** | Satellite radar: finds ships with the transponder off and checks their size | One Sentinel-1 scene; dark-ship detection; identity check |
+| **Space** | **Nazariy Buryak** | Satellite radar: reviews AIS-unmatched contacts and checks vessel size with uncertainty | Offline tools and two real contacts available; [dataset plan and evidence handoffs](space/README.md#update-for-teammates--8-october-2026) documented; implementation pending |
 | **Interface** | **Ihor Maslovskyi** + **Bohdan** | What the judges see | Map, moving vessels, alert card with the live countdown, action panel, evidence page |
 
 **Why pairs.** One person who gets stuck goes quiet for two days; two people talk, and talking
@@ -97,6 +97,13 @@ Details and links: [plan §4.5](docs/04-work-plan.md).
       [Space instructions](space/README.md). *Owner:* **Nazariy**
 - [x] Offline radar/AIS matching, custody candidates and the vessel-length review check:
       [`argus/space.py`](argus/space.py), with tests. *Owner:* **Nazariy**
+- [x] Review the mentor-suggested SAR, imagery and maritime datasets; document source priorities,
+      access limits and handoffs to Data, Brain and Interface. [Space dataset plan](docs/10-space-dataset-plan.md).
+      *Owner:* **Nazariy**
+- [ ] Extend Space with a coverage manifest, newer GFW export adapter, overlapping AIS input
+      and offline evidence pages. **Planned; not yet implemented.** Keep the two historical
+      contacts as the offline fallback. [Current status](space/README.md#workstream-status).
+      *Owner:* **Nazariy**, with Data, Brain and Interface handoffs
 - [ ] Download cable and pipeline routes (EMODnet, TeleGeography), seabed depth (GEBCO or
       EMODnet), and the EMODnet vessel-density grids. *Owners:* **Ihor, Bohdan**
 - [ ] `argus/brain.py`: read `scenario.json` → write `alerts.json`. Slow-down rule plus
@@ -162,5 +169,6 @@ the answer is "after the hackathon". ([plan §4.6](docs/04-work-plan.md))
 | [docs/07-architecture.md](docs/07-architecture.md) | The current code layout, language choices, contract units and workstream ownership |
 | [docs/08-research-and-next-ideas.md](docs/08-research-and-next-ideas.md) | Checked primary sources, caveats and suggested next improvements |
 | [docs/09-team-skills.md](docs/09-team-skills.md) | How teammates download the repository skills |
+| [docs/10-space-dataset-plan.md](docs/10-space-dataset-plan.md) | Space dataset comparison, implementation sequence and handoffs to Data, Brain and Interface |
 | [skills/](skills/) | Portable codebase and interface skills for teammates |
 | [scripts/check_contracts.py](scripts/check_contracts.py) | Checks the two demo JSON files before integration |

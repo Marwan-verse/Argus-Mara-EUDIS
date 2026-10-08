@@ -4,6 +4,37 @@ The first implementation uses existing Global Fishing Watch (GFW) radar detectio
 It needs no backend, image-processing packages or account for the offline example.
 Run commands from the repository root with Python 3.9 or later.
 
+## Update for teammates — 8 October 2026
+
+The mentor-suggested dataset sources have been reviewed. The recommendation is to use
+**GFW per-contact radar detections**, **Copernicus scene evidence**, then a small
+**EMODnet context extract**. The complete source comparison, implementation order and
+acceptance checks are in [the Space dataset plan](../docs/10-space-dataset-plan.md).
+
+**Available now:** the offline association and length-review tools, two attributed historical
+contacts, the Sentinel-1 catalogue importer, and the separate 4Wings grid-report CLI.
+**Planned:** a coverage manifest, an adapter for the newer GFW export, AIS input handoff and
+offline evidence pages. These additions are not implemented by this documentation update.
+
+The two real contacts are from **2018 and 2021**; our Irish AIS recording began in **October
+2026**. Keep them in separate historical examples. A real combined replay needs overlapping
+AIS positions and radar acquisition times. GFW advertises roughly five-day SAR publication
+delay; current regional availability and account access still need verification.
+
+### Handoff to other workstreams
+
+| Workstream | What Space supplies or needs |
+|---|---|
+| Data | Needs AIS fixes with UTC times, coordinates, speed/course and sourced vessel dimensions. Infrastructure and depth remain Data's inputs; a small EMODnet context extract is planned. |
+| Brain | Can consume the existing sidecar's association, custody candidates and length checks. Space supplies review evidence; Brain owns alert scores, cable countdowns and response ETAs. |
+| Interface | Can display the existing contact fields and provenance. An offline evidence page is planned; until it exists, keep the unavailable-evidence state visible. |
+| Story/integration | Can use the two real contacts as historical examples, separate from the fictional tanker. Retain matching caveats and visible operator approval. |
+
+Shared adapters and evidence handoffs can be developed together when they directly support
+these tasks. Preserve the [two-file contract and change protocol](../docs/07-architecture.md).
+Portable [codebase and interface skills](../docs/09-team-skills.md) are already in the repository
+for teammates to install.
+
 ## Run offline
 
 ```bash
@@ -125,7 +156,12 @@ download fields](https://globalfishingwatch.org/platform-update/2024-may-global-
 | One real unmatched radar example | Two published contacts verified and bundled |
 | Sentinel-1 scene | Catalogue verified; public preview downloaded and inspected locally |
 | GFW token and current Irish-region API pull | Request/fetch CLI ready; account step pending. Public-data path selected |
-| Full GRD download, calibration and own ship detector | Pending account/image-processing work; GFW is the selected shortcut |
+| Mentor dataset comparison and implementation plan | Documented 8 Oct; [plan and handoffs](../docs/10-space-dataset-plan.md) |
+| Coverage manifest, newer GFW export adapter and AIS handoff | Planned; account/export schema and overlapping data remain to be verified |
+| Offline evidence pages for Brain and Interface | Planned; existing sidecar remains available |
+| Small EMODnet traffic-context extract | Planned after the core evidence handoff; coordinate with Data |
+| Calibrated Sentinel-1 area crop | Optional account step; whole-scene preview already supported |
+| Own ship detector or model training | Outside v1 under D15; published GFW detections remain the selected path |
 | Ansys STK licence request | Optional, pending a SETU account; no dependency on it |
 
 No satellite-pass ETA is inferred from a historical scene. The demo's next-look ETA remains

@@ -1,5 +1,21 @@
 # Sources
 
+## Space dataset review (8 October 2026)
+
+These primary-source checks support the [Space dataset plan](10-space-dataset-plan.md).
+They describe provider documentation; new account access, export schemas and Irish-region
+availability remain to be verified before integration.
+
+- [GFW per-contact SAR detections and footprints](https://globalfishingwatch.org/platform-update/2024-may-data-download-portal-new-dataset-released-featuring-vessel-detections-from-sentinel-1-sar/) — newer download fields and advertised publication delay.
+- [GFW 4Wings reports](https://api-doc.globalfishingwatch.org/our-apis/documentation/docs/v3/4wings/report) and [API/download differences](https://globalfishingwatch.org/platform-update/2024-may-global-fishing-watch-apis-new-dataset-in-4wings-api-featuring-vessel-detections-from-sentinel-1-sar/) — grid-cell reports must remain separate from per-contact evidence.
+- [GFW data caveats](https://api-doc.globalfishingwatch.org/our-apis/documentation/docs/v3/general-api-doc/data-caveats) — matching, acquisition coverage, false detections and estimated lengths.
+- [Copernicus Sentinel-1 GRD processing](https://documentation.dataspace.copernicus.eu/APIs/SentinelHub/Data/S1GRD.html) and [area-request examples](https://documentation.dataspace.copernicus.eu/APIs/SentinelHub/Process/Examples/S1GRD.html) — calibration options and authenticated requests for selected areas.
+- [EMODnet vessel-density metadata, revised 6 December 2025](https://ows.emodnet-humanactivities.eu/geonetwork/srv/api/records/0f2f3ff1-30ef-49e1-96e7-8ca78d58a07c) — 2017–2024 coverage, 1 km cells, density units, EPSG:3035, CC BY 4.0 and the 2024 satellite-coverage caveat.
+- [Copernicus Marine Irish-region wave reanalysis](https://data.marine.copernicus.eu/product/IBI_MULTIYEAR_WAV_005_006/description) and [Toolbox introduction](https://help.marine.copernicus.eu/en/articles/7949409-copernicus-marine-toolbox-introduction) — modelled environmental context and account-based spatial/temporal subsets.
+- [NOAA vessel traffic](https://coast.noaa.gov/digitalcoast/data/vesseltraffic.html) and [Danish historical AIS](https://www.dma.dk/safety-at-sea/navigational-information/ais-data) — public AIS sources with different geographic coverage; D19 selects Denmark for evaluation.
+- [Kpler historical AIS](https://www.kpler.com/product/maritime/historical-ais) and [data services](https://www.kpler.com/product/maritime/data-services) — commercial historical access and filtering; no suitable demo export/licence has been obtained.
+- [EOS LandViewer catalogue](https://eos.com/find-satellite/), [Esri Wayback explanation](https://www.esri.com/arcgis-blog/products/arcgis-living-atlas/mapping/use-world-imagery-wayback) and [Soar Atlas download guide](https://about.soaratlas.com/blogs/how-to-get-free-satellite-imagery) — comparison/reference tools; distinguish basemap publication from acquisition and optical imagery from SAR.
+
 ## Source checks for the current build (7 October 2026)
 
 - [EUDIS 2026 challenge page](https://eudis-hackathon.eu/challenges/) — EU-wide Challenge 3 is defined by each local organiser; the Irish maritime text needs an Irish source for direct quotation.
