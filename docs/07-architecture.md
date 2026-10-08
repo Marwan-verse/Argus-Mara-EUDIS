@@ -56,3 +56,19 @@ Add optional fields without breaking readers. To rename, remove or reinterpret a
 4. Space's two public examples remain a separate story from the fictional tanker. The Interface can add one reviewed example after its observation time, source and matching uncertainty are clear in the evidence.
 
 The larger module list in `05-build-guide.md` is a post-demo option. Avoid creating empty folders for those future components.
+
+## Space evidence addition — 8 October 2026
+
+Space writes an optional sidecar and local evidence pack with `argus.evidence`; the two shared
+demo files retain their existing fields and meaning. Browser templates live in `ui/space/`,
+normalized AIS ingest in `argus/ingest/ais.py`, and generated/downloaded material in ignored
+`data/`. See [Space's additive fields and commands](../space/README.md#run-offline).
+
+The sidecar preserves provider associations separately from local ones, records association
+method and timing assumptions, and exposes missing-evidence reasons. Exported `evidence_url`
+paths resolve against the pack root. Brain may choose a generated page when writing its alert;
+Interface owns linking that page from the stage replay. The current sample alert remains a
+placeholder. Historical packs and fictional packs are separate. Real/reconstructed contacts
+cannot locally match fictional/simulated AIS; sourced dimensions expire after an assumed
+24 hours and cannot come from future observations. A page-local operator acknowledgement
+persists only until reload and never triggers a response.

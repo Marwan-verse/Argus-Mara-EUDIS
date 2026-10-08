@@ -50,6 +50,20 @@ They are not claims that an authenticated request or regional download has succe
 
 ## Implementation order
 
+### Implementation update — 8 October 2026
+
+| Item | Result |
+|---|---|
+| Source/coverage manifest | Implemented by `argus.evidence`: source/output/code hashes, source attribution, explicit selection and noncontinuous coverage. Unknown historical retrieval time stays unavailable. |
+| Verified GFW CSV | Extended with UTC date filtering, stable IDs, deduplication and conflict rejection. Optional source scores are preserved. |
+| Newer GFW export | Pending: no account token or actual newer export schema was available. No speculative adapter was added. |
+| AIS handoff | Implemented for normalized CSV and recorder CSV/Parquet, preserving labels and dimension observation times; raw messages are excluded. Actual contemporaneous Irish data remains pending. |
+| Evidence handoff | Implemented: static local pages, schematic scene footprints, optional previews, matching/length caveats, unavailable states and page-local review notes. Brain/Interface still own connecting their stage replay. |
+| EMODnet context | Deferred to the optional Data context task; no density scoring or new GIS dependency was added to the core evidence pack. |
+
+Commands and the additive field contract are in [Space's README](../space/README.md).
+The original sequence below remains the reference for remaining work.
+
 ### 1. Reproducible source and coverage pack
 
 Keep the two verified historical contacts as the guaranteed offline examples. Add a manifest

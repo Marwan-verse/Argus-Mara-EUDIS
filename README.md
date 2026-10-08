@@ -60,7 +60,7 @@ daily — is [docs/plan-ru.md](docs/plan-ru.md).
 | **Story + integration** | **Mykhailo** (captain) | The pitch and the people | Organisers, demo script, **the AIS recorder on his own machine**; every evening checks the demo still runs |
 | **Data** | **Adam Pohořilský** + **Marwan** | Collects everything: cables, seabed depth, traffic | Cable routes and depth; vessel-density grids; the scenario file |
 | **Brain** | **Nazar Kyrychenko** + **Myroslav** | Notices suspicious behaviour and runs the countdown | Anchor-drag rule; countdown; response ETAs; the two numbers |
-| **Space** | **Nazariy Buryak** | Satellite radar: reviews AIS-unmatched contacts and checks vessel size with uncertainty | Offline tools and two real contacts available; [dataset plan and evidence handoffs](space/README.md#update-for-teammates--8-october-2026) documented; implementation pending |
+| **Space** | **Nazariy Buryak** | Satellite radar: reviews AIS-unmatched contacts and checks vessel size with uncertainty | Offline evidence packs, provenance manifest, AIS handoff and two real contacts implemented; [instructions and remaining dataset access](space/README.md#update-for-teammates--8-october-2026) |
 | **Interface** | **Ihor Maslovskyi** + **Bohdan** | What the judges see | Map, moving vessels, alert card with the live countdown, action panel, evidence page |
 
 **Why pairs.** One person who gets stuck goes quiet for two days; two people talk, and talking
@@ -100,9 +100,13 @@ Details and links: [plan §4.5](docs/04-work-plan.md).
 - [x] Review the mentor-suggested SAR, imagery and maritime datasets; document source priorities,
       access limits and handoffs to Data, Brain and Interface. [Space dataset plan](docs/10-space-dataset-plan.md).
       *Owner:* **Nazariy**
-- [ ] Extend Space with a coverage manifest, newer GFW export adapter, overlapping AIS input
-      and offline evidence pages. **Planned; not yet implemented.** Keep the two historical
-      contacts as the offline fallback. [Current status](space/README.md#workstream-status).
+- [x] Extend Space with a coverage manifest, normalized AIS input and offline evidence pages.
+      Run `python3 -m argus.evidence` for the two historical contacts; a separate fictional
+      pack supports the demo handoff. [Instructions](space/README.md#generate-an-offline-evidence-pack).
+      *Owner:* **Nazariy**, with Data, Brain and Interface handoffs
+- [ ] Verify the newer GFW per-contact export schema and obtain overlapping SAR/AIS data.
+      The verified historical CSV remains the fallback; the newer adapter and a recent real
+      combined replay are pending. [Current status](space/README.md#workstream-status).
       *Owner:* **Nazariy**, with Data, Brain and Interface handoffs
 - [ ] Download cable and pipeline routes (EMODnet, TeleGeography), seabed depth (GEBCO or
       EMODnet), and the EMODnet vessel-density grids. *Owners:* **Ihor, Bohdan**

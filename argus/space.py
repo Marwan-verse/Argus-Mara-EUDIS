@@ -169,7 +169,7 @@ def custody_candidates(detection, vessels, when, t0, max_speed_kn=30, horizon_s=
         radius = max_speed_kn * 1.852 * age / 3600
         distance = distance_km(last, detection)
         if age <= horizon_s and distance <= radius:
-            check = length_check(detection.get("length_m"), vessel.get("ais_length_m"))
+            check = length_check(detection.get("length_m"), dimensions_at(vessel, when, t0))
             predicted = project(last, age)
             candidates.append({"mmsi": vessel["mmsi"], "status": "candidate_only",
                                "last_fix_age_s": round(age), "distance_from_last_fix_km": round(distance, 3),
@@ -179,11 +179,48 @@ def custody_candidates(detection, vessels, when, t0, max_speed_kn=30, horizon_s=
     return candidates
 
 
+def dimensions_at(vessel, when, t0):
+    """Imported dimensions expire after 24h and must not come from the future.
+
+    Legacy scenario dimensions are constants, but still need a contemporaneous
+    track before they can be compared with a source-reported historical contact.
+    """
+    if "dimension_history" in vessel:
+        history = [item for item in vessel["dimension_history"]
+                   if 0 <= when - time_of(item, t0) <= 86400
+                   and item.get("label", vessel.get("label")) == vessel.get("label")]
+        return max(history, key=lambda item: time_of(item, t0))["ais_length_m"] if history else None
+    past = [point for point in vessel.get("track", []) if 0 <= when - time_of(point, t0) <= 1800]
+    return vessel.get("ais_length_m") if past else None
+
+
+def compatible_labels(detection, vessel, default):
+    observed = {"real", "reconstructed"}
+    return ((detection.get("label", default) in observed)
+            == (vessel.get("label", default) in observed))
+
+
+def position_method(track, when, t0):
+    points = sorted(track, key=lambda point: time_of(point, t0))
+    times = [time_of(point, t0) for point in points]
+    i = bisect.bisect_left(times, when)
+    if i < len(times) and times[i] == when:
+        method, used = {"position_method": "observed_fix", "age_s": 0}, [points[i]]
+    elif 0 < i < len(times) and times[i] - times[i - 1] <= 600:
+        method, used = {"position_method": "short_bracket_interpolation", "bracket_s": times[i] - times[i - 1]}, points[i - 1:i + 1]
+    else:
+        method, used = {"position_method": "past_fix_projection", "age_s": when - times[i - 1]}, [points[i - 1]]
+    method["timestamp_sources"] = sorted({p.get("timestamp_source", "observation_time") for p in used})
+    method["observation_time_assumed"] = "received_time_assumption" in method["timestamp_sources"]
+    return method
+
+
 def analyse(scenario, match_radius_km=1.0):
     match_radius_km = finite(match_radius_km, "match_radius_km")
     if match_radius_km <= 0:
         raise ValueError("match_radius_km must be positive")
     t0, vessels = scenario.get("t0_utc"), scenario.get("vessels", [])
+    default_label = scenario.get("label", "assumption")
     if len({str(v["mmsi"]) for v in vessels}) != len(vessels):
         raise ValueError("duplicate vessel MMSI")
     groups, results = {}, []
@@ -193,10 +230,14 @@ def analyse(scenario, match_radius_km=1.0):
         result = dict(detection)
         source_mmsi = detection.get("matched_mmsi") or None
         result.update({"id": detection.get("id", f"SAR-{index + 1}"),
+                       "label": detection.get("label", default_label),
+                       "provider_matched_mmsi": source_mmsi,
                        "matched_mmsi": source_mmsi,
                        "association": "source_reported" if source_mmsi else "unmatched",
                        "length_check": {"status": "unavailable", "mismatch": None},
-                       "custody_candidates": []})
+                       "custody_candidates": [], "unavailable_reasons": [],
+                       "association_label": "reconstructed" if detection.get("label", default_label) in {"real", "reconstructed"}
+                                            else "assumption" if detection.get("label", default_label) == "assumption" else "simulated"})
         results.append(result)
         groups.setdefault((when, detection.get("scene_id")), []).append(index)
     by_mmsi = {str(v["mmsi"]): v for v in vessels}
@@ -212,8 +253,9 @@ def analyse(scenario, match_radius_km=1.0):
         costs = []
         for i in pending:
             distances = [distance_km(results[i], pos) for _, pos in available]
-            costs.append([d / match_radius_km if d <= match_radius_km else penalty * 3
-                          for d in distances] + [penalty] * len(pending))
+            costs.append([d / match_radius_km if d <= match_radius_km
+                          and compatible_labels(results[i], v, default_label) else penalty * 3
+                          for d, (v, _pos) in zip(distances, available)] + [penalty] * len(pending))
         for row, (i, col) in enumerate(zip(pending, assignment(costs))):
             if col < len(available) and costs[row][col] <= 1:
                 vessel, pos = available[col]
@@ -222,16 +264,34 @@ def analyse(scenario, match_radius_km=1.0):
         for i in indices:
             result = results[i]
             vessel = by_mmsi.get(str(result["matched_mmsi"]))
-            if vessel:
-                result["length_check"] = length_check(result.get("length_m"), vessel.get("ais_length_m"))
+            if vessel and compatible_labels(result, vessel, default_label):
+                result["length_check"] = length_check(result.get("length_m"), dimensions_at(vessel, when, t0))
+            result["association_evidence"] = {"method": result["association"],
+                "ais_vessels_supplied": len(vessels), "eligible_unreserved_positions": len(available)}
+            if result["association"] == "local_ais_match":
+                result["association_evidence"].update(position_method(vessel.get("track", []), when, t0))
             result["dark_candidate"] = result["matched_mmsi"] is None
             if result["dark_candidate"]:
-                result["custody_candidates"] = custody_candidates(result, vessels, when, t0)
+                candidates = [v for v in vessels if compatible_labels(result, v, default_label)]
+                result["custody_candidates"] = custody_candidates(result, candidates, when, t0)
+                result["unavailable_reasons"].append(
+                    "No AIS input supplied." if not vessels else
+                    "No eligible contemporaneous AIS position." if not available else
+                    "No compatible AIS association within the distance gate and one-to-one assignment.")
+            if result["length_check"]["mismatch"] is None:
+                result["unavailable_reasons"].append(
+                    "Length comparison is below the supported 80 m size." if result["length_check"]["status"] == "below_supported_size"
+                    else "No comparable radar length and contemporaneous declared AIS dimensions.")
     return {"generated_by": "argus.space", "label": scenario.get("label", "unlabelled"),
             "scenario": scenario.get("name"),
             "assumptions": {"match_radius_km": match_radius_km, "max_interpolation_gap_s": 600,
                             "max_extrapolation_age_s": 300, "custody_max_speed_kn": 30,
-                            "custody_horizon_s": 1800, "radar_length_uncertainty_m": 30},
+                            "custody_horizon_s": 1800, "radar_length_uncertainty_m": 30,
+                            "max_dimension_age_s": 86400},
+            "coverage": {"radar_observations": len(results), "ais_vessels": len(vessels),
+                         "ais_fixes": sum(len(v.get("track", [])) for v in vessels),
+                         "complete_regional_census": False},
+            "provenance": scenario.get("provenance"), "selection": scenario.get("selection"),
             "caveat": "An unmatched radar contact is a review candidate, not proof of AIS shutdown or hostile intent.",
             "detections": results}
 
