@@ -3,7 +3,7 @@ import { clock, fixAt, trailSections, remaining, responseWindow, escapeHtml as e
 const $ = id => document.getElementById(id);
 const NS = 'http://www.w3.org/2000/svg';
 const state = { time: 4500, playing: false, rate: 60, zoom: 1, approved: null, lastFrame: null };
-let scenario, alert, vessel, coastline, duration, beats, events;
+let scenario, alert, vessel, cable, detection, coastline, duration, beats, events, evidenceAvailable = false;
 const referenceLat = 53.3;
 const longitudeScale = Math.cos(referenceLat * Math.PI / 180);
 const mapUnitsPerDegree = 320;
@@ -70,8 +70,9 @@ function staticMap() {
   for (const cable of scenario.cables) {
     $('reach-layer').append(node('path', { d: path(cable.anchor_reachable), class: 'reach-line' }));
     $('cables-layer').append(node('path', { d: path(cable.path), class: 'cable-line' }));
-    mapText($('cables-layer'), {lat: cable.path[2][0], lon: cable.path[2][1]}, 'Telecom link · illustrative', 'teal', 30, -46);
-    mapText($('reach-layer'), {lat: cable.path[2][0], lon: cable.path[2][1]}, 'Anchor reach · assumption', 'muted', 30, 27);
+    const middle = cable.path[Math.floor(cable.path.length / 2)];
+    mapText($('cables-layer'), {lat: middle[0], lon: middle[1]}, `${cable.kind || 'Cable'} · illustrative`, 'teal', 30, -46);
+    mapText($('reach-layer'), {lat: middle[0], lon: middle[1]}, 'Anchor reach · assumption', 'muted', 30, 27);
   }
   for (const asset of scenario.assets) {
     if (asset.lat === undefined) continue;
@@ -139,7 +140,7 @@ function render() {
   $('course-value').textContent = fix ? `${fix.cog_deg.toFixed(1)}°` : '—';
   labelState(left ? 'ALERT' : !fix ? 'AIS GAP' : state.time >= beats[3].t ? 'APPROACHING' : 'WATCH', left || !fix ? 'amber' : 'teal');
   $('assessment-title').textContent = left ? 'Cable approach' : !fix ? 'AIS contact lost' : 'Vessel under watch';
-  $('assessment-copy').textContent = left ? 'Possible anchor-drag pattern. Intent unconfirmed.' : !fix ? 'Reception gap. Identity and intent require review.' : 'Replay observations. No active Anchor Watch alert.';
+  $('assessment-copy').textContent = left ? 'Rule cues met. Cause and intent remain unconfirmed.' : !fix ? 'Reception gap. Identity and intent require review.' : 'Replay observations. No active Anchor Watch alert.';
   $('countdown').textContent = left ? clock(left.expected) : '— — : — —';
   $('countdown').classList.toggle('inactive', !left);
   $('earliest').textContent = left ? clock(left.earliest) : 'Not yet estimated';
@@ -157,39 +158,27 @@ function render() {
   $('approval-status').innerHTML = state.approved ? `<span class="approval-symbol">✓</span> Approved at ${utc(state.approved.time)} UTC` : '<span class="approval-symbol">□</span> Operator approval required';
   $('export-evidence').disabled = !left;
   const log = events.filter(event => event.t <= state.time);
-  if (state.approved) log.push({t: state.approved.time, text:'Officer approved simulated aircraft response.', warning:false});
+  if (state.approved) log.push({t: state.approved.time, text:`Officer approved simulated ${state.approved.asset} response.`, warning:false});
   $('event-log').innerHTML = log.sort((a,b) => b.t - a.t).slice(0, 4).map(event => `<div class="event-row ${event.warning ? 'warning' : ''}"><time>${utc(event.t)}</time><span class="event-dot"></span><span class="event-text">${escape(event.text)}</span></div>`).join('');
   for (const button of $('beat-buttons').children) button.classList.toggle('active', Number(button.dataset.t) === currentBeat.t);
   renderMap(fix);
 }
 
-function evidenceReasons() {
-  // Keep the original stub statements in the evidence pack, with explicit qualification.
-  return alert.reasons.map(reason => {
-    if (/identity mismatch/i.test(reason)) return 'Radar 228 m / declared 180 m: tentative length discrepancy.';
-    if (/with no reason/i.test(reason)) {
-      const observed = vessel.track.filter(fix => fix.t <= state.time);
-      const initialSpeed = observed[0]?.sog_kn;
-      const lowestSpeed = Math.min(...observed.map(fix => fix.sog_kn));
-      return `Observed speed ${initialSpeed.toFixed(1)} → ${lowestSpeed.toFixed(1)} kn; cause unverified.`;
-    }
-    if (/anchor-reach/i.test(reason)) return 'Approaching an illustrative anchor-reachable cable section.';
-    if (/AIS gap/i.test(reason)) return '20-minute AIS silence in the fictional scenario.';
-    return reason;
-  });
-}
+function evidenceReasons() { return alert.reasons; }
 
-function evidenceHtml() {
+function evidenceHtml(includePackLink = true) {
   const left = remaining(alert, state.time);
-  const detection = scenario.detections.find(contact => contact.t <= state.time);
-  return `<h3>Provenance</h3><p>Scenario: ${escape(scenario.label)}. Vessel: ${escape(vessel.label)}. Cable geometry: ${escape(scenario.cables[0].label)} and illustrative. Response capabilities: assumptions. Coastline: real, Natural Earth display geometry.</p>
+  const observedRadar = detection && detection.t <= state.time ? detection : null;
+  const spaceLink = evidenceAvailable
+    ? (includePackLink ? `<a href="${escape(alert.evidence_url)}" target="_blank" rel="noopener">Open the fictional Space contact review</a>` : 'The separate Space contact review is included in the demo package.')
+    : 'The separate Space contact review is unavailable on this device.';
+  return `<h3>Provenance</h3><p>Scenario: ${escape(scenario.label)}. Vessel: ${escape(vessel.label)}. Cable geometry: ${escape(cable.label)} and illustrative. Response capabilities: assumptions. Coastline: real, Natural Earth display geometry.</p>
     <h3>Available observations at ${utc(state.time)} UTC</h3><p>${left ? evidenceReasons().map(escape).join('<br>') : 'The alert has not fired at this replay time.'}</p>
-    ${detection ? `<dl><div><dt>Radar acquisition</dt><dd>${utc(detection.t)} UTC · ${escape(detection.label)}</dd></div><div><dt>Radar length estimate</dt><dd>${detection.length_m} m</dd></div><div><dt>AIS-declared length</dt><dd>${vessel.ais_length_m} m</dd></div><div><dt>AIS association</dt><dd>${detection.matched_mmsi === null ? 'Unmatched; candidate identity only' : escape(detection.matched_mmsi)}</dd></div></dl><p>A 48 m discrepancy exceeds the nominal 45 m threshold, but does not survive the assumed ±30 m radar uncertainty. This is a review cue, not a confirmed identity mismatch.</p>` : '<p>No radar observation is available yet.</p>'}
-    <h3>Countdown assumptions</h3><p>${left ? `Expected remaining ${clock(left.expected)}; earliest remaining ${clock(left.earliest)}. ` : ''}The sample estimate projects constant speed and course from the alert fix. The earliest estimate assumes 20% more speed; it is not a calibrated confidence bound. Assets are timed to the projected crossing point. This is a stub alert, not a validated detector.</p>
-    <h3>Limits of the evidence</h3><p>An AIS gap or unmatched radar observation does not establish hostile intent. The sample includes no corroborating weather, port or traffic data. Its claims about being inside the anchor-reach zone and having no other reason to slow are scenario assertions, not validated measurements. The original alert also cites 9.1 kn before that speed appears in the track; this interface reports only speeds observed up to the current replay time.</p>
-    <div class="evidence-warning">${state.approved ? `Simulated operator approval recorded at ${utc(state.approved.time)} UTC. No operational action was sent.` : 'Human review required. No operator approval has been recorded.'}</div>
-    <h3>Evidence record</h3><p>The contract target <code>${escape(alert.evidence_url)}</code> is not available as a published page. You can export the current review as a local HTML record after the alert fires.</p>
-    ${left ? `<details><summary>Original sample alert statements</summary><ul>${alert.reasons.map(reason => `<li>${escape(reason)}</li>`).join('')}</ul></details>` : ''}`;
+    ${observedRadar ? `<dl><div><dt>Radar acquisition</dt><dd>${utc(observedRadar.t)} UTC · ${escape(observedRadar.label)}</dd></div><div><dt>Radar length estimate</dt><dd>${escape(observedRadar.length_m ?? 'unavailable')} m</dd></div><div><dt>AIS-declared length</dt><dd>${escape(vessel.ais_length_m ?? 'unavailable')} m</dd></div><div><dt>AIS association</dt><dd>${observedRadar.matched_mmsi === null ? 'Unmatched; candidate identity only' : escape(observedRadar.matched_mmsi)}</dd></div></dl><p>Length and identity require separate review with measurement uncertainty. The radar contact is not a confirmed match.</p>` : '<p>No radar observation is available yet.</p>'}
+    <h3>Countdown assumptions</h3><p>${left ? `Expected remaining ${clock(left.expected)}; earliest remaining ${clock(left.earliest)}. ` : ''}${escape(alert.eta_method || 'Constant speed and course from the alert fix.')} Response arrival times are assumptions.</p>
+    <h3>Limits of the evidence</h3><p>An AIS gap or unmatched radar observation does not establish hostile intent. The sample includes no corroborating weather, port or traffic data. The illustrative anchor-reach section and response capabilities are assumptions. ${escape(alert.score_basis || '')}</p>
+    <div class="evidence-warning">${state.approved ? `Simulated operator approval for ${escape(state.approved.asset)} recorded at ${utc(state.approved.time)} UTC. No operational action was sent.` : 'Human review required. No operator approval has been recorded.'}</div>
+    <h3>Evidence record</h3><p>${spaceLink} You can export the current operator review as a separate local HTML record after the alert fires.</p>`;
 }
 
 function setTime(time) {
@@ -241,27 +230,33 @@ function bind() {
   $('approve').addEventListener('click', () => {
     state.playing = false; render();
     const left = remaining(alert, state.time);
-    const available = left && alert.options.find(option => responseWindow(option, left.earliest) === 'available');
-    if (!available) return;
+    const available = left && alert.options.filter(option => responseWindow(option, left.earliest) === 'available');
+    if (!available?.length) return;
     $('confirm-review').checked = false;
     $('confirm-approve').disabled = true;
-    $('approval-content').innerHTML = `<p><strong>${escape(available.asset)}</strong></p><p>Assumed arrival: ${Math.ceil(available.eta_s / 60)} minutes. Earliest cable crossing: ${clock(left.earliest)} remaining.</p><p class="approval-note">This records an exercise decision. Vessel identity, intent, cable geometry and response capabilities require verification before any operational use.</p>`;
+    $('approval-content').innerHTML = `<fieldset><legend>Choose a simulated response</legend>${available.map((option, index) => `<label class="response-choice"><input type="radio" name="response-option" value="${escape(option.asset)}" ${index === 0 ? 'checked' : ''}> ${escape(option.asset)} · ${Math.ceil(option.eta_s / 60)} min assumed arrival</label>`).join('')}</fieldset><p>Earliest cable crossing: ${clock(left.earliest)} remaining.</p><p class="approval-note">This records an exercise decision. Vessel identity, intent, cable geometry and response capabilities require verification before any operational use.</p>`;
     $('approval-dialog').showModal();
   });
   $('confirm-review').addEventListener('change', event => {$('confirm-approve').disabled = !event.target.checked;});
   $('confirm-approve').addEventListener('click', () => {
     const left = remaining(alert, state.time);
-    const available = left && alert.options.find(option => responseWindow(option, left.earliest) === 'available');
+    const selected = $('approval-content').querySelector('input[name="response-option"]:checked')?.value;
+    const available = left && alert.options.find(option => option.asset === selected && responseWindow(option, left.earliest) === 'available');
     if (!$('confirm-review').checked || !available) return;
-    state.approved = {time: state.time, asset: available.asset, label:'simulated'};
+    state.approved = {time: state.time, asset: available.asset, assumed_arrival_s: available.eta_s, label:'simulated'};
     $('approval-dialog').close(); render();
     $('evidence-content').innerHTML = evidenceHtml(); $('evidence-dialog').showModal();
   });
   $('export-evidence').addEventListener('click', () => {
     if (state.time < alert.t) return;
-    const html = `<!doctype html><html lang="en"><meta charset="utf-8"><title>Argus Mara — exercise evidence A1</title><style>body{max-width:800px;margin:50px auto;font:14px/1.7 system-ui;padding:20px;color:#222}h1{font-size:26px}h3{margin-top:25px}dl>div{display:flex;justify-content:space-between}dd{margin:0}.evidence-warning{background:#f2f2f2;padding:16px}code{font-size:12px}</style><h1>Argus Mara · Exercise evidence A1</h1><p>SIMULATED EXERCISE · Scenario time ${utc(state.time)} UTC · ${escape(scenario.t0_utc.slice(0,10))}</p>${evidenceHtml()}<h3>Decision record</h3><pre>${escape(JSON.stringify(state.approved || {approval:'not recorded'}, null, 2))}</pre><h3>Original alert contract</h3><pre style="white-space:pre-wrap">${escape(JSON.stringify(alert,null,2))}</pre></html>`;
+    const html = `<!doctype html><html lang="en"><meta charset="utf-8"><title>Argus Mara — exercise evidence ${escape(alert.id)}</title><style>body{max-width:800px;margin:50px auto;font:14px/1.7 system-ui;padding:20px;color:#222}h1{font-size:26px}h3{margin-top:25px}dl>div{display:flex;justify-content:space-between}dd{margin:0}.evidence-warning{background:#f2f2f2;padding:16px}code{font-size:12px}</style><h1>Argus Mara · Exercise evidence ${escape(alert.id)}</h1><p>SIMULATED EXERCISE · Scenario time ${utc(state.time)} UTC · ${escape(scenario.t0_utc.slice(0,10))}</p>${evidenceHtml(false)}<h3>Decision record</h3><pre>${escape(JSON.stringify(state.approved || {approval:'not recorded'}, null, 2))}</pre><h3>Alert contract</h3><pre style="white-space:pre-wrap">${escape(JSON.stringify(alert,null,2))}</pre></html>`;
     const url = URL.createObjectURL(new Blob([html], {type:'text/html;charset=utf-8'}));
-    const link = document.createElement('a'); link.href = url; link.download = 'argus-mara-A1-exercise-evidence.html'; link.click();
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `argus-mara-${alert.id}-exercise-evidence.html`;
+    document.body.append(link);
+    link.click();
+    link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
   document.addEventListener('keydown', event => {
@@ -293,32 +288,41 @@ async function start() {
   try {
     let alerts;
     [scenario, alerts, coastline] = await Promise.all([loadJson('../demo/scenario.json'), loadJson('../demo/alerts.json'), loadJson('assets/coastline.json')]);
-    alert = alerts.alerts[0];
+    alert = [...alerts.alerts].sort((a, b) => a.t - b.t)[0];
     if (!alert) throw new Error('This replay needs a scenario alert.');
     vessel = scenario.vessels.find(contact => contact.mmsi === alert.mmsi);
     if (!vessel?.track.length) throw new Error('The alert vessel has no replay track.');
+    cable = scenario.cables.find(item => item.id === alert.segment_id);
+    if (!cable) throw new Error('The alert cable is absent from the scenario.');
+    detection = scenario.detections.find(item => item.t === alert.observations?.radar_contact_t)
+      || scenario.detections.find(item => item.t <= alert.t) || null;
+    if (/^evidence\/[a-zA-Z0-9/_-]+\.html$/.test(alert.evidence_url || '')) {
+      try { evidenceAvailable = (await fetch(alert.evidence_url, {method:'HEAD'})).ok; }
+      catch { evidenceAvailable = false; }
+    }
     duration = Math.max(...scenario.vessels.map(contact => contact.track.at(-1)?.t || 0));
     state.time = alert.t; state.rate = scenario.replay_speed;
     const gap = vessel.track.findIndex((fix, index) => index > 0 && fix.t - vessel.track[index - 1].t > 120);
-    const gapStart = gap > 0 ? vessel.track[gap - 1].t + 60 : 1800;
-    const radarTime = scenario.detections[0]?.t ?? 2400;
-    const returnTime = gap > 0 ? vessel.track[gap].t : 3000;
+    const gapStart = alert.observations?.gap_start_t ?? (gap > 0 ? vessel.track[gap - 1].t + 60 : 0);
+    const radarTime = detection?.t ?? gapStart;
+    const returnTime = alert.observations?.gap_end_t ?? (gap > 0 ? vessel.track[gap].t : gapStart);
+    const firstSlowdown = vessel.track.find(fix => fix.t >= returnTime && fix.sog_kn < vessel.track[0].sog_kn);
     beats = [
       { index:1, t:0, title:'Normal passage', description:'Fictional tanker on an AIS-reported track.' },
       { index:2, t:gapStart, title:'AIS contact lost', description:'No position is interpolated through the AIS gap.' },
-      { index:3, t:radarTime, title:'Radar observation received', description:'Separate 228 m radar contact. Candidate identity requires review.' },
+      { index:3, t:radarTime, title:'Radar observation received', description:`Separate ${detection?.length_m ?? 'unmeasured'} m radar contact. Candidate identity requires review.` },
       { index:4, t:returnTime, title:'AIS returns · course changed', description:'Vessel now approaches the illustrative cable corridor.' },
       { index:5, t:alert.t, title:'Anchor Watch triggered', description:'Review the crossing estimate and response window.' },
       { index:6, t:alert.t + 1, title:'Response window assessed', description:'Compare assumed arrival times with the earliest cable crossing.' },
       { index:7, t:alert.t + 2, title:'Operator decision', description:'Review evidence and approve a simulated response.' }
     ];
     events = [
-      {t:0,text:'CORMORANT STAR acquired · normal passage at 12.0 kn.'},
+      {t:0,text:`${vessel.name} acquired · normal passage at ${vessel.track[0].sog_kn.toFixed(1)} kn.`},
       {t:gapStart,text:'AIS reception gap begins; vessel marker withdrawn.',warning:true},
-      {t:radarTime,text:'SAR observation · 228 m contact, AIS association unconfirmed.',warning:true},
+      {t:radarTime,text:`SAR observation · ${detection?.length_m ?? 'unmeasured'} m contact, AIS association unconfirmed.`,warning:true},
       {t:returnTime,text:'AIS returns · course altered toward cable corridor.'},
-      {t:4200,text:'Speed reduction observed; cause requires review.',warning:true},
-      {t:alert.t,text:'A1 · Anchor Watch estimate issued. Human review required.',warning:true}
+      ...(firstSlowdown ? [{t:firstSlowdown.t,text:'Speed reduction observed; cause requires review.',warning:true}] : []),
+      {t:alert.t,text:`${alert.id} · Anchor Watch estimate issued. Human review required.`,warning:true}
     ];
     $('timeline').max = duration;
     $('timeline-end').textContent = `${utc(duration,true)} UTC`;
@@ -332,8 +336,14 @@ async function start() {
     }
     $('vessel-name').textContent = vessel.name;
     $('vessel-id').textContent = `MMSI ${vessel.mmsi} · ${vessel.type[0].toUpperCase()}${vessel.type.slice(1)}`;
+    $('contact-count').textContent = scenario.vessels.length;
+    $('alert-id').textContent = alert.id;
     $('length-value').textContent = `${vessel.ais_length_m} m`;
-    $('depth').textContent = `${scenario.cables[0].min_depth_m} m`;
+    $('cable-name').textContent = cable.name;
+    $('cable-label').textContent = cable.label;
+    $('cable-description').textContent = cable.label === 'real' ? 'Publicly sourced display route' : 'Illustrative route';
+    $('depth').textContent = `${cable.min_depth_m} m`;
+    $('method-note').textContent = alert.eta_method || 'Constant speed and course from the alert fix.';
     staticMap(); bind(); render(); view(); requestAnimationFrame(animate);
   } catch(error) {
     $('load-error').hidden = false;

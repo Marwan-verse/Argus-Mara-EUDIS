@@ -6,19 +6,42 @@
 
 The project has two runtime halves. Python prepares a scenario and computes alerts. A browser presents both files and records a human's simulated decision. The interface should be served as static files from the repository root for local development; a local static server is not an application backend. Once assets are downloaded, the demo must run with external Wi-Fi disabled.
 
+**Native companion (D30, 8 October):** `run_gui.py` also reads the two committed JSON
+files and opens a Tkinter application window. It keeps the AIS gap, separate radar
+contact, countdown, response comparison, uncertainty and human approval. It starts no
+web server and adds no dependency to the file contract. `RUN-GUI-WINDOWS.bat` is a
+double-click launcher; the browser interface remains available for the original stage
+workflow. The native shell uses CustomTkinter (D33) for light cards and controls; its
+package is installed in an ignored virtual environment from the root `requirements.txt`.
+The browser interface and the JSON contract do not depend on that package.
+
+*Map navigation (D31, D34, 8 October):* drag to pan; use the wheel or map controls to zoom.
+The local Natural Earth coastline covers the world and is the offline default. The
+optional NASA Blue Marble imagery requests only visible tiles and caches them with
+HTTP expiry/validators; missing imagery falls back to the local global map. Online
+tiles disclose the visible area to NASA Earthdata and are display context only.
+Offline layers show NGA World Port Index point locations and a historical,
+stylized TeleGeography cable map snapshot under CC BY-NC-SA 3.0. The latter is
+not surveyed geometry and cannot feed alerts or countdowns. The right-side plus opens
+contacts, timeline, response, layer, note and evidence tabs inside the right pane. The
+bottom plus opens the same panels in a lower workspace, alongside map tools. Both
+splitters can be resized; drag tabs to reorder them or move them between panes, and
+right-click a tab to move or close it. The Situation tab stays in the right pane.
+Notes are session-local.
+
 ```text
 recorder/       live AIS capture; independent from the stage demo
 data/           ignored local recordings and downloaded datasets
 demo/           committed scenario.json and alerts.json; the v1 contract
-argus/          Python contract checks and Space analysis; Brain-owned ETA code next
+argus/          Python contract checks, Space analysis, Brain rules and countdown
 space/          Space sidecar examples, provenance and handoff
-ui/             Interface-owned static HTML, CSS, JS and local map assets next
+ui/             Interface-owned static HTML, CSS, JS, map and fictional evidence
 scripts/        cross-workstream checks and local development helpers
 skills/         downloadable teammate instructions
 docs/           research, decisions, plan and build guidance
 ```
 
-**Languages:** Python 3 for ingest, geometry, rules, ETAs and contract generation. Browser JavaScript, HTML and CSS for replay. JSON is the boundary. Keep v1 dependency-free where practical. The recorder's `websockets` and `pyarrow` dependencies stay in `recorder/requirements.txt`; they do not become interface requirements.
+**Languages:** Python 3 for ingest, geometry, rules, ETAs and contract generation. Browser JavaScript, HTML and CSS for replay. JSON is the boundary. The native desktop companion has one direct UI dependency in the root `requirements.txt`; the file contracts and browser demo remain independent. The recorder's `websockets` and `pyarrow` dependencies stay in `recorder/requirements.txt`; they do not become interface requirements.
 
 ## Ownership and flow
 
@@ -40,7 +63,7 @@ The recorder and Space sidecar can continue independently. Do not make the demo 
 - AIS gaps remain gaps in a track. The interface should hide the AIS marker during a gap and draw a radar detection separately, rather than interpolate a visible AIS position through it.
 - The accepted provenance values are `real`, `reconstructed`, `simulated`, `fictional` and `assumption`. The scenario's top-level label and each object label are already present. An alert is derived from the labelled scenario; show the underlying labels with its evidence.
 - `in_time` means an option's ETA is no later than `eta_earliest_s`. `eta_s: null` means unavailable or out of range.
-- `evidence_url` is a future interface target. The stub alert points to `evidence/A1.html`, which does not exist yet. The UI should show an unavailable state until an evidence page is implemented.
+- `evidence_url` is relative to `/ui/` in the stage replay. The fictional alert links to a committed, generated page under `ui/evidence/`; the UI checks its availability. Historical and downloaded evidence stays in ignored `data/`.
 
 Run `python scripts/check_contracts.py` after editing either JSON file. The checker tests structure and cross-file references; it cannot establish that an estimate is scientifically accurate.
 
@@ -53,13 +76,12 @@ Add optional fields without breaking readers. To rename, remove or reinterpret a
 *Interface update, 8 October 2026 (D27):* `ui/index.html`, `styles.css`, `app.mjs`
 and `replay.mjs` now implement the seven-beat offline console. Run
 `python scripts/serve_demo.py` and open `/ui/`. Natural Earth display geometry is
-bundled locally. Evidence review and HTML export work; the old stub evidence URL
-is still unavailable. Operator decisions are simulated, session-local, and clear
-when the replay is sought or restarted. The Brain detector and updated countdown
-calculations remain pending.
+bundled locally. Evidence review and HTML export work. Operator decisions are
+simulated, session-local, and clear when the replay is sought or restarted. D29
+adds a rule-generated Brain alert and a bundled fictional Space review page.
 
 1. Interface owns a local coastline asset and a static replay that handles the AIS gap, radar contact, alert and approval.
-2. Brain moves the projection helper from `demo/make_scenario.py` into a reusable `argus/countdown.py`, while writing the same `alerts.json` shape.
+2. Brain's projection helper now lives in `argus/countdown.py`; `argus/brain.py` writes the same `alerts.json` shape. Its four-cue score is rule completeness, not a threat probability.
 3. Data replaces the illustrative cable and depth only after source, licence and provenance are recorded.
 4. Space's two public examples remain a separate story from the fictional tanker. The Interface can add one reviewed example after its observation time, source and matching uncertainty are clear in the evidence.
 
@@ -69,14 +91,15 @@ The larger module list in `05-build-guide.md` is a post-demo option. Avoid creat
 
 Space writes an optional sidecar and local evidence pack with `argus.evidence`; the two shared
 demo files retain their existing fields and meaning. Browser templates live in `ui/space/`,
-normalized AIS ingest in `argus/ingest/ais.py`, and generated/downloaded material in ignored
-`data/`. See [Space's additive fields and commands](../space/README.md#run-offline).
+normalized AIS ingest in `argus/ingest/ais.py`, and real/downloaded material in ignored
+`data/`. The fictional stage pack is generated into `ui/evidence/` for offline distribution.
+See [Space's additive fields and commands](../space/README.md#run-offline).
 
 The sidecar preserves provider associations separately from local ones, records association
 method and timing assumptions, and exposes missing-evidence reasons. Exported `evidence_url`
-paths resolve against the pack root. Brain may choose a generated page when writing its alert;
-Interface owns linking that page from the stage replay. The current sample alert remains a
-placeholder. Historical packs and fictional packs are separate. Real/reconstructed contacts
+paths resolve against the pack root. Brain chooses the generated fictional page for its alert;
+Interface links that page from the stage replay after a local availability check.
+Historical packs and fictional packs are separate. Real/reconstructed contacts
 cannot locally match fictional/simulated AIS; sourced dimensions expire after an assumed
 24 hours and cannot come from future observations. A page-local operator acknowledgement
 persists only until reload and never triggers a response.
