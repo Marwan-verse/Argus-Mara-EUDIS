@@ -19,32 +19,42 @@ The code is on `feat/shared-live-ais`; merge approval stays with Marwan. Railway
 can deploy this branch before it is merged. Do not select or push `main` for this
 setup. No paid plan is needed to try it.
 
-1. Open [Railway projects](https://railway.com/dashboard), choose **New project**
-   and deploy **GitHub repo**, selecting `Marwan-verse/Defence-Hackaton`. If the
-   repository is missing, its owner must allow the Railway GitHub app to access
-   it. Select branch **feat/shared-live-ais** in the service's Source settings.
-   Install only for the necessary repository. Use a single service, e.g.
-   `shared-live-ais`; do not add Postgres, Redis or a second collector.
-2. The root `railway.json` selects **live/Dockerfile**. Keep the repository root
-   directory `/`, one replica and health check `/healthz`. Disable **Serverless /
+1. Open [Railway projects](https://railway.com/dashboard), choose **New project →
+   Empty project**, then add one empty service, e.g. `shared-live-ais`. Configure
+   the service and archive before attaching a code source. Do not add Postgres,
+   Redis or a second collector.
+2. In the service's build settings select Dockerfile path **live/Dockerfile**.
+   Keep the repository root directory `/`, one replica and health check
+   `/healthz` with a 120-second timeout. Disable **Serverless /
    App sleeping**; collection must continue with no visitors. Disable automatic
    PR environments so each pull request does not start another collector.
+   Select **EU West / Amsterdam** (currently `europe-west4-drams3a`). Limit the
+   service to **0.5 GB memory** and **1 vCPU**. New services reject
+   `railway.json`/`railway.toml` Config as Code references; use service settings
+   or the platform's supported Infrastructure as Code separately.
 3. Add a **Volume** to this service and set its mount path to **/data**. The Trial
    volume limit is 0.5 GB. The image uses `/data/ais`, and refuses to collect if
    `/data` is not an actual mount. A redeploy without a volume cannot preserve
    history. No existing Mac archive is uploaded or deleted by deployment.
-4. In the service's private **Variables**, add **AISSTREAM_API_KEY** and paste
-   your AISstream key there. Do not put the key in Git, chat, a build argument,
-   public link or frontend code. Leave `ARGUS_AIS_LABEL=real` (the default).
-   `ARGUS_REQUIRE_VOLUME=1` is set by the image; keep it enabled. Leave `PORT`
-   to Railway. Deploy the changes.
+4. Connect `Marwan-verse/Defence-Hackaton` in Source settings, explicitly using
+   **feat/shared-live-ais**. If the repository is missing, its owner must allow
+   the Railway GitHub app to access that repository. Alternatively, the official
+   Railway CLI supports uploading local source to the explicitly selected
+   project/service/environment; no GitHub installation is required for that
+   route. Do not include raw recordings or keys in an upload. Start the first
+   deployment without `AISSTREAM_API_KEY`.
 5. Under **Settings → Networking**, generate a public domain, target the
    service's `PORT` (typically 8080). Open that HTTPS link. `/healthz` must show
    `process_ready: true`, `persistent_volume_verified: true`,
-   `feed.archive_status: ready`, then `feed.status: live`, an increasing
-   `archived_rows_this_run` and recent `last_received_utc`. `/healthz` alone
-   being HTTP 200 proves process health; it does not prove AIS reception.
-6. Keep the Mac recording until this works. Restart the Railway service once:
+   `feed.archive_status: ready` and `feed.status: no_key`. HTTP 200 proves process
+   health; it does not prove AIS reception.
+6. In the service's private **Variables**, add **AISSTREAM_API_KEY** and paste
+   your AISstream key there. Do not put the key in Git, chat, a build argument,
+   public link or frontend code. Leave `ARGUS_AIS_LABEL=real` (the default).
+   `ARGUS_REQUIRE_VOLUME=1` is set by the image; keep it enabled. Leave `PORT`
+   to Railway. Deploy the changes. Check for `feed.status: live`, increasing
+   `archived_rows_this_run` and recent `last_received_utc`.
+7. Keep the Mac recording until this works. Restart the Railway service once:
    previously received contacts should return with their original UTC stamps,
    collection should reconnect and archived bytes should be retained. A new
    `stream_id` on restart is expected. Then the Mac recorder can be stopped by
