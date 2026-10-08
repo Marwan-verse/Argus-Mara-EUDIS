@@ -389,13 +389,19 @@ class ArgusApp:
         self.map.bind("<ButtonPress-1>", self._pan_start)
         self.map.bind("<B1-Motion>", self._pan_move)
         self.map.bind("<ButtonRelease-1>", self._pan_end)
+        self._last_scroll_zoom = (0.0, 0)
         self.map.bind("<MouseWheel>", self._mouse_wheel)
-        self.map.bind("<Button-4>", lambda event: self._zoom_at(1, event.x, event.y))
-        self.map.bind("<Button-5>", lambda event: self._zoom_at(-1, event.x, event.y))
+        self.map.bind("<Button-4>", lambda event: self._mouse_wheel(event, 1))
+        self.map.bind("<Button-5>", lambda event: self._mouse_wheel(event, -1))
+        try:
+            # Tk 9 uses a separate event for precise two-finger scrolling.
+            self.map.bind("<TouchpadScroll>", self._touchpad_scroll)
+        except tk.TclError:
+            pass  # Tk 8.6 delivers trackpad scrolling as MouseWheel instead.
         self.map.bind("<Motion>", self._map_motion)
         map_footer = ctk.CTkFrame(left, fg_color="transparent")
         map_footer.grid(row=3, column=0, sticky="ew", padx=17, pady=(8, 12))
-        self.map_status_label = ctk.CTkLabel(map_footer, text="Drag to pan · wheel to zoom",
+        self.map_status_label = ctk.CTkLabel(map_footer, text="Drag to pan · wheel or two-finger scroll to zoom",
                                              text_color=MUTED, font=ctk.CTkFont("Segoe UI", 10))
         self.map_status_label.pack(side="left")
         self.map_attribution_label = ctk.CTkLabel(map_footer, text="Natural Earth · public domain",
@@ -1490,9 +1496,41 @@ class ArgusApp:
                 self._draw_map(force_static=True)
                 return
 
-    def _mouse_wheel(self, event) -> str:
-        self._zoom_at(1 if event.delta > 0 else -1, event.x, event.y)
+    def _mouse_wheel(self, event, amount: int | None = None) -> str:
+        # On macOS, Shift also marks horizontal MouseWheel events.
+        if event.state & 1:
+            return "break"
+        if amount is None and event.num in (4, 5):
+            amount = 1 if event.num == 4 else -1
+        if amount is not None:
+            # Tk versions differ in the numeric button reported to callbacks.
+            self._zoom_at(amount, event.x, event.y)
+        else:
+            # macOS Tk 8.6 sends small deltas, including +/-1, for both devices.
+            self._zoom_from_scroll(event.delta, event.x, event.y,
+                                   precise=abs(event.delta) < 120)
         return "break"
+
+    def _touchpad_scroll(self, event) -> str:
+        # Tk 9 packs signed X/Y distances into the high/low 16 bits of delta.
+        vertical = event.delta & 0xffff
+        if vertical >= 0x8000:
+            vertical -= 0x10000
+        self._zoom_from_scroll(vertical, event.x, event.y, precise=True)
+        return "break"
+
+    def _zoom_from_scroll(self, delta: int, x: float, y: float, *, precise: bool) -> None:
+        if not delta:
+            return
+        direction = 1 if delta > 0 else -1
+        now = time.monotonic()
+        previous_time, previous_direction = self._last_scroll_zoom
+        # A trackpad gesture produces many events. Respond immediately, then
+        # limit repeated steps so one short gesture cannot exhaust the zoom range.
+        if precise and direction == previous_direction and now - previous_time < 0.15:
+            return
+        self._last_scroll_zoom = (now, direction)
+        self._zoom_at(direction, x, y)
 
     def _zoom_at(self, amount: int, screen_x: float, screen_y: float) -> None:
         maximum = MAX_IMAGERY_ZOOM if self.map_mode.get() == ONLINE_MAP else MAX_MAP_ZOOM
@@ -1693,7 +1731,7 @@ class ArgusApp:
         else:
             self.map.create_text(12, 12, text="GLOBAL COASTLINE · DISPLAY ONLY", anchor="nw",
                                  fill=MUTED, font=("Segoe UI Semibold", 9))
-            self.map_status_label.configure(text="Drag to pan · wheel or +/- to zoom" if not self.map_tool else self.map_status_label.cget("text"))
+            self.map_status_label.configure(text="Drag to pan · wheel, two-finger scroll or +/- to zoom" if not self.map_tool else self.map_status_label.cget("text"))
             self.map_attribution_label.configure(text="Natural Earth · NGA · TeleGeography")
 
         if self.map_layers["Historical cable routes"].get():
