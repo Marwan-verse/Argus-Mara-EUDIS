@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fixAt, trailSections, remaining, responseWindow, clock, escapeHtml } from '../ui/replay.mjs';
+
+const scenario = JSON.parse(readFileSync(new URL('../demo/scenario.json', import.meta.url)));
+const alert = JSON.parse(readFileSync(new URL('../demo/alerts.json', import.meta.url))).alerts[0];
+const track = scenario.vessels[0].track;
+assert.equal(fixAt(track, 2400), null, 'AIS must remain absent during the radar observation');
+assert.equal(fixAt(track, 1800), null, 'AIS gap starts after the last reported fix');
+assert.equal(fixAt(track, 3000).t, 3000, 'AIS returns at its actual fix');
+assert.equal(fixAt(track, -1), null);
+assert.equal(fixAt(track, track.at(-1).t + 1), null);
+const segments = trailSections(track, 4500);
+assert.equal(segments.length, 2, 'Trail must not bridge the gap');
+assert.equal(segments[0].at(-1)[0], track.find(p => p.t === 1740).lat);
+assert.equal(remaining(alert, alert.t - 1), null, 'No countdown before alert');
+assert.deepEqual(remaining(alert, alert.t), {expected:alert.eta_expected_s, earliest:alert.eta_earliest_s});
+assert.equal(remaining(alert, alert.t + alert.eta_expected_s + 1).expected, 0);
+assert.equal(responseWindow(alert.options[0], alert.eta_earliest_s), 'available');
+assert.equal(responseWindow(alert.options[0], alert.options[0].eta_s - 1), 'late', 'Response feasibility changes as window expires');
+assert.equal(responseWindow(alert.options[2], 99999), 'unavailable');
+assert.equal(responseWindow({eta_s:600},600), 'available', 'Boundary follows contract <= rule');
+assert.equal(clock(4537), '01:15:37');
+assert.equal(escapeHtml('<script>'), '&lt;script&gt;');
+console.log('Replay checks passed: AIS gap, trail separation, countdown, response window, safe text.');
