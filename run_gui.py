@@ -6,6 +6,8 @@ Usage: python run_gui.py
 CustomTkinter provides the native dashboard shell. This companion interface reads the same two
 JSON contracts as the browser demo and never starts a server. Global Natural Earth
 geometry is the default; optional NASA imagery loads only the visible map tiles.
+Optional live Met Éireann weather (a point summary plus rain/cloud shading and wind arrows
+sampled on a grid) is off by default and is display context only.
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ from __future__ import annotations
 import argparse
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from html import escape
 import json
@@ -29,6 +31,7 @@ from PIL import Image, ImageTk
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from argus import weather
 from argus.contracts import validate_alerts, validate_scenario
 from argus.countdown import step
 from argus.map_view import coordinates, find_ports, geographic_extent, route_name, search_text
@@ -52,6 +55,7 @@ MAX_IMAGERY_ZOOM = 8
 ONLINE_MAP = "NASA Blue Marble · online"
 TILE_URL = "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/BlueMarble_NextGeneration/default/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpeg"
 TILE_USER_AGENT = "ArgusMaraDesktop/0.3 (local offline-first demo)"
+WEATHER_HOURS = ("Now", "+1 h", "+2 h", "+3 h", "+6 h", "+9 h", "+12 h")
 
 
 def tile_cache_root() -> Path:
@@ -200,7 +204,7 @@ class ArgusApp:
         self.map_center = (53.15, -5.55)
         self.map_zoom = 8
         self.map_mode = tk.StringVar(value="Offline coastline")
-        self.map_layers = {name: tk.BooleanVar(value=True) for name in ("AIS track", "Radar contacts", "Cable", "Anchor reach", "Response assets", "World ports", "Historical cable routes")}
+        self.map_layers = {name: tk.BooleanVar(value=True) for name in ("AIS track", "Radar contacts", "Cable", "Anchor reach", "Response assets", "World ports", "Historical cable routes", "Rain and cloud", "Wind")}
         self.map_tool: str | None = None
         self.map_note_points: list[tuple[float, float]] = []
         self.measure_points: list[tuple[float, float]] = []
@@ -215,6 +219,24 @@ class ArgusApp:
         self._tile_cache = tile_cache_root()
         self._tile_status = ""
         self._last_tile_key: tuple[int, float, float, int, int] | None = None
+        # Live weather is opt-in so the exercise still runs with the network off.
+        self.live_weather = tk.BooleanVar(value=False)
+        self.weather_point = tuple(self.cable["path"][len(self.cable["path"]) // 2])
+        self._weather: dict | None = None
+        self._weather_status = "Live weather off · no network requests"
+        self._weather_generation = 0
+        self._weather_queue: queue.Queue = queue.Queue()
+        self._weather_executor = ThreadPoolExecutor(max_workers=6, thread_name_prefix="argus-weather")
+        self._weather_refresh_after = None
+        self.weather_hour = tk.StringVar(value="Now")
+        self._weather_grid: tuple[float, list[float], list[float]] | None = None
+        self._weather_grid_cache: dict[tuple[float, float], tuple[float, dict | None]] = {}
+        self._weather_grid_pending: set[tuple[float, float]] = set()
+        self._weather_grid_after = None
+        self._weather_field_version = 0
+        self._weather_field: dict | None = None
+        self._weather_overlay: dict | None = None
+        self._weather_view_key: tuple | None = None
         self._panel_widgets: dict[str, ttk.Frame] = {}
         self._panel_locations: dict[str, str] = {}
         self._panel_titles = {
@@ -223,7 +245,7 @@ class ArgusApp:
             "world_data": "Global map data",
             "ports": "Port directory", "cables": "Cable directory",
             "notes": "Map notes", "evidence": "Evidence review",
-            "decision": "Decision review",
+            "decision": "Decision review", "weather": "Live weather",
         }
         self._decision_choice = tk.StringVar(value="")
         self._decision_acknowledged = tk.BooleanVar(value=False)
@@ -236,6 +258,7 @@ class ArgusApp:
         self.render()
         self.root.after(80, self._tick)
         self.root.after(150, self._poll_tiles)
+        self.root.after(500, self._poll_weather)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
     def _configure_window(self) -> None:
@@ -301,6 +324,7 @@ class ArgusApp:
         nav("⌁   Cable directory", lambda: self.open_window("cables"))
         nav("▣   Evidence review", self.review_evidence)
         nav("✓   Response board", lambda: self.open_window("responses"))
+        nav("☁   Live weather", lambda: self.open_window("weather"))
         ctk.CTkFrame(sidebar, height=1, fg_color=LINE).pack(fill="x", padx=22, pady=23)
         ctk.CTkLabel(sidebar, text="MAP SHORTCUTS", text_color=MUTED,
                      font=ctk.CTkFont("Segoe UI", 10, "bold")).pack(anchor="w", padx=23, pady=(0, 8))
@@ -365,6 +389,10 @@ class ArgusApp:
                      font=ctk.CTkFont("Segoe UI", 16, "bold")).pack(side="left")
         ctk.CTkLabel(map_head, text="  •  " + self.vessel["name"], text_color=MUTED,
                      font=ctk.CTkFont("Segoe UI", 11)).pack(side="left")
+        self.weather_label = ctk.CTkLabel(map_head, text="", text_color=MUTED, cursor="hand2",
+                                          font=ctk.CTkFont("Segoe UI", 11))
+        self.weather_label.pack(side="right")
+        self.weather_label.bind("<Button-1>", lambda _event: self.open_window("weather"))
         map_bar = ctk.CTkFrame(left, fg_color="transparent")
         map_bar.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 9))
         self.map_selector = ctk.CTkOptionMenu(map_bar, variable=self.map_mode,
@@ -378,6 +406,14 @@ class ArgusApp:
                       width=58, height=31, fg_color="#edf3fb", text_color=TEAL).pack(side="left", padx=6)
         ctk.CTkButton(map_bar, text="Layers", command=lambda: self.open_window("layers"),
                       width=58, height=31, fg_color="#edf3fb", text_color=TEAL).pack(side="left")
+        ctk.CTkSwitch(map_bar, text="Live weather", variable=self.live_weather,
+                      command=self._toggle_weather, progress_color=TEAL, text_color=INK,
+                      font=ctk.CTkFont("Segoe UI", 11)).pack(side="left", padx=(12, 0))
+        for layer, caption in (("Rain and cloud", "Rain"), ("Wind", "Wind")):
+            ctk.CTkSwitch(map_bar, text=caption, variable=self.map_layers[layer], width=40, switch_width=30,
+                          command=lambda name=layer: self._weather_layer_changed(name),
+                          progress_color=TEAL, text_color=INK,
+                          font=ctk.CTkFont("Segoe UI", 11)).pack(side="left", padx=(8, 0))
         for text, action in (("−", lambda: self._zoom_by(-1)), ("+", lambda: self._zoom_by(1)),
                              ("⌂", self.fit_map), ("World", self.fit_world)):
             ctk.CTkButton(map_bar, text=text, command=action, width=53 if text == "World" else 32, height=31,
@@ -627,7 +663,7 @@ class ArgusApp:
             self._panel_locations[key] = destination
             self._populate_panel(key, widget)
             target.add(widget, text=self._panel_titles[key])
-        elif key in ("notes", "evidence", "decision"):
+        elif key in ("notes", "evidence", "decision", "weather"):
             for child in widget.winfo_children():
                 child.destroy()
             self._populate_panel(key, widget)
@@ -773,6 +809,8 @@ class ArgusApp:
             selector.bind("<<ComboboxSelected>>", self._change_map_mode)
             for label, variable in self.map_layers.items():
                 ttk.Checkbutton(frame, text=label, variable=variable, command=lambda: self._draw_map(force_static=True)).pack(anchor="w", pady=4)
+            ttk.Checkbutton(frame, text="Live weather · Met Éireann (online)", variable=self.live_weather,
+                            command=self._toggle_weather).pack(anchor="w", pady=(10, 4))
             ttk.Button(frame, text="View the whole world", command=self.fit_world).pack(anchor="w", pady=(12, 4))
             ttk.Button(frame, text="Data sources and limitations", command=lambda: self.open_window("world_data", self._active_dock_location)).pack(anchor="w")
             ttk.Label(frame, text="NASA imagery requests only visible tiles. The global coastline, ports and historical cable routes are stored locally. Routes are stylized and must never be used for alerts.", style="Muted.TLabel", wraplength=550, justify="left").pack(anchor="w", pady=(14, 0))
@@ -783,11 +821,15 @@ class ArgusApp:
                 (f"World ports · {len(self.world_ports):,}", "NGA World Port Index · real reference locations. Points may not mark individual berths."),
                 (f"Cable systems · {len(self.world_cables):,}", "Historical TeleGeography map snapshot · reconstructed, simplified stylized routes. CC BY-NC-SA 3.0 (creativecommons.org/licenses/by-nc-sa/3.0/); noncommercial display only. May include planned systems. Never use these lines for proximity alerts."),
                 ("Imagery", "NASA Earthdata GIBS Blue Marble Next Generation · online display imagery. This imagery is not a live satellite feed."),
+                ("Weather", "Met Éireann forecast API (data.gov.ie) · real live point forecast at the exercise cable, plus rain/cloud shading and wind arrows from a grid of model points (not radar), CC BY 4.0. Off by default; shows current weather, not the fictional replay's, and never changes alerts or ETAs."),
                 ("Exercise overlays", "Fictional vessel, cable and response geometry is separate from the global reference layers. Operator approval remains required."),
             ]
             for heading, description in sources:
                 ttk.Label(frame, text=heading, style="Heading.TLabel").pack(anchor="w", pady=(9, 2))
                 ttk.Label(frame, text=description, style="Muted.TLabel", wraplength=520, justify="left").pack(anchor="w")
+
+        elif key == "weather":
+            self._build_weather_panel(frame)
 
         elif key == "notes":
             ttk.Label(frame, text="Map notes live for this session only.", style="Muted.TLabel").pack(anchor="w", pady=(0, 8))
@@ -808,6 +850,336 @@ class ArgusApp:
 
             ttk.Button(actions, text="Remove selected", command=remove_selected).pack(side="left", padx=8)
             ttk.Button(actions, text="Clear all", command=self.clear_map_notes).pack(side="left")
+
+    def _build_weather_panel(self, frame) -> None:
+        lat, lon = self.weather_point
+        ttk.Checkbutton(frame, text="Show live weather (requests the Met Éireann API)",
+                        variable=self.live_weather, command=self._toggle_weather).pack(anchor="w")
+        ttk.Label(frame, text=f"Point forecast at the exercise cable · {lat:.3f}, {lon:.3f}",
+                  style="Muted.TLabel").pack(anchor="w", pady=(6, 0))
+        ttk.Label(frame, text=self._weather_status, style="Muted.TLabel", wraplength=520).pack(anchor="w", pady=(2, 10))
+        hour_row = ttk.Frame(frame)
+        hour_row.pack(anchor="w", pady=(0, 6))
+        ttk.Label(hour_row, text="Rain, cloud and wind map hour").pack(side="left")
+        hour = ttk.Combobox(hour_row, textvariable=self.weather_hour, values=WEATHER_HOURS, state="readonly", width=8)
+        hour.pack(side="left", padx=(8, 0))
+        hour.bind("<<ComboboxSelected>>", lambda _event: self._draw_map(force_static=True))
+        if self.live_weather.get():
+            grid = self._weather_grid
+            if grid is None:
+                overlay = "Map overlay: the view is outside Met Éireann coverage (50–60°N, 20°W–1°E)."
+            else:
+                total = len(grid[1]) * len(grid[2])
+                loaded = sum(1 for lat in grid[1] for lon in grid[2] if (lat, lon) in self._weather_grid_cache)
+                overlay = f"Map overlay: {loaded} of {total} grid points loaded · {grid[0]:g}° spacing"
+            ttk.Label(frame, text=overlay, style="Muted.TLabel", wraplength=520).pack(anchor="w", pady=(0, 10))
+        if not self.live_weather.get() or not self._weather:
+            ttk.Label(frame, text="Real, current weather only. It is not the weather of the fictional replay and never changes alerts, countdowns or response ETAs.",
+                      style="Muted.TLabel", wraplength=520, justify="left").pack(anchor="w")
+            return
+        now = weather.current_conditions(self._weather)
+        ttk.Label(frame, text=weather.summary(now), style="Heading.TLabel", wraplength=520).pack(anchor="w")
+        hint = weather.caution(now)
+        if hint:
+            ttk.Label(frame, text=hint, foreground=AMBER, wraplength=520, justify="left").pack(anchor="w", pady=(4, 0))
+        table = ttk.Treeview(frame, columns=("time", "wind", "gust", "temp", "rain"), show="headings", height=12)
+        for column, text, width in (("time", "UTC", 70), ("wind", "Wind", 150), ("gust", "Gusts", 80),
+                                    ("temp", "Temp", 70), ("rain", "Rain", 80)):
+            table.heading(column, text=text)
+            table.column(column, width=width, anchor="w")
+        for point in weather.upcoming(self._weather, 24):
+            wind = weather.knots(point.get("wind_mps"))
+            gust = weather.knots(point.get("gust_mps"))
+            table.insert("", "end", values=(
+                f"{point['time']:%H:%M}",
+                f"{point.get('wind_dir') or ''} {wind:.0f} kn · Bft {point.get('beaufort', '?')}" if wind is not None else "—",
+                f"{gust:.0f} kn" if gust is not None else "—",
+                f"{point['temperature_c']:.0f} °C" if point.get("temperature_c") is not None else "—",
+                f"{point['precip_mm']:.1f} mm" if point.get("precip_mm") is not None else "—"))
+        table.pack(fill="both", expand=True, pady=(10, 0))
+        ttk.Label(frame, text=f"Source: {weather.ATTRIBUTION} · {weather.SOURCE_URL}. Label: real. Cautions are assumptions; ETAs are unchanged.",
+                  style="Muted.TLabel", wraplength=520, justify="left").pack(anchor="w", pady=(8, 0))
+
+    def _toggle_weather(self) -> None:
+        self._weather_generation += 1
+        if self._weather_refresh_after:
+            try:
+                self.root.after_cancel(self._weather_refresh_after)
+            except tk.TclError:
+                pass
+            self._weather_refresh_after = None
+        if self.live_weather.get():
+            self._weather_status = "Loading Met Éireann forecast…"
+            self.weather_label.configure(text="☁ Loading weather…", text_color=MUTED)
+            self._request_weather()
+        else:
+            self._weather = None
+            self._weather_status = "Live weather off · no network requests"
+            self.weather_label.configure(text="")
+            self._weather_grid_pending.clear()
+        self._weather_overlay = None
+        self._refresh_weather_panel()
+        self._draw_map(force_static=True)
+
+    def _request_weather(self) -> None:
+        generation = self._weather_generation
+        lat, lon = self.weather_point
+
+        def fetch() -> None:
+            try:
+                self._weather_queue.put(("point", generation, weather.fetch_forecast(lat, lon), None))
+            except Exception as error:  # network, HTTP or XML problems all mean "unavailable"
+                self._weather_queue.put(("point", generation, None, error))
+
+        self._weather_executor.submit(fetch)
+        self._update_weather_grid()  # also refreshes grid points older than 30 minutes
+        self._weather_refresh_after = self.root.after(weather.REFRESH_S * 1000, self._request_weather)
+
+    def _schedule_weather_grid(self, delay_ms: int = 700) -> None:
+        if not self.live_weather.get():
+            return
+        if self._weather_grid_after is not None:
+            try:
+                self.root.after_cancel(self._weather_grid_after)
+            except tk.TclError:
+                pass
+        self._weather_grid_after = self.root.after(delay_ms, self._update_weather_grid)
+
+    def _update_weather_grid(self) -> None:
+        """Request the grid points of the current view that are not cached or pending."""
+        self._weather_grid_after = None
+        if not self._weather_map_active() or not self._map_size[0]:
+            return
+        width, height = self._map_size
+        center_x, center_y = geo_to_world(*self.map_center, self.map_zoom)
+        if width >= TILE_SIZE * 2 ** self.map_zoom:
+            west, east = -180.0, 180.0
+            north, south = world_to_geo(0, center_y - height / 2, self.map_zoom)[0], world_to_geo(0, center_y + height / 2, self.map_zoom)[0]
+        else:
+            north, west = world_to_geo(center_x - width / 2, center_y - height / 2, self.map_zoom)
+            south, east = world_to_geo(center_x + width / 2, center_y + height / 2, self.map_zoom)
+            if west > east:
+                west, east = -180.0, 180.0
+        grid = weather.grid_for_view(south, north, west, east)
+        if grid != self._weather_grid:
+            self._weather_grid = grid
+            self._weather_overlay = None
+            self._draw_map(force_static=True)
+        if grid is None:
+            return
+        generation, now = self._weather_generation, time.monotonic()
+        for lat in grid[1]:
+            for lon in grid[2]:
+                key = (lat, lon)
+                cached = self._weather_grid_cache.get(key)
+                if key in self._weather_grid_pending or (cached and now - cached[0] < weather.REFRESH_S):
+                    continue
+                self._weather_grid_pending.add(key)
+                self._weather_executor.submit(self._weather_grid_worker, generation, key)
+
+    def _weather_grid_worker(self, generation: int, key: tuple[float, float]) -> None:
+        try:
+            forecast, retry = weather.fetch_forecast(*key), False
+        except ValueError:  # outside the forecast area: nothing to retry
+            forecast, retry = None, False
+        except Exception:
+            forecast, retry = None, True
+        self._weather_queue.put(("grid", generation, key, forecast, retry))
+
+    def _poll_weather(self) -> None:
+        grid_changed = False
+        while True:
+            try:
+                kind, generation, *message = self._weather_queue.get_nowait()
+            except queue.Empty:
+                break
+            if generation != self._weather_generation or not self.live_weather.get():
+                continue  # switched off (or on again) since this request started
+            if kind == "grid":
+                key, forecast, retry = message
+                self._weather_grid_pending.discard(key)
+                # A failed request is retried after two minutes instead of thirty.
+                fetched = time.monotonic() - (weather.REFRESH_S - 120 if retry else 0)
+                self._weather_grid_cache[key] = (fetched, forecast)
+                grid_changed = True
+                continue
+            forecast, error = message
+            if forecast:
+                self._weather = forecast
+                now = weather.current_conditions(forecast)
+                self._weather_status = f"Met Éireann · updated {forecast['fetched']:%H:%M} UTC · refreshes every 30 min"
+                self.weather_label.configure(text="☁ " + weather.summary(now),
+                                             text_color=AMBER if weather.caution(now) else INK)
+            else:
+                self._weather_status = f"Weather unavailable ({type(error).__name__}) · retrying in 30 min"
+                if not self._weather:
+                    self.weather_label.configure(text="☁ Weather unavailable", text_color=MUTED)
+            self._refresh_weather_panel()
+        if grid_changed:
+            self._weather_field_version += 1
+            self._draw_map(force_static=True)
+            self._refresh_weather_panel()
+        self.root.after(500, self._poll_weather)
+
+    def _weather_map_active(self) -> bool:
+        return self.live_weather.get() and (self.map_layers["Rain and cloud"].get() or self.map_layers["Wind"].get())
+
+    def _weather_layer_changed(self, layer: str) -> None:
+        """Turning on a weather layer also turns on live weather, which it needs."""
+        if self.map_layers[layer].get() and not self.live_weather.get():
+            self.live_weather.set(True)
+            self._toggle_weather()
+        else:
+            self._draw_map(force_static=True)
+
+    def _weather_time(self) -> datetime:
+        choice = self.weather_hour.get()
+        offset = 0 if choice == "Now" else int(choice[1:].split()[0])
+        return datetime.now(timezone.utc) + timedelta(hours=offset)
+
+    def _weather_field_images(self) -> dict | None:
+        """Cloud/rain/mask images and wind vectors for the current grid and forecast hour."""
+        grid = self._weather_grid
+        when = self._weather_time().replace(minute=0, second=0, microsecond=0)
+        key = (grid, self._weather_field_version, when)
+        if self._weather_field and self._weather_field["key"] == key:
+            return self._weather_field
+        step, lats, lons = grid
+        values, winds, estimated = {}, [], False
+        for lat in lats:
+            for lon in lons:
+                forecast = self._weather_grid_cache.get((lat, lon), (0, None))[1]
+                if not forecast:
+                    continue
+                point = weather.current_conditions(forecast, when)
+                result = weather.field_values(point)
+                if result:
+                    values[(lat, lon)] = result[:2]
+                    estimated = estimated or result[2]
+                vector = weather.wind_vector(point)
+                if vector:  # ECMWF-only points carry no wind
+                    winds.append((lat, lon, *vector))
+        self._weather_field = {"key": key, "when": when, "estimated": estimated, "winds": winds,
+                               "count": len(values) + len(winds),
+                               "images": weather.field_images(lats, lons, values) if values else None}
+        return self._weather_field
+
+    def _draw_weather_overlay(self, width: int, height: int) -> None:
+        if not self._weather_map_active():
+            self._weather_view_key = None
+            return
+        view_key = (self.map_zoom, round(self.map_center[0], 3), round(self.map_center[1], 3), width, height)
+        if view_key != self._weather_view_key:  # fetch the new view's grid once the map settles
+            self._weather_view_key = view_key
+            self._schedule_weather_grid()
+        if not self._weather_grid or not self.map_layers["Rain and cloud"].get():
+            return
+        field = self._weather_field_images()
+        if not field["images"]:
+            return
+        step, lats, lons = self._weather_grid
+        z = self.map_zoom
+        x0, y0 = geo_to_world(lats[-1] + step / 2, lons[0] - step / 2, z)
+        x1, y1 = geo_to_world(lats[0] - step / 2, lons[-1] + step / 2, z)
+        center_x, center_y = geo_to_world(*self.map_center, z)
+        world = TILE_SIZE * 2 ** z
+        shift = round((center_x - (x0 + x1) / 2) / world) * world
+        x0, x1 = x0 + shift, x1 + shift
+        view = (center_x - width / 2, center_y - height / 2, center_x + width / 2, center_y + height / 2)
+        visible = (max(x0, view[0]), max(y0, view[1]), min(x1, view[2]), min(y1, view[3]))
+        if visible[0] >= visible[2] or visible[1] >= visible[3]:
+            return
+        overlay = self._weather_overlay
+        if not (overlay and overlay["key"] == (field["key"], z, x0) and
+                overlay["rect"][0] <= visible[0] and overlay["rect"][1] <= visible[1] and
+                overlay["rect"][2] >= visible[2] and overlay["rect"][3] >= visible[3]):
+            # Render half a view beyond each edge so short pans reuse the same image.
+            target = (max(x0, view[0] - width / 2), max(y0, view[1] - height / 2),
+                      min(x1, view[2] + width / 2), min(y1, view[3] + height / 2))
+            size = (max(1, round(target[2] - target[0])), max(1, round(target[3] - target[1])))
+            columns, rows = field["images"][0].size
+            box = ((target[0] - x0) / (x1 - x0) * columns, (target[1] - y0) / (y1 - y0) * rows,
+                   (target[2] - x0) / (x1 - x0) * columns, (target[3] - y0) / (y1 - y0) * rows)
+            layers = [image.resize(size, Image.BILINEAR, box=box) for image in field["images"]]
+            overlay = {"key": (field["key"], z, x0), "image": ImageTk.PhotoImage(weather.colorize(*layers), master=self.map),
+                       "rect": (target[0], target[1], target[0] + size[0], target[1] + size[1])}
+            self._weather_overlay = overlay
+        self.map.create_image(overlay["rect"][0] - view[0], overlay["rect"][1] - view[1],
+                              image=overlay["image"], anchor="nw")
+
+    def _draw_wind_arrows(self, width: int, height: int) -> None:
+        if not self._weather_map_active() or not self.map_layers["Wind"].get() or not self._weather_grid:
+            return
+        field = self._weather_field_images()
+        cell = self._weather_grid[0] * TILE_SIZE * 2 ** self.map_zoom / 360  # grid spacing in pixels
+        for lat, lon, towards, kn in field["winds"]:
+            x, y = self._project(lat, lon)
+            if not (-20 <= x <= width + 20 and -20 <= y <= height + 20):
+                continue
+            length = max(18.0, min(0.8 * cell, 22 + kn * 1.4, 66.0))
+            # Web Mercator is conformal, so compass bearings keep their screen angle.
+            dx, dy = math.sin(math.radians(towards)) * length / 2, -math.cos(math.radians(towards)) * length / 2
+            colour = weather.wind_colour(kn)
+            self.map.create_line(x - dx, y - dy, x + dx, y + dy, fill="white", width=6,
+                                 arrow="last", arrowshape=(12, 14, 6), capstyle="round")
+            self.map.create_line(x - dx, y - dy, x + dx, y + dy, fill=colour, width=3,
+                                 arrow="last", arrowshape=(11, 13, 5))
+            if cell >= 55:
+                self.map.create_text(x - dx * 1.3, y - dy * 1.3, text=f"{kn:.0f}", fill=colour,
+                                     font=("Segoe UI Semibold", 8))
+
+    def _draw_weather_legend(self) -> None:
+        rain_on, wind_on = self.map_layers["Rain and cloud"].get(), self.map_layers["Wind"].get()
+        if not self._weather_map_active():
+            return
+        layers = {(True, True): "RAIN, CLOUD & WIND", (True, False): "RAIN & CLOUD", (False, True): "WIND"}[(rain_on, wind_on)]
+        if not self._weather_grid:
+            text = f"{layers} · view outside Met Éireann coverage (50–60°N, 20°W–1°E)"
+        else:
+            field = self._weather_field_images()
+            if not field["count"]:
+                text = f"{layers} · loading Met Éireann forecast grid…"
+            else:
+                text = f"{layers} · MET ÉIREANN MODEL FORECAST {field['when']:%H:%M} UTC · NOT RADAR"
+                if rain_on and field["estimated"]:
+                    text += " · rain partly estimated from symbols"
+        title = self.map.bbox("map_title")
+        top = (title[3] if title else 26) + 6
+        label = self.map.create_text(14, top + 4, text=text, anchor="nw", fill=INK, font=("Segoe UI Semibold", 8))
+        _x1, y1, x2, y2 = self.map.bbox(label)
+        line = y2 - y1
+        background = self.map.create_rectangle(8, top, x2 + 8, y2 + 8, fill="white", outline=LINE)
+        self.map.tag_raise(label)
+        rows = []
+        if rain_on:
+            rows.append(("box", [("#a3adbb", "cloud")] + [
+                ("#%02x%02x%02x" % weather.rain_colour(weather.rain_level(mm))[:3], f"{mm:g}")
+                for mm in weather.RAIN_LEGEND_MM], " mm/h rain"))
+        if wind_on:
+            rows.append(("arrow", [(colour, band) for _limit, colour, band in weather.WIND_BANDS],
+                         " kn wind · arrows point downwind"))
+        right, bottom = x2, y2
+        for kind, swatches, unit in rows:
+            row = bottom + line // 2 + 3
+            x = 14
+            for index, (colour, caption) in enumerate(swatches):
+                if kind == "box":
+                    self.map.create_rectangle(x, row - line // 3, x + line, row + line // 3, fill=colour, outline="")
+                else:
+                    self.map.create_line(x, row, x + line, row, fill=colour, width=2.5, arrow="last", arrowshape=(7, 8, 3))
+                item = self.map.create_text(x + line + 4, row, text=caption + (unit if index == len(swatches) - 1 else ""),
+                                            anchor="w", fill=MUTED, font=("Segoe UI", 8))
+                x = self.map.bbox(item)[2] + (line if kind == "box" and index == 0 else line // 2)
+            right, bottom = max(right, x), row + line // 2
+        self.map.coords(background, 8, top, right + 8, bottom + 6)
+
+    def _refresh_weather_panel(self) -> None:
+        widget = self._panel_widgets.get("weather")
+        if widget is None:
+            return
+        for child in widget.winfo_children():
+            child.destroy()
+        self._populate_panel("weather", widget)
 
     def _build_port_directory(self, frame) -> None:
         ttk.Label(frame, text="Search all local NGA reference ports by name, country code or WPI ID.",
@@ -1169,6 +1541,7 @@ class ArgusApp:
 
     def close(self) -> None:
         self._tile_executor.shutdown(wait=False, cancel_futures=True)
+        self._weather_executor.shutdown(wait=False, cancel_futures=True)
         self.root.destroy()
 
     def _project(self, lat: float, lon: float) -> tuple[float, float]:
@@ -1725,19 +2098,21 @@ class ArgusApp:
                 if image:
                     self.map.create_image(sx, sy, image=image, anchor="nw")
             self.map.create_text(12, 12, text="NASA BLUE MARBLE · DISPLAY ONLY", anchor="nw",
-                                 fill="#1e3550", font=("Segoe UI Semibold", 9))
+                                 fill="#1e3550", font=("Segoe UI Semibold", 9), tags="map_title")
             self.map_status_label.configure(text=self._tile_status or "NASA imagery · cached on this device")
             self.map_attribution_label.configure(text="NASA Earthdata · Natural Earth · NGA · TeleGeography")
         else:
             self.map.create_text(12, 12, text="GLOBAL COASTLINE · DISPLAY ONLY", anchor="nw",
-                                 fill=MUTED, font=("Segoe UI Semibold", 9))
+                                 fill=MUTED, font=("Segoe UI Semibold", 9), tags="map_title")
             self.map_status_label.configure(text="Drag to pan · wheel, two-finger scroll or +/- to zoom" if not self.map_tool else self.map_status_label.cget("text"))
             self.map_attribution_label.configure(text="Natural Earth · NGA · TeleGeography")
 
+        self._draw_weather_overlay(width, height)
         if self.map_layers["Historical cable routes"].get():
             self._draw_world_cables(width, height)
         if self.map_layers["World ports"].get():
             map_labels.extend(self._draw_world_ports(width, height))
+        self._draw_wind_arrows(width, height)
 
         if self.map_layers["Anchor reach"].get():
             for cable in self.scenario["cables"]:
@@ -1798,6 +2173,7 @@ class ArgusApp:
         reserved = list(grid_label_boxes)
         for _priority, kind, label, x, y in sorted(map_labels, key=lambda item: item[0]):
             self._draw_map_callout(label, x, y, kind, reserved)
+        self._draw_weather_legend()
         self.map.create_rectangle(4, height - 24, width - 4, height - 3, fill="white", outline="")
         self.map.create_text(10, height - 13,
                              text="● NGA world ports · violet: historical stylized cables · exercise overlays fictional",

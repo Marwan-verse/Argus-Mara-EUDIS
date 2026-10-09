@@ -36,6 +36,14 @@ clusters zoom in. Selected historical cable routes can be framed across the date
 line. `argus/map_view.py` holds display-only search and geographic extent helpers;
 it is independent of Brain's countdown and changes neither shared JSON file.
 
+*Live weather (D36, 9 October):* the map bar's "Live weather" switch, off by default,
+requests the Met Éireann point forecast (`argus/weather.py`) at the exercise cable every
+30 minutes. Its "Rain and cloud" layer samples up to 100 grid points over the visible view
+and shades model-forecast cloud and rain (not radar) for now or up to 12 hours ahead; its "Wind"
+layer draws downwind arrows coloured by speed. Map-bar "Rain" and "Wind" switches toggle each layer.
+It shows current real weather, not the replay's, and is display-only: alerts,
+countdowns, ETAs and both JSON files are unchanged.
+
 ```text
 recorder/       live AIS capture; independent from the stage demo
 data/           ignored local recordings and downloaded datasets

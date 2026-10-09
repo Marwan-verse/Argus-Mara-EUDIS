@@ -18,4 +18,8 @@ section. Its `score` counts satisfied cues; it is not a threat probability.
 `countdown.py` also calculates assumed response arrival times. Additional modules
 are unnecessary for this v1 replay.
 
+`weather.py` (D36) fetches the live Met Éireann point forecast for the desktop app's optional
+"Live weather" switch, and turns a grid of point forecasts into the map's rain/cloud overlay and wind arrows. It is real, current, display-only data and never feeds `brain.py` or
+`countdown.py`. Try it with `python -m argus.weather [LAT LON]`.
+
 Keep input and output in the two JSON files described in [`demo/README.md`](../demo/README.md). Do not make the interface import Python or depend on a live service. See [`docs/07-architecture.md`](../docs/07-architecture.md) for units, ownership and change rules.
