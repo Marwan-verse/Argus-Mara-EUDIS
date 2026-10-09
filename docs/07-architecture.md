@@ -2,6 +2,16 @@
 
 *Proposed implementation structure, 7 October 2026. This follows decisions D13–D15 and D22. It does not change the seven-beat demo.*
 
+## Browser frontend (D37, 9 October 2026)
+
+All browser interactions use Svelte 5 components under `ui/src/`: offline replay,
+live dashboard, local evidence review and recorder map preview. The esbuild script
+compiles committed, self-contained bundles; Node 22+ is required for development,
+not presentation or deployment. Run `npm ci`, `npm run check`, `npm run build`,
+`npm test` and `npm run test:browser`. See `ui/README.md` for generated paths,
+Chromium requirements and the offline export contract. The Python native companion
+and data/detection/countdown modules keep their existing responsibilities.
+
 ## The shortest path to the working demo
 
 The project has two runtime halves. Python prepares a scenario and computes alerts. A browser presents both files and records a human's simulated decision. The interface should be served as static files from the repository root for local development; a local static server is not an application backend. Once assets are downloaded, the demo must run with external Wi-Fi disabled.

@@ -61,6 +61,13 @@ cloud deployment or proof of a working real feed. See decision D36.
 
 ---
 
+## Browser frontend development
+
+The browser replay, live AIS console, evidence controls and recorder map export
+use Svelte 5. Run `npm ci`, `npm run check`, `npm run build` and `npm run test:browser`
+from the repository root. Committed bundles keep the offline demo and Python
+server runnable without Node. See [the UI guide](ui/README.md) for setup and checks.
+
 ## The demo the judges will see
 
 1. **A map of Ireland:** ships move, cables lie on the seabed, and the shallow areas where an anchor can reach the seabed glow.

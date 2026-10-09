@@ -1,14 +1,14 @@
 {
   "generated_by": "argus.evidence",
   "schema_version": 1,
-  "generated_at_utc": "2026-10-08T16:41:30.713644Z",
+  "generated_at_utc": "2026-10-09T11:19:42.937085Z",
   "sources": [
     {
       "file": "scenario.json",
       "role": "radar_input",
       "label": "simulated",
-      "sha256": "b55be9e957bb0c323d73af96d5ae08c0615b608c83a08185a3ad7b48cdd1940f",
-      "bytes": 21674
+      "sha256": "6c6ce3df11b2c78a9c1594b75aac1bcf523312cc15277bc998abc029454a8c2f",
+      "bytes": 20437
     }
   ],
   "provenance": {
@@ -47,7 +47,7 @@
     "Export offline review pages"
   ],
   "assumptions": {
-    "match_radius_km": 1.0,
+    "match_radius_km": 1,
     "max_interpolation_gap_s": 600,
     "max_extrapolation_age_s": 300,
     "custody_max_speed_kn": 30,
@@ -56,36 +56,37 @@
     "max_dimension_age_s": 86400
   },
   "implementation_sha256": {
-    "argus/space.py": "04ee6bbe2ff5ea59513d7239bc301d30a99b54115f562d18e9968ed1bf3e0b2e",
-    "argus/evidence.py": "787b461dd48ecbca849da42ef877758ef12974a68826d1b2047b9f02d325fb32",
-    "argus/ingest/gfw.py": "5ce8fde589ba1ac71f2884769af870bde96cd5bc3b2168bcba3b792fcd604920",
-    "argus/ingest/ais.py": "8f8291f7cf447241dc6aedc6fc0ea8e519adaaa2772a3b50b7704bc4853c2b4e",
-    "argus/provenance.py": "f6b8eefebceaf80034c52f1d03108900285ac9ea1e8dc95a8e1c18e85e149e81"
+    "argus/space.py": "32043a638b60d575d21f4596d750d47725372b6056ac468aad586919eb35ee6e",
+    "argus/evidence.py": "63e31721fd8d5086ca5dee48a98fe70ec2d19b6364f32fa66320ee7dd0dbabbd",
+    "argus/ingest/gfw.py": "115b31f7681f6d28786824790fd31d2a0a1340312bdd19661eb6a060cf4de7cc",
+    "argus/ingest/ais.py": "79805852f4712592b692e3d8e56ae28f9e15f5cedf770902c0ea28f6e1bfd52b",
+    "argus/provenance.py": "466b9a6959da872a8134f60e02e3c4591d9fa545ca04b94887890c3ee7b4f66a"
   },
   "files": [
     {
       "path": "assets/evidence.css",
-      "sha256": "191f1a8fcdd3c0a645f875518e8adf27dc3f3d654e299eaf87f034fe900c3e60"
+      "sha256": "c1ae84d73c244382c2e2a5cd323835c17a39c48736d8f5a5289d21be85f31bd1"
     },
     {
       "path": "assets/evidence.js",
-      "sha256": "469285144456003d8542eab68c688f926b75c6fffdebce43b05705c64b570257"
+      "sha256": "d18452db61605bceaf45894b4c270e07f8226a7e5d455ff26d6d94823b03640a",
+      "bytes": 50189
     },
     {
       "path": "contacts/contact-0001.html",
-      "sha256": "c53bf735bbdf85af749fb5dd00cb54f099dc9eb457aa8741466b5db0b64efd48"
+      "sha256": "934499e5897bcb462c9b27c00c44ac4e1c91330d0419e77f903dee594f54ea57"
     },
     {
       "path": "index.html",
-      "sha256": "13feb4da851490f866a58607bacd2dd133a414d5180048ff61e519bd64228694"
+      "sha256": "7425fc57661ab003931775b71440342af08329ecc8dc71cfdbff571e0fbef6ef"
     },
     {
       "path": "input.json",
-      "sha256": "f7fe85a679479dae148c6d0df327b882d17f8596c89967f85b962db6bd54169d"
+      "sha256": "12217e42ea1f5ab27b64a43409f290e688024ce5c63431378c3be66fbd54c4d9"
     },
     {
       "path": "space.json",
-      "sha256": "71828fe39d20a7c9a0eb689b661e5430b4db91133f48e580d0ef4fe6a944242a"
+      "sha256": "2545a5d77ff1e4ee0224c85549d02d394a2e7ccbfcaaefc8e21ec56779e5e006"
     }
   ],
   "caveat": "An unmatched radar contact is a review candidate, not proof of AIS shutdown or hostile intent."

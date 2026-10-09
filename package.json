@@ -1,0 +1,25 @@
+{
+  "name": "argus-mara-browser",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build_frontend.mjs",
+    "check": "svelte-check --workspace ui/src --fail-on-warnings",
+    "test": "node --test tests/test_replay.mjs tests/test_live_browser.mjs",
+    "test:browser": "playwright test",
+    "check:skills": "node scripts/check_svelte.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0",
+    "@sveltejs/mcp": "0.1.26",
+    "esbuild": "0.28.2",
+    "prettier": "3.9.9",
+    "prettier-plugin-svelte": "4.1.1",
+    "svelte": "5.57.2",
+    "svelte-check": "4.7.6",
+    "typescript": "6.0.3"
+  }
+}
