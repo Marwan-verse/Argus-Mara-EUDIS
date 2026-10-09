@@ -10,3 +10,7 @@ __pycache__/
 recorder/.apikey
 
 # main branch verifications
+# Frontend tooling; browser bundles are committed for offline use.
+node_modules/
+test-results/
+playwright-report/

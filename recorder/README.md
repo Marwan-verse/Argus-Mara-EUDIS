@@ -118,6 +118,10 @@ Open a second window in the project folder and run:
 | `.venv/bin/python recorder/check.py` (Mac/Linux) · `.venv\Scripts\python recorder\check.py` (Windows) | Files, size, and today's messages and ships. Warns if nothing new was written for 20 minutes |
 | same, but `recorder/map.py` | Writes `map.html`. Open it to see every ship heard in the last hour |
 
+The Svelte map preview embeds the local Natural Earth basemap and runs offline.
+It shows received positions, observation timestamps and searchable ship names.
+Rebuild its committed bundle with `npm run build` after frontend source changes.
+
 If `check.py` says *No data yet*, wait ten minutes — the first file takes that long.
 
 ## What gets saved

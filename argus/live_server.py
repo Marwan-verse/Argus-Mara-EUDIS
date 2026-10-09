@@ -379,7 +379,7 @@ async def events(request):
 async def asset(request):
     # Explicit allowlist; never expose the repository, private volume or key file.
     routes = {"/": ROOT / "ui/live/index.html", "/live.css": ROOT / "ui/live/live.css",
-              "/live.mjs": ROOT / "ui/live/live.mjs",
+              "/live.mjs": ROOT / "ui/live/dashboard.mjs",
               "/assets/world_land.json": ROOT / "ui/assets/world_land.json",
               "/assets/world_ports.json": ROOT / "ui/assets/world_ports.json",
               "/assets/mark.svg": ROOT / "ui/assets/mark.svg"}

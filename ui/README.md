@@ -16,9 +16,47 @@ python scripts/serve_demo.py
 ```
 
 Open <http://127.0.0.1:8000/ui/>. Windows users can also double-click
-`scripts/START-DEMO-WINDOWS.bat`. No dependencies to install, no backend, no build
-step, and no outside network requests. Keep the local static server running while
+`scripts/START-DEMO-WINDOWS.bat`. The committed Svelte bundles need no runtime dependencies, backend or outside
+network requests. Node is required only to develop and rebuild browser components. Keep the local static server running while
 presenting; opening `index.html` directly is not supported.
+
+## Develop the Svelte frontend
+
+Use Node 22+ from the repository root:
+
+```sh
+npm ci
+npm run check
+npm run build
+npm test
+npm run test:browser
+```
+
+Source components live in `ui/src/`. The build writes self-contained, minified
+bundles to `ui/app.mjs`, `ui/live/dashboard.mjs`, `ui/space/evidence.js`, and
+`ui/recorder.js`, and refreshes the fictional evidence pack's script checksum.
+Commit the source, lockfile and bundles together. Python's static server and
+`live/Dockerfile` serve the bundles directly; no CDN or Node service is involved.
+The replay and live data helpers remain pure JavaScript for their existing tests.
+The live canvas renderer caches its basemap; Svelte owns dashboard controls and
+keys directory rows by MMSI. The native Tkinter applications remain Python.
+
+Browser tests need the Python `.venv` dependencies (root and `live/requirements.txt`)
+and Chromium. They use `/usr/bin/chromium` when installed; otherwise run
+`npx playwright install chromium`. Tests start isolated local services on ports
+8001 and 8081 with simulated observations and no provider credentials. The cloud
+browser blocks `file://` navigation; export tests load the generated HTML and
+its bundled assets directly with all network requests blocked.
+
+The official skills are saved in `skills/svelte-code-writer/` and
+`skills/svelte-core-bestpractices/`. `npm run check:skills` runs the official
+Svelte autofixer and needs access to `svelte.dev` for its documentation index.
+`npm run check` works locally and fails on compiler warnings.
+
+A local two-second playback check at 30× found 4,712 workspace nodes added and
+removed by the previous renderer, versus zero additions/removals by Svelte.
+This demonstrates reduced DOM churn, not a general loading-speed benchmark;
+the bundles include the Svelte runtime and are larger than the original scripts.
 
 ## Controls
 

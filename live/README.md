@@ -13,6 +13,16 @@ proof of a ship's current position. Both views show received UTC and freshness;
 missing speed/course remain unavailable. Static identity reports never refresh a
 position's age. Simulated development feeds are explicitly labelled.
 
+## Browser development
+
+The console source is `ui/src/Live.svelte`; run `npm ci`, `npm run check`, and
+`npm run build` from the repository root. Commit `ui/live/dashboard.mjs` with the
+source. The server serves this compiled bundle at `/live.mjs`; the Docker image
+copies it with `ui/live/` and needs no Node runtime. `ui/live/live.mjs` contains
+pure, tested observation-store and map-projection helpers. The Svelte migration
+was requested on local `main`; the deployment instructions below describe the
+separate collector rollout and do not authorize a deployment or push.
+
 ## Deploy on the verified Railway Trial
 
 The code is on `feat/shared-live-ais`; merge approval stays with Marwan. Railway
