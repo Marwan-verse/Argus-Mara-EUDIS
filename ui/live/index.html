@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Argus Mara — shared AIS</title>
+  <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/live.css">
+  <script type="module" src="/live.mjs"></script>
+</head>
+<body>
+  <div class="app">
+    <aside class="navigation" aria-label="Workspace navigation">
+      <a class="brand" href="/" aria-label="Argus Mara home"><img src="/assets/mark.svg" alt="" width="34" height="34"><strong>ARGUS MARA</strong><span>SHARED AIS CONSOLE</span></a>
+      <p class="section-caption">Workspace</p>
+      <button class="nav-button current" id="nav-map"><span aria-hidden="true">◫</span> Maritime situation</button>
+      <button class="nav-button" id="nav-vessels"><span aria-hidden="true">◉</span> Vessel directory</button>
+      <button class="nav-button" id="nav-data"><span aria-hidden="true">▣</span> Shared data access</button>
+      <div class="navigation-divider"></div>
+      <p class="section-caption">Map shortcuts</p>
+      <button class="nav-button" id="nav-ireland"><span aria-hidden="true">⊞</span> Fit Ireland</button>
+      <button class="nav-button" id="nav-world"><span aria-hidden="true">◎</span> World overview</button>
+      <div class="navigation-foot"><strong>Received observations</strong><p>One shared feed for the team.<br>Last received positions, without interpolation.</p></div>
+    </aside>
+    <main class="main">
+      <header class="page-header"><div><h1>Maritime situation</h1><p>Shared AIS feed <span>/</span> received UTC <span>/</span> observation view</p></div><div class="header-state"><span class="source-badge" id="feed-label" hidden>Simulated feed</span><span class="connection-pill" id="connection-pill"><i></i><span id="connection-text" aria-live="polite">Connecting</span></span><time id="clock" class="mono"></time></div></header>
+      <section class="metrics" aria-label="Feed overview">
+        <div class="metric"><i class="purple"></i><div><span>Mapped vessels</span><strong id="metric-vessels">0</strong><small id="metric-source">No positions received</small></div></div>
+        <div class="metric"><i class="blue"></i><div><span>AIS feed</span><strong id="metric-feed">Connecting</strong><small id="feed-description">Checking the shared service</small></div></div>
+        <div class="metric"><i class="cyan"></i><div><span>Last AIS message</span><strong id="metric-message-age">—</strong><small id="metric-message-time">Not yet received</small></div></div>
+        <div class="metric"><i class="lavender"></i><div><span>Last position report</span><strong id="metric-position-age">—</strong><small id="metric-position-time">Not yet received</small></div></div>
+      </section>
+      <div class="workspace">
+        <section class="map-panel panel" aria-label="Observation map">
+          <div class="panel-heading"><div><h2>Situation map</h2><span id="map-subtitle">Latest received AIS positions</span></div><div class="map-options"><label><input type="checkbox" id="show-ports"> Reference ports</label><button id="fit-ireland">Ireland</button><button id="fit-world">World</button></div></div>
+          <div class="map-area" id="map-area"><canvas id="map" tabindex="0" aria-label="Map of last received AIS positions. Drag to pan, scroll with a mouse wheel or two fingers to zoom. Select a vessel marker to inspect its observation."></canvas><div class="map-label">GLOBAL COASTLINE <span>·</span> OBSERVATION VIEW</div><div class="map-toolbar"><button id="zoom-in" aria-label="Zoom in" title="Zoom in">+</button><button id="zoom-out" aria-label="Zoom out" title="Zoom out">−</button><button id="fit-vessels" aria-label="Fit received vessels" title="Fit received vessels">⌖</button></div><div class="map-empty" id="map-empty"><div class="empty-symbol" aria-hidden="true">⌖</div><strong id="empty-title">Waiting for received positions</strong><p id="empty-description">The map will show AIS observations as the shared feed receives them.</p></div><div class="map-legend"><span><i class="legend-real"></i>Real AIS</span><span id="simulated-legend" hidden><i class="legend-simulated"></i>Simulated</span><span><i class="legend-old"></i>Observation older than 30 min</span></div><div class="map-scale"><span id="map-scale-text">—</span><i id="map-scale-line"></i></div></div>
+          <div class="map-footer"><span id="map-status">Drag to pan · wheel or two fingers to zoom</span><span id="map-attribution">Natural Earth · public domain</span></div>
+        </section>
+        <aside class="directory-panel panel" id="directory-panel" aria-label="Vessel directory and observation details">
+          <div class="panel-heading"><h2>Vessel directory</h2><span class="count mono" id="directory-count">0 vessels</span></div>
+          <div class="search-wrap"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8.3" cy="8.3" r="5.6"/><path d="m12.5 12.5 4.5 4.5"/></svg><input id="search" type="search" placeholder="Search name or MMSI" aria-label="Search vessels by name or MMSI" autocomplete="off" spellcheck="false"></div>
+          <div class="directory-scroll"><div id="vessel-list" class="vessel-list"></div><p id="no-results" class="no-results" hidden>No matching vessel. Try a name or MMSI.</p><button id="show-more" class="show-more" hidden>Show more vessels</button></div>
+          <section class="selection" id="selection" aria-label="Selected vessel observation" hidden><div class="selection-heading"><span class="section-caption">Selected observation</span><button id="clear-selection" class="icon-button" aria-label="Clear vessel selection">×</button></div><div class="selected-name-row"><h3 id="selected-name"></h3><span class="source-badge" id="selected-source"></span></div><div class="selected-identity mono" id="selected-mmsi"></div><div class="selected-type" id="selected-type"></div><div class="fix-box"><span>Last received position</span><time id="selected-time" class="mono"></time><strong id="selected-age"></strong><div id="selected-coordinates" class="mono"></div></div><dl class="selected-facts"><div><dt>Speed over ground</dt><dd id="selected-speed"></dd></div><div><dt>Course over ground</dt><dd id="selected-course"></dd></div></dl><button id="center-selected" class="accent-button">Center on received position</button><p class="selection-note">This is the last received observation. Its position is not predicted between messages.</p></section>
+          <div class="directory-footer"><p>No alerts or vessel intent are inferred in this view.</p><a href="/api/v1/vessels" target="_blank" rel="noopener">Open shared AIS JSON <span aria-hidden="true">↗</span></a></div>
+        </aside>
+      </div>
+      <footer class="page-footer"><span>Positions retain their received timestamps. A quiet feed does not establish vessel behaviour.</span><button id="data-access">Shared data access <span aria-hidden="true">↗</span></button></footer>
+    </main>
+  </div>
+  <dialog id="data-dialog" aria-labelledby="data-title"><div class="dialog-heading"><h2 id="data-title">Shared AIS data</h2><button id="close-data" class="icon-button" aria-label="Close shared data information">×</button></div><p>The team can use the same current vessel observations in their own tools.</p><label for="api-url">Current vessels · JSON</label><div class="url-row"><input id="api-url" readonly><button id="copy-url">Copy URL</button></div><a id="api-link" href="/api/v1/vessels" target="_blank" rel="noopener">Open vessel snapshot ↗</a><p class="data-note">Updates: <code>/api/v1/events</code>. Each vessel includes its reception time and a real or simulated evidence label. API data contains no provider credentials.</p><p class="data-note">Map: Natural Earth, public domain. Optional ports: NGA World Port Index, reference locations only. This display is not a navigational chart.</p><span id="copy-status" role="status"></span></dialog>
+</body>
+</html>

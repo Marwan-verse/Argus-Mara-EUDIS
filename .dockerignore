@@ -1,0 +1,16 @@
+.git
+.venv
+**/__pycache__
+**/*.pyc
+data
+**/.apikey
+**/.env
+**/.env.*
+**/*.parquet
+**/*.zip
+**/node_modules
+recorder/.venv
+tests
+space
+demo
+docs
