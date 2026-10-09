@@ -582,7 +582,10 @@ class ArgusApp:
 
     def _set_initial_split(self, _event=None) -> None:
         width = self.main_split.winfo_width()
-        if not self._initial_split_set and width > 700:
+        # The horizontal paned window is added to the workspace before its
+        # two child panes are built.  Tk can therefore send a Configure event
+        # while it has no sash yet; defer positioning until both panes exist.
+        if not self._initial_split_set and len(self.main_split.panes()) >= 2 and width > 700:
             self.main_split.sashpos(0, int(width * 0.63))
             self._initial_split_set = True
 
