@@ -12,6 +12,8 @@ test("seven beats preserve AIS gaps, layers, countdown and approval/export", asy
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto(demo);
   await expect(page.locator("#countdown")).toHaveText("01:13:31");
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await page.screenshot({ path: "test-results/replay-desktop.png" });
   await expect(page.locator("#beat-buttons button")).toHaveCount(7);
   await page.locator("#beat-buttons button").nth(0).click();
   await expect(page.locator("#vessel-layer .vessel-symbol")).toHaveCount(1);
@@ -45,6 +47,18 @@ test("seven beats preserve AIS gaps, layers, countdown and approval/export", asy
   await page.locator("#export-evidence").click();
   const download = await downloadPromise;
   const record = await readFile(await download.path(), "utf8");
+  const reviewedText = await page.locator("#evidence-content").innerText();
+  const exportedText = await page.evaluate(
+    (html) =>
+      new DOMParser().parseFromString(html, "text/html").body.textContent,
+    record,
+  );
+  for (const line of reviewedText
+    .split("\n")
+    .filter((line) => line.trim() && !line.includes("Open the fictional")))
+    expect(exportedText.replace(/\s+/g, " ")).toContain(
+      line.replace(/\s+/g, " ").trim(),
+    );
   const decision = await page.evaluate(
     (html) =>
       JSON.parse(
@@ -56,6 +70,14 @@ test("seven beats preserve AIS gaps, layers, countdown and approval/export", asy
   expect(decision.label).toBe("simulated");
   expect(decision.asset).toContain("aircraft");
   expect(record).toContain("No operational action was sent.");
+  const exportedPage = await page.context().newPage();
+  await exportedPage.route("**/*", (route) => route.abort());
+  await exportedPage.setContent(record);
+  await expect(exportedPage.locator(".evidence-warning")).toContainText(
+    "Simulated operator approval",
+  );
+  await expect(exportedPage.locator("a, script, img")).toHaveCount(0);
+  await exportedPage.close();
   await page
     .locator("#evidence-dialog")
     .getByText("Back to chart", { exact: true })
@@ -101,6 +123,7 @@ test("live dashboard loads received observations, filters and selects without pr
   await expect(page.locator("#metric-vessels")).toHaveText("2");
   await expect(page.locator("#feed-label")).toBeVisible();
   await expect(page.locator(".vessel-row")).toHaveCount(2);
+  await expect(page.locator("#map-empty")).toBeHidden();
   await page.locator("#search").fill("999000001");
   await expect(page.locator(".vessel-row")).toHaveCount(1);
   await page.locator(".vessel-row").click();
@@ -174,7 +197,11 @@ pq.write_table(pa.Table.from_pylist([{
     "recv_utc": datetime.now(timezone.utc), "msg_type": "PositionReport",
     "mmsi": 999000003, "ship_name": "</script><img src=x onerror=alert(1)>",
     "lat": 53.0, "lon": -6.0, "sog": 1.0, "cog": 90.0
-}]), folder / "fixture.parquet")
+}] + [{
+    "recv_utc": datetime.now(timezone.utc), "msg_type": "PositionReport",
+    "mmsi": 999001000 + index, "ship_name": "RECORDER TEST " + str(index),
+    "lat": 53.0, "lon": -6.0, "sog": 0.0, "cog": 0.0
+} for index in range(125)]), folder / "fixture.parquet")
 `,
       ],
       { cwd: directory, encoding: "utf8" },
@@ -190,7 +217,11 @@ pq.write_table(pa.Table.from_pylist([{
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.setContent(await readFile(join(directory, "map.html"), "utf8"));
-    await expect(page.locator(".vessel-row")).toHaveCount(1);
+    await expect(page.locator(".vessel-row")).toHaveCount(90);
+    await page.locator("#show-more").click();
+    await expect(page.locator(".vessel-row")).toHaveCount(126);
+    await expect(page.locator("#show-more")).toHaveCount(0);
+    await page.getByRole("searchbox").fill("999000003");
     await page.locator(".vessel-row").click();
     await expect(page.locator(".selection")).toContainText(
       "</script><img src=x onerror=alert(1)>",

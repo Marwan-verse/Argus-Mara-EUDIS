@@ -38,8 +38,12 @@ bundles to `ui/app.mjs`, `ui/live/dashboard.mjs`, `ui/space/evidence.js`, and
 Commit the source, lockfile and bundles together. Python's static server and
 `live/Dockerfile` serve the bundles directly; no CDN or Node service is involved.
 The replay and live data helpers remain pure JavaScript for their existing tests.
-The live canvas renderer caches its basemap; Svelte owns dashboard controls and
-keys directory rows by MMSI. The native Tkinter applications remain Python.
+The live canvas renderer caches its basemap, projected positions and coastline
+paths. Svelte owns dashboard controls and a shared live/recorder directory keyed
+by MMSI. The directory initially renders 90 rows, offers more in batches of 90,
+and searches every contact. Name order and search strings are rebuilt when
+vessels change; feed heartbeats retain the same vessel array. The native Tkinter
+applications remain Python.
 
 Browser tests need the Python `.venv` dependencies (root and `live/requirements.txt`)
 and Chromium. They use `/usr/bin/chromium` when installed; otherwise run
@@ -58,6 +62,29 @@ removed by the previous renderer, versus zero additions/removals by Svelte.
 This demonstrates reduced DOM churn, not a general loading-speed benchmark;
 the bundles include the Svelte runtime and are larger than the original scripts.
 
+The 11 October follow-up measured unnecessary idle work with 5,000 explicitly
+simulated contacts in local Chromium:
+
+| Work measured | Before | After |
+|---|---:|---:|
+| Animation callbacks in one second of paused replay | 53 | 0 |
+| Full-directory sorts across 12 feed heartbeats | 12 | 0 |
+| Map redraws across those heartbeats | 14 | 0 |
+
+These are work counters, not a general speed benchmark. Search round trips were
+46 ms before and 54 ms after in these individual runs, so no search latency
+improvement is claimed. Map redraws still occur for new observations, selection,
+navigation, resizing and the 30-minute observation-age boundary. Paused or hidden
+replays schedule no animation; returning to the tab resumes from its held time.
+Closed evidence/response dialogs do not build their review content. Evidence
+exports serialize the reviewed Svelte content into a standalone HTML record.
+
+To repeat the measurement, start `python scripts/serve_demo.py --port 8002` and
+`.venv/bin/python tests/serve_live_fixture.py` in separate terminals, then run
+`npm run measure:frontend`. Chromium must be installed as for browser tests.
+`DEMO_URL` and `LIVE_URL` can override the local URLs. The measurement substitutes
+its own simulated snapshot and events; it never connects to a provider.
+
 ## Controls
 
 - Play/Pause; Restart; 30×, 60× or 120× speed; time slider.
@@ -72,6 +99,7 @@ the bundles include the Svelte runtime and are larger than the original scripts.
   simulated decision. Approval opens its evidence record.
 - Seeking or restarting clears approval. Approval otherwise survives forward
   playback for that run. Decisions are session-local and are lost on reload.
+- Playback holds while its browser tab is hidden and resumes when visible.
 - Space toggles playback and arrow keys step a minute when a form, button or
   dialog is not focused. Escape closes dialogs.
 

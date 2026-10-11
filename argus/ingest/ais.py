@@ -118,9 +118,12 @@ def import_file(path, label, schema="normalized"):
         except ImportError as exc:
             raise ValueError("Parquet needs the recorder's pyarrow; use a CSV export for a dependency-free handoff") from exc
         # Explicit columns exclude raw messages and any future secret-bearing columns.
-        rows = pq.read_table(path, columns=["mmsi", "msg_type", "ship_name", "lat", "lon",
-                                          "sog", "cog", "time_utc", "recv_utc"]).to_pylist()
-        result = normalise_rows(rows, label, schema)
+        columns = ["mmsi", "msg_type", "ship_name", "lat", "lon",
+                   "sog", "cog", "time_utc", "recv_utc"]
+        with pq.ParquetFile(path) as parquet:
+            rows = (row for batch in parquet.iter_batches(batch_size=4096, columns=columns)
+                    for row in batch.to_pylist())
+            result = normalise_rows(rows, label, schema)
     else:
         with path.open(encoding="utf-8-sig", newline="") as stream:
             result = normalise_rows(csv.DictReader(stream), label, schema)

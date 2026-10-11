@@ -96,6 +96,19 @@ class LiveStateTests(unittest.TestCase):
         snapshot["vessels"][0]["lat"] = 0
         self.assertEqual(state.snapshot()["vessels"][0]["lat"], 53)
 
+    def test_lightweight_ids_and_count_include_static_contacts_and_eviction(self):
+        state = LiveState(max_vessels=2)
+        self.assertEqual(state.contact_count, 0)
+        state.ingest(position(mmsi=111111111))
+        state.ingest(static({"Name": "STATIC TEST"}, mmsi=222222222))
+        self.assertEqual(state.contact_count, 2)
+        self.assertEqual(state.contact_ids(), {"111111111", "222222222"})
+        ids = state.contact_ids()
+        ids.clear()
+        self.assertEqual(state.contact_count, 2)
+        state.ingest(position(mmsi=333333333))
+        self.assertEqual(state.contact_ids(), {"222222222", "333333333"})
+
 
 if __name__ == "__main__":
     unittest.main()

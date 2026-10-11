@@ -194,6 +194,20 @@ class LiveServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(delta["removals"], ["999000001"])
         self.assertEqual(len(self.service.history), 1)
 
+    async def test_health_and_eviction_publish_do_not_materialize_the_fleet(self):
+        await self.service.accept(row())
+        first = (await self.get("/api/v1/vessels"))[1]
+        self.service.state.max_vessels = self.service.config.max_vessels = 1
+        with patch.object(self.service.state, "snapshot", side_effect=AssertionError("unneeded full fleet snapshot")):
+            await self.service.accept(row(mmsi=999000002))
+            await self.service.accept(row(mmsi=999000003))
+            await self.service.publish()
+            status, health = await self.get("/healthz")
+            self.assertEqual((status, health["contacts"]), (200, 1))
+            delta = self.service.updates(first["stream_id"], first["sequence"])
+            self.assertEqual([v["mmsi"] for v in delta["upserts"]], ["999000003"])
+            self.assertIn("999000001", delta["removals"])
+
     async def test_single_upstream_for_multiple_viewers_and_auth_failure(self):
         connections = 0
         subscribed = asyncio.Event()

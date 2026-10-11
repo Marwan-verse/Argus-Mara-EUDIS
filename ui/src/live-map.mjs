@@ -22,10 +22,11 @@ export function createLiveMap(canvas, options) {
     markers = [],
     frame,
     stopped = false;
+  let nextAgeChange = Infinity;
+  const positions = new WeakMap();
   const background = document.createElement("canvas"),
     bctx = background.getContext("2d");
   const text = (id, value) => options.onMetrics(id, value);
-  const nowMs = () => Date.now();
   const controller = new AbortController();
   const listen = (type, handler, config = {}) =>
     canvas.addEventListener(type, handler, {
@@ -98,25 +99,25 @@ export function createLiveMap(canvas, options) {
   const observer = new ResizeObserver(resize);
   observer.observe(canvas.parentElement);
   function landRing(ring) {
-    const points = [];
-    let previous = null;
+    const path = new Path2D(),
+      bounds = [Infinity, Infinity, -Infinity, -Infinity];
+    let previous = null,
+      count = 0;
     for (const p of ring) {
       if (!Array.isArray(p) || !finite(p[0]) || !finite(p[1])) continue;
       let [x, y] = project(p[0], p[1]);
       if (previous !== null) x += Math.round(previous - x);
-      points.push([x, y]);
+      if (count++) path.lineTo(x, y);
+      else path.moveTo(x, y);
+      bounds[0] = Math.min(bounds[0], x);
+      bounds[1] = Math.min(bounds[1], y);
+      bounds[2] = Math.max(bounds[2], x);
+      bounds[3] = Math.max(bounds[3], y);
       previous = x;
     }
-    if (points.length < 3) return null;
-    return {
-      points,
-      bounds: [
-        Math.min(...points.map((p) => p[0])),
-        Math.min(...points.map((p) => p[1])),
-        Math.max(...points.map((p) => p[0])),
-        Math.max(...points.map((p) => p[1])),
-      ],
-    };
+    if (count < 3) return null;
+    path.closePath();
+    return { path, bounds };
   }
   async function loadAssets() {
     const results = options.assets
@@ -125,15 +126,20 @@ export function createLiveMap(canvas, options) {
           { status: "fulfilled", value: options.assets.ports },
         ]
       : await Promise.allSettled([
-          fetch("/assets/world_land.json").then((r) => {
-            if (!r.ok) throw new Error("Coastline unavailable");
-            return r.json();
-          }),
-          fetch("/assets/world_ports.json").then((r) => {
-            if (!r.ok) throw new Error("Ports unavailable");
-            return r.json();
-          }),
+          fetch("/assets/world_land.json", { signal: controller.signal }).then(
+            (r) => {
+              if (!r.ok) throw new Error("Coastline unavailable");
+              return r.json();
+            },
+          ),
+          fetch("/assets/world_ports.json", { signal: controller.signal }).then(
+            (r) => {
+              if (!r.ok) throw new Error("Ports unavailable");
+              return r.json();
+            },
+          ),
         ]);
+    if (stopped) return;
     if (results[0].status === "fulfilled") {
       for (const [level, rings] of Object.entries(
         results[0].value.levels || {},
@@ -208,7 +214,7 @@ export function createLiveMap(canvas, options) {
     }
     bctx.fillStyle = "#fcfdfd";
     bctx.strokeStyle = "#acbfcc";
-    bctx.lineWidth = 0.8;
+    bctx.lineWidth = 0.8 / view.scale;
     const rings =
       landLevels[span > 35 ? "110m" : "50m"] || landLevels["110m"] || [];
     for (const ring of rings) {
@@ -218,17 +224,19 @@ export function createLiveMap(canvas, options) {
       for (const offset of [-1, 0, 1]) {
         const shift = baseShift + offset;
         if (bb[2] + shift < x0 || bb[0] + shift > x1) continue;
-        bctx.beginPath();
-        ring.points.forEach((p, i) => {
-          const x = (p[0] + shift - view.x) * view.scale + width / 2,
-            y = (p[1] - view.y) * view.scale + height / 2;
-          i ? bctx.lineTo(x, y) : bctx.moveTo(x, y);
-        });
-        bctx.closePath();
-        bctx.fill();
-        bctx.stroke();
+        bctx.setTransform(
+          dpr * view.scale,
+          0,
+          0,
+          dpr * view.scale,
+          dpr * (width / 2 + (shift - view.x) * view.scale),
+          dpr * (height / 2 - view.y * view.scale),
+        );
+        bctx.fill(ring.path);
+        bctx.stroke(ring.path);
       }
     }
+    bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     if (options.showPorts()) {
       bctx.fillStyle = "#497c8b";
       const clusters = new Map();
@@ -290,9 +298,9 @@ export function createLiveMap(canvas, options) {
     );
     backgroundDirty = false;
   }
-  function drawMarker(vessel, x, y) {
+  function drawMarker(vessel, x, y, now) {
     const isSelected = options.selected() === vessel.mmsi,
-      old = nowMs() - vessel.received_ms > 1800000,
+      old = now - vessel.received_ms > 1800000,
       r = isSelected ? 6 : 3.3;
     ctx.save();
     ctx.translate(x, y);
@@ -342,28 +350,39 @@ export function createLiveMap(canvas, options) {
   }
   function draw() {
     renderPending = false;
-    if (!width || !height) return;
+    if (stopped || document.hidden || !width || !height) return;
+    const now = Date.now(),
+      selected = options.selected();
     if (backgroundDirty) renderBackground();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(background, 0, 0);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     markers = [];
+    nextAgeChange = Infinity;
     let mapped = 0;
     for (const vessel of store.vessels.values()) {
       if (!vessel.hasPosition) continue;
       mapped++;
-      let [x, y] = project(vessel.lon, vessel.lat);
+      const staleAt = vessel.received_ms + 1800001;
+      if (vessel.label === "real" && staleAt > now)
+        nextAgeChange = Math.min(nextAgeChange, staleAt);
+      let position = positions.get(vessel);
+      if (!position) {
+        position = project(vessel.lon, vessel.lat);
+        positions.set(vessel, position);
+      }
+      let [x, y] = position;
       x += Math.round(view.x - x);
       x = (x - view.x) * view.scale + width / 2;
       y = (y - view.y) * view.scale + height / 2;
       if (x < -15 || x > width + 15 || y < -15 || y > height + 15) continue;
       markers.push({ vessel, x, y });
-      if (vessel.mmsi !== options.selected()) drawMarker(vessel, x, y);
+      if (vessel.mmsi !== selected) drawMarker(vessel, x, y, now);
     }
-    const chosen = markers.find((m) => m.vessel.mmsi === options.selected());
+    const chosen = markers.find((m) => m.vessel.mmsi === selected);
     if (chosen) {
-      drawMarker(chosen.vessel, chosen.x, chosen.y);
+      drawMarker(chosen.vessel, chosen.x, chosen.y, now);
       const name = vesselName(chosen.vessel);
       ctx.font = "600 11px Segoe UI,Arial";
       const tw = Math.min(210, ctx.measureText(name).width),
@@ -385,11 +404,18 @@ export function createLiveMap(canvas, options) {
     );
   }
   function scheduleDraw() {
-    if (!stopped && !renderPending) {
+    if (!stopped && !document.hidden && !renderPending) {
       renderPending = true;
       frame = requestAnimationFrame(draw);
     }
   }
+  document.addEventListener(
+    "visibilitychange",
+    () => {
+      if (!document.hidden) scheduleDraw();
+    },
+    { signal: controller.signal },
+  );
   const pointers = new Map();
   let drag = null,
     pinch = null;
@@ -546,6 +572,9 @@ export function createLiveMap(canvas, options) {
     fitVessels,
     centerSelected,
     draw: scheduleDraw,
+    refreshAge(now = Date.now()) {
+      if (now >= nextAgeChange) scheduleDraw();
+    },
     portsChanged() {
       backgroundDirty = true;
       scheduleDraw();

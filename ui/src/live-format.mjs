@@ -3,7 +3,8 @@ export const timestamp = (value) =>
   typeof value === "string" && Number.isFinite(Date.parse(value))
     ? Date.parse(value)
     : null;
-export const count = (value) => new Intl.NumberFormat("en-GB").format(value);
+const numberFormat = new Intl.NumberFormat("en-GB");
+export const count = (value) => numberFormat.format(value);
 export const dateFormat = new Intl.DateTimeFormat("en-GB", {
   timeZone: "UTC",
   day: "2-digit",

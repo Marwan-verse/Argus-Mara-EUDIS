@@ -121,6 +121,9 @@ Open a second window in the project folder and run:
 The Svelte map preview embeds the local Natural Earth basemap and runs offline.
 It shows received positions, observation timestamps and searchable ship names.
 Rebuild its committed bundle with `npm run build` after frontend source changes.
+The map exporter reads only display columns in batches of 4,096 rows, avoiding a
+Python list containing the whole recording. It still chooses each vessel's
+latest received fix. See [performance measurements](../docs/11-performance.md).
 
 If `check.py` says *No data yet*, wait ten minutes — the first file takes that long.
 

@@ -1,6 +1,7 @@
 <script>
   import { connectLive } from "./live-connection.mjs";
   import { createLiveMap } from "./live-map.mjs";
+  import VesselDirectory from "./VesselDirectory.svelte";
   import {
     count,
     dateFormat,
@@ -19,39 +20,29 @@
     status: "Connecting",
   });
   let now = $state(Date.now()),
-    query = $state(""),
     selected = $state(null),
-    listLimit = $state(90),
     showPorts = $state(false);
   let mapMetrics = $state({}),
     copyStatus = $state(""),
     apiUrl = $state("");
-  let canvas, search, dataDialog, urlInput, map;
-  let positioned = $derived(snapshot.vessels.filter((v) => v.hasPosition));
+  let canvas, vesselDirectory, dataDialog, urlInput, map;
+  let vessels = $derived(snapshot.vessels);
+  let positioned = $derived(vessels.filter((v) => v.hasPosition));
   let simulated = $derived(
     positioned.filter((v) => v.label === "simulated").length,
   );
-  let filtered = $derived(
-    snapshot.vessels
-      .filter((v) =>
-        (v.name + " " + v.mmsi)
-          .toLocaleLowerCase("en-GB")
-          .includes(query.trim().toLocaleLowerCase("en-GB")),
-      )
-      .sort(
-        (a, b) =>
-          vesselName(a).localeCompare(vesselName(b), "en-GB") ||
-          a.mmsi.localeCompare(b.mmsi),
-      ),
-  );
-  let chosen = $derived(snapshot.vessels.find((v) => v.mmsi === selected));
+  let vesselLookup = $derived(new Map(vessels.map((v) => [v.mmsi, v])));
+  let chosen = $derived(vesselLookup.get(selected));
   let feedDescription = $derived(feedState(snapshot.feed, now));
   let latestPosition = $derived(
     timestamp(snapshot.feed.last_position_utc) !== null
       ? snapshot.feed.last_position_utc
       : positioned.length
         ? new Date(
-            Math.max(...positioned.map((v) => v.received_ms)),
+            positioned.reduce(
+              (latest, v) => Math.max(latest, v.received_ms),
+              0,
+            ),
           ).toISOString()
         : null,
   );
@@ -146,8 +137,9 @@
   function attachDashboard(element) {
     canvas = element;
     const connection = connectLive((value) => {
+      const changedVessels = snapshot.vessels !== value.vessels;
       snapshot = value;
-      map?.draw();
+      if (changedVessels) map?.draw();
     });
     map = createLiveMap(canvas, {
       store: connection.store,
@@ -159,8 +151,9 @@
       },
     });
     const timer = setInterval(() => {
+      if (document.hidden) return;
       now = Date.now();
-      map.draw();
+      map.refreshAge(now);
     }, 1000);
     return () => {
       connection.destroy();
@@ -171,6 +164,12 @@
 </script>
 
 <svelte:document
+  onvisibilitychange={() => {
+    if (!document.hidden) {
+      now = Date.now();
+      map?.refreshAge(now);
+    }
+  }}
   onkeydown={(event) => {
     if (event.key === "Escape" && !dataDialog.open) selectVessel(null);
   }}
@@ -190,7 +189,10 @@
       onclick={() => canvas.focus()}
       ><span aria-hidden="true">◫</span> Maritime situation</button
     >
-    <button class="nav-button" id="nav-vessels" onclick={() => search.focus()}
+    <button
+      class="nav-button"
+      id="nav-vessels"
+      onclick={() => vesselDirectory?.focusSearch()}
       ><span aria-hidden="true">◉</span> Vessel directory</button
     >
     <button class="nav-button" id="nav-data" onclick={openData}
@@ -347,7 +349,7 @@
               title="Fit received vessels">⌖</button
             >
           </div>
-          <div class="map-empty" id="map-empty">
+          <div class="map-empty" id="map-empty" hidden={positioned.length > 0}>
             <div class="empty-symbol" aria-hidden="true">⌖</div>
             <strong id="empty-title"
               >{!snapshot.connected && snapshot.initialReceived
@@ -393,86 +395,13 @@
         id="directory-panel"
         aria-label="Vessel directory and observation details"
       >
-        <div class="panel-heading">
-          <h2>Vessel directory</h2>
-          <span class="count mono" id="directory-count"
-            >{count(filtered.length)}
-            {query.trim() ? "matches" : "vessels"}</span
-          >
-        </div>
-        <div class="search-wrap">
-          <svg
-            viewBox="0 0 20 20"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.6"
-            aria-hidden="true"
-            ><circle cx="8.3" cy="8.3" r="5.6" /><path
-              d="m12.5 12.5 4.5 4.5"
-            /></svg
-          ><input
-            id="search"
-            bind:this={search}
-            bind:value={query}
-            oninput={() => (listLimit = 90)}
-            type="search"
-            placeholder="Search name or MMSI"
-            aria-label="Search vessels by name or MMSI"
-            autocomplete="off"
-            spellcheck="false"
-          />
-        </div>
-        <div class="directory-scroll">
-          <div id="vessel-list" class="vessel-list">
-            {#each filtered.slice(0, listLimit) as vessel (vessel.mmsi)}
-              <button
-                class="vessel-row {selected === vessel.mmsi
-                  ? 'selected'
-                  : ''} {vessel.label === 'simulated' ? 'simulated' : ''}"
-                data-mmsi={vessel.mmsi}
-                aria-pressed={selected === vessel.mmsi}
-                onclick={() => selectVessel(vessel.mmsi)}
-                ><span class="vessel-symbol"
-                  ><svg
-                    viewBox="0 0 20 20"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.3"
-                    aria-hidden="true"
-                    ><path d="m10 2 5 13-5-2-5 2 5-13Z" /><path
-                      d="M3 17c1 0 1 .8 2 .8s1-.8 2-.8 1 .8 2 .8 1-.8 2-.8 1 .8 2 .8 1-.8 2-.8 1 .8 2 .8"
-                    /></svg
-                  ></span
-                ><span class="vessel-text"
-                  ><span class="vessel-name">{vesselName(vessel)}</span><span
-                    class="vessel-id mono"
-                    >{vessel.mmsi}{vessel.label === "simulated"
-                      ? " · Simulated"
-                      : ""}</span
-                  ></span
-                ><span class="vessel-age mono"
-                  >{vessel.hasPosition
-                    ? ageText(vessel.received_ms, now)
-                    : "No position"}</span
-                ></button
-              >
-            {/each}
-          </div>
-          <p
-            id="no-results"
-            class="no-results"
-            hidden={filtered.length > 0 || !snapshot.vessels.length}
-          >
-            No matching vessel. Try a name or MMSI.
-          </p>
-          <button
-            id="show-more"
-            onclick={() => (listLimit += 90)}
-            class="show-more"
-            hidden
-            >Show more · {count(Math.max(0, filtered.length - listLimit))} remaining</button
-          >
-        </div>
+        <VesselDirectory
+          {vessels}
+          {selected}
+          {now}
+          onSelect={selectVessel}
+          bind:this={vesselDirectory}
+        />
         {#if chosen}<section
             class="selection"
             id="selection"
