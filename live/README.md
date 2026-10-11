@@ -146,6 +146,11 @@ of input. The service allows at most 32 simultaneous browser event streams.
 Native clients use incremental polling, so teammates do not repeatedly download
 the entire fleet. These are resource controls for the 0.5 GB Trial service.
 
+Publication and eviction bookkeeping now read cache IDs without creating a full
+public fleet snapshot; `/healthz` reads the contact count directly. Snapshot and
+delta response fields, age semantics and durable-before-publication ordering are
+unchanged. See [local performance measurements](../docs/11-performance.md).
+
 The API supports cross-origin GET and EventSource for a future browser frontend.
 The [minimal integration example](API.md) keeps a new design independent of this
 viewer; teams can reuse the same URL and field names.

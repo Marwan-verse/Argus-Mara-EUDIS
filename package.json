@@ -7,6 +7,7 @@
     "check": "svelte-check --workspace ui/src --fail-on-warnings",
     "test": "node --test tests/test_replay.mjs tests/test_live_browser.mjs",
     "test:browser": "playwright test",
+    "measure:frontend": "node scripts/measure_frontend.mjs",
     "check:skills": "node scripts/check_svelte.mjs"
   },
   "engines": {

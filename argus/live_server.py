@@ -151,7 +151,7 @@ class LiveService:
                 for row in rows:
                     row["label"] = self.config.label
                     self.state.ingest(row)
-            self.published_ids = {v["mmsi"] for v in self.state.snapshot()["vessels"]}
+            self.published_ids = self.state.contact_ids()
         except ArchiveError:
             self.feed["archive_status"] = "error"
             self.set_status("archive_error")
@@ -191,7 +191,7 @@ class LiveService:
         if upsert:
             self.dirty[upsert["mmsi"]] = upsert
             if len(self.dirty) > self.config.max_vessels:
-                current_ids = {v["mmsi"] for v in self.state.snapshot()["vessels"]}
+                current_ids = self.state.contact_ids()
                 self.dirty = {mmsi: v for mmsi, v in self.dirty.items() if mmsi in current_ids}
             if row["msg_type"] in POSITION_TYPES:
                 self.feed["last_position_utc"] = upsert["received_utc"]
@@ -238,7 +238,7 @@ class LiveService:
     async def publish(self):
         if not self.dirty and not self.status_dirty:
             return
-        current = {v["mmsi"] for v in self.state.snapshot()["vessels"]}
+        current = self.state.contact_ids()
         self.sequence += 1
         batch = {**self.envelope(), "feed": dict(self.feed),
                  "upserts": [v for mmsi, v in self.dirty.items() if mmsi in current],
@@ -328,7 +328,7 @@ async def health(request):
     return response_json({"process_ready": service.ready, "feed": dict(service.feed),
                           "archive": service.archive.stats(),
                           "persistent_volume_verified": service.volume_verified,
-                          "contacts": service.state.snapshot()["meta"]["contacts"],
+                          "contacts": service.state.contact_count,
                           "uptime_s": round(time.monotonic() - service.started)})
 
 

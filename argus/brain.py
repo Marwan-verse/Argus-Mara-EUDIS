@@ -38,11 +38,27 @@ def recent_gap(track, now_s):
     return found
 
 
+def _gap_windows(track):
+    """Yield each observed fix with its latest eligible gap in one pass.
+
+    Tracks are time-ordered by the scenario contract. A gap is first available
+    at its returning fix and remains eligible at exactly MAX_GAP_AGE_S.
+    """
+    previous = latest = None
+    for fix in track:
+        if previous is not None:
+            silent_s = fix["t"] - previous["t"] - EXPECTED_FIX_INTERVAL_S
+            if silent_s >= MIN_GAP_S:
+                latest = previous, fix, silent_s
+        gap = latest if latest and fix["t"] - latest[1]["t"] <= MAX_GAP_AGE_S else None
+        yield fix, gap
+        previous = fix
+
+
 def detect_vessel(vessel, cables, assets, detections, alert_id):
     """Return the earliest explainable alert for one vessel, or None."""
     track = vessel["track"]
-    for fix in track:
-        gap = recent_gap(track, fix["t"])
+    for fix, gap in _gap_windows(track):
         if gap is None:
             continue
         before, after, silent_s = gap

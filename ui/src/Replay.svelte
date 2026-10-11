@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import ReplayMap from "./ReplayMap.svelte";
   import EvidenceView from "./EvidenceView.svelte";
   import {
@@ -21,8 +21,9 @@
   let layers = $state({ track: true, radar: true, reach: true, assets: true });
   let evidenceDialog = $state(),
     approvalDialog = $state();
-  let lastFrame = null,
-    replayTime = 0;
+  let evidenceOpen = $state(false),
+    approvalOpen = $state(false),
+    visible = $state(!document.hidden);
   let chartSize = $state.raw({ width: 0, height: 0 });
   let scaleWidth = $derived(
     Math.round(
@@ -60,7 +61,6 @@
     beats = $derived(payload?.beats || []),
     events = $derived(payload?.events || []);
   let evidenceAvailable = $derived(payload?.evidenceAvailable || false);
-  let state = $derived({ time, approved });
   let fix = $derived(vessel ? fixAt(vessel.track, time) : null);
   let left = $derived(alert ? remaining(alert, time) : null);
   let currentBeat = $derived(
@@ -119,23 +119,21 @@
     playing = false;
     approved = null;
     time = Math.max(0, Math.min(duration, Number(value)));
-    replayTime = time;
-    lastFrame = null;
   }
   function togglePlay() {
     if (time >= duration) setTime(0);
-    replayTime = time;
     playing = !playing;
-    lastFrame = null;
   }
   function openEvidence() {
     playing = false;
+    evidenceOpen = true;
     evidenceDialog.showModal();
   }
   function openApproval() {
     playing = false;
     if (!available.length) return;
     confirmed = false;
+    approvalOpen = true;
     selectedResponse = available[0].asset;
     approvalDialog.showModal();
   }
@@ -181,27 +179,17 @@
     return name;
   }
 
-  function evidenceHtml(includePackLink = true) {
-    const left = remaining(alert, state.time);
-    const observedRadar =
-      detection && detection.t <= state.time ? detection : null;
-    const spaceLink = evidenceAvailable
-      ? includePackLink
-        ? `<a href="${escape(alert.evidence_url)}" target="_blank" rel="noopener">Open the fictional Space contact review</a>`
-        : "The separate Space contact review is included in the demo package."
-      : "The separate Space contact review is unavailable on this device.";
-    return `<h3>Provenance</h3><p>Scenario: ${escape(scenario.label)}. Vessel: ${escape(vessel.label)}. Cable geometry: ${escape(cable.label)} and illustrative. Response capabilities: assumptions. Coastline: real, Natural Earth display geometry.</p>
-    <h3>Available observations at ${utc(state.time)} UTC</h3><p>${left ? alert.reasons.map(escape).join("<br>") : "The alert has not fired at this replay time."}</p>
-    ${observedRadar ? `<dl><div><dt>Radar acquisition</dt><dd>${utc(observedRadar.t)} UTC · ${escape(observedRadar.label)}</dd></div><div><dt>Radar length estimate</dt><dd>${escape(observedRadar.length_m ?? "unavailable")} m</dd></div><div><dt>AIS-declared length</dt><dd>${escape(vessel.ais_length_m ?? "unavailable")} m</dd></div><div><dt>AIS association</dt><dd>${observedRadar.matched_mmsi === null ? "Unmatched; candidate identity only" : escape(observedRadar.matched_mmsi)}</dd></div></dl><p>Length and identity require separate review with measurement uncertainty. The radar contact is not a confirmed match.</p>` : "<p>No radar observation is available yet.</p>"}
-    <h3>Countdown assumptions</h3><p>${left ? `Expected remaining ${clock(left.expected)}; earliest remaining ${clock(left.earliest)}. ` : ""}${escape(alert.eta_method || "Constant speed and course from the alert fix.")} Response arrival times are assumptions.</p>
-    <h3>Limits of the evidence</h3><p>An AIS gap or unmatched radar observation does not establish hostile intent. The sample includes no corroborating weather, port or traffic data. The illustrative anchor-reach section and response capabilities are assumptions. ${escape(alert.score_basis || "")}</p>
-    <div class="evidence-warning">${state.approved ? `Simulated operator approval for ${escape(state.approved.asset)} recorded at ${utc(state.approved.time)} UTC. No operational action was sent.` : "Human review required. No operator approval has been recorded."}</div>
-    <h3>Evidence record</h3><p>${spaceLink} You can export the current operator review as a separate local HTML record after the alert fires.</p>`;
-  }
-
   function exportEvidence() {
     if (!left) return;
-    const html = `<!doctype html><html lang="en"><meta charset="utf-8"><title>Argus Mara — exercise evidence ${escape(alert.id)}</title><style>body{max-width:800px;margin:50px auto;font:14px/1.7 system-ui;padding:20px;color:#222}h1{font-size:26px}h3{margin-top:25px}dl>div{display:flex;justify-content:space-between}dd{margin:0}.evidence-warning{background:#f2f2f2;padding:16px}code{font-size:12px}</style><h1>Argus Mara · Exercise evidence ${escape(alert.id)}</h1><p>SIMULATED EXERCISE · Scenario time ${utc(state.time)} UTC · ${escape(scenario.t0_utc.slice(0, 10))}</p>${evidenceHtml(false)}<h3>Decision record</h3><pre>${escape(JSON.stringify(state.approved || { approval: "not recorded" }, null, 2))}</pre><h3>Alert contract</h3><pre style="white-space:pre-wrap">${escape(JSON.stringify(alert, null, 2))}</pre></html>`;
+    // Export the reviewed Svelte markup so the screen and record cannot diverge.
+    const content = document.getElementById("evidence-content").cloneNode(true);
+    for (const link of content.querySelectorAll("a"))
+      link.replaceWith(
+        document.createTextNode(
+          "The separate Space contact review is included in the demo package.",
+        ),
+      );
+    const html = `<!doctype html><html lang="en"><meta charset="utf-8"><title>Argus Mara — exercise evidence ${escape(alert.id)}</title><style>body{max-width:800px;margin:50px auto;font:14px/1.7 system-ui;padding:20px;color:#222}h1{font-size:26px}h3{margin-top:25px}dl>div{display:flex;justify-content:space-between}dd{margin:0}.evidence-warning{background:#f2f2f2;padding:16px}code{font-size:12px}</style><h1>Argus Mara · Exercise evidence ${escape(alert.id)}</h1><p>SIMULATED EXERCISE · Scenario time ${utc(time)} UTC · ${escape(scenario.t0_utc.slice(0, 10))}</p>${content.innerHTML}<h3>Decision record</h3><pre>${escape(JSON.stringify(approved || { approval: "not recorded" }, null, 2))}</pre><h3>Alert contract</h3><pre style="white-space:pre-wrap">${escape(JSON.stringify(alert, null, 2))}</pre></html>`;
     const url = URL.createObjectURL(
       new Blob([html], { type: "text/html;charset=utf-8" }),
     );
@@ -213,37 +201,48 @@
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-  async function loadJson(url) {
-    const response = await fetch(url);
+  async function loadJson(url, signal) {
+    const response = await fetch(url, { signal });
     if (!response.ok)
       throw new Error(`Unable to load ${url} (${response.status}).`);
     return response.json();
   }
-  onMount(() => {
-    let stopped = false,
+  // Animation is external work: schedule it only during visible playback.
+  $effect(() => {
+    if (!playing || !visible) return;
+    const speed = rate,
+      end = duration;
+    let replayTime = untrack(() => time),
+      lastFrame = null,
       frame;
     function animate(now) {
-      if (stopped) return;
-      if (playing && lastFrame !== null) {
+      if (lastFrame !== null) {
         replayTime = Math.min(
-          duration,
-          replayTime + Math.min((now - lastFrame) / 1000, 0.5) * rate,
+          end,
+          replayTime + Math.min((now - lastFrame) / 1000, 0.5) * speed,
         );
         time = Math.floor(replayTime);
-        if (replayTime >= duration) {
-          time = duration;
+        if (replayTime >= end) {
+          time = end;
           playing = false;
+          return;
         }
       }
       lastFrame = now;
       frame = requestAnimationFrame(animate);
     }
+    frame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frame);
+  });
+  onMount(() => {
+    let stopped = false;
+    const controller = new AbortController();
     async function load() {
       try {
         const [scenario, alerts, coastline] = await Promise.all([
-          loadJson("../demo/scenario.json"),
-          loadJson("../demo/alerts.json"),
-          loadJson("assets/coastline.json"),
+          loadJson("../demo/scenario.json", controller.signal),
+          loadJson("../demo/alerts.json", controller.signal),
+          loadJson("assets/coastline.json", controller.signal),
         ]);
         const alert = [...alerts.alerts].sort((a, b) => a.t - b.t)[0];
         if (!alert) throw new Error("This replay needs a scenario alert.");
@@ -269,7 +268,10 @@
         ) {
           try {
             evidenceAvailable = (
-              await fetch(alert.evidence_url, { method: "HEAD" })
+              await fetch(alert.evidence_url, {
+                method: "HEAD",
+                signal: controller.signal,
+              })
             ).ok;
           } catch {
             /* pack unavailable */
@@ -387,9 +389,7 @@
           evidenceAvailable,
         };
         time = alert.t;
-        replayTime = time;
         rate = scenario.replay_speed;
-        frame = requestAnimationFrame(animate);
       } catch (cause) {
         if (!stopped) error = `Replay unavailable. ${cause.message}`;
       }
@@ -397,14 +397,14 @@
     load();
     return () => {
       stopped = true;
-      cancelAnimationFrame(frame);
+      controller.abort();
     };
   });
 </script>
 
 <svelte:document
   onkeydown={keyboard}
-  onvisibilitychange={() => (lastFrame = null)}
+  onvisibilitychange={() => (visible = !document.hidden)}
 />
 {#if error}<div id="load-error" class="load-error" role="alert">{error}</div>
 {:else if payload}
@@ -773,7 +773,12 @@
         >{/each}
     </div>
   </footer>
-  <dialog id="evidence-dialog" bind:this={evidenceDialog} class="review-dialog">
+  <dialog
+    id="evidence-dialog"
+    bind:this={evidenceDialog}
+    class="review-dialog"
+    onclose={() => (evidenceOpen = false)}
+  >
     <div class="dialog-heading">
       <div>
         <span class="eyebrow">Evidence review · A1</span>
@@ -785,16 +790,16 @@
       >
     </div>
     <div id="evidence-content">
-      <EvidenceView
-        {scenario}
-        {vessel}
-        {cable}
-        {alert}
-        {detection}
-        {time}
-        {approved}
-        {evidenceAvailable}
-      />
+      {#if evidenceOpen}<EvidenceView
+          {scenario}
+          {vessel}
+          {cable}
+          {alert}
+          {detection}
+          {time}
+          {approved}
+          {evidenceAvailable}
+        />{/if}
     </div>
     <div class="dialog-actions">
       <button onclick={(event) => event.currentTarget.closest("dialog").close()}
@@ -811,6 +816,7 @@
     id="approval-dialog"
     bind:this={approvalDialog}
     class="review-dialog approval-dialog"
+    onclose={() => (approvalOpen = false)}
   >
     <div class="dialog-heading">
       <div>
@@ -823,27 +829,27 @@
       >
     </div>
     <div id="approval-content">
-      <fieldset>
-        <legend>Choose a simulated response</legend
-        >{#each available as option (option.asset)}<label
-            class="response-choice"
-            ><input
-              type="radio"
-              name="response-option"
-              value={option.asset}
-              bind:group={selectedResponse}
-            />
-            {option.asset} · {Math.ceil(option.eta_s / 60)} min assumed arrival</label
-          >{/each}
-      </fieldset>
-      <p>
-        Earliest cable crossing: {left ? clock(left.earliest) : "—"} remaining.
-      </p>
-      <p class="approval-note">
-        This records an exercise decision. Vessel identity, intent, cable
-        geometry and response capabilities require verification before any
-        operational use.
-      </p>
+      {#if approvalOpen}<fieldset>
+          <legend>Choose a simulated response</legend
+          >{#each available as option (option.asset)}<label
+              class="response-choice"
+              ><input
+                type="radio"
+                name="response-option"
+                value={option.asset}
+                bind:group={selectedResponse}
+              />
+              {option.asset} · {Math.ceil(option.eta_s / 60)} min assumed arrival</label
+            >{/each}
+        </fieldset>
+        <p>
+          Earliest cable crossing: {left ? clock(left.earliest) : "—"} remaining.
+        </p>
+        <p class="approval-note">
+          This records an exercise decision. Vessel identity, intent, cable
+          geometry and response capabilities require verification before any
+          operational use.
+        </p>{/if}
     </div>
     <label class="confirmation"
       ><input id="confirm-review" bind:checked={confirmed} type="checkbox" /> I reviewed

@@ -16,15 +16,23 @@ export function connectLive(onChange) {
   let connected = false,
     initialReceived = false,
     status = "Connecting";
+  let vessels = [],
+    vesselsDirty = false;
   function publish() {
-    if (!stopped)
+    if (!stopped) {
+      // Feed heartbeats must not invalidate the directory or redraw all contacts.
+      if (vesselsDirty) {
+        vessels = [...store.vessels.values()];
+        vesselsDirty = false;
+      }
       onChange({
-        vessels: [...store.vessels.values()],
+        vessels,
         feed: { ...store.feed },
         connected,
         initialReceived,
         status,
       });
+    }
   }
   function changed() {
     if (!throttle)
@@ -50,6 +58,7 @@ export function connectLive(onChange) {
       const payload = await response.json();
       if (stopped) return;
       if (applySnapshot(store, payload)) {
+        vesselsDirty = true;
         initialReceived = true;
         changed();
       } else if (!initialReceived) throw new Error("Invalid snapshot");
@@ -74,6 +83,7 @@ export function connectLive(onChange) {
     source.onerror = () => connection(false, "Reconnecting");
     source.addEventListener("snapshot", (event) => {
       if (applySnapshot(store, parse(event))) {
+        vesselsDirty = true;
         initialReceived = true;
         connection(true, "Shared service connected");
       }
@@ -87,6 +97,8 @@ export function connectLive(onChange) {
         return;
       }
       if (result === "applied") {
+        if (payload.upserts?.length || payload.removals?.length)
+          vesselsDirty = true;
         initialReceived = true;
         connection(true, "Shared service connected");
         if (payload.sequence > previous + 1) snapshot().catch(() => {});

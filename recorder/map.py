@@ -21,10 +21,19 @@ if not files:
 
 cutoff = time.time() - (minutes + 10) * 60  # a file covers up to 10 minutes before it is written
 recent = [str(f) for f in files if f.stat().st_mtime >= cutoff] or [str(files[-1])]
-table = pq.read_table(recent, columns=["recv_utc", "msg_type", "mmsi", "ship_name", "lat", "lon", "sog", "cog"])
+
+
+def recording_rows(paths):
+    """Read only display columns, converting at most 4096 rows at a time."""
+    columns = ["recv_utc", "msg_type", "mmsi", "ship_name", "lat", "lon", "sog", "cog"]
+    for path in paths:
+        with pq.ParquetFile(path) as parquet:
+            for batch in parquet.iter_batches(batch_size=4096, columns=columns):
+                yield from batch.to_pylist()
+
 
 names, latest = {}, {}
-for r in table.to_pylist():
+for r in recording_rows(recent):
     if r["ship_name"]:
         names[r["mmsi"]] = r["ship_name"]
     lat, lon = r["lat"], r["lon"]

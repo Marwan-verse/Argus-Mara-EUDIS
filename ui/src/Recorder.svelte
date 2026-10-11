@@ -1,9 +1,9 @@
 <script>
   import { createLiveMap } from "./live-map.mjs";
   import { normalizeVessel } from "../live/live.mjs";
+  import VesselDirectory from "./VesselDirectory.svelte";
   let { data } = $props();
   let selected = $state(null),
-    query = $state(""),
     mapMetrics = $state({});
   let canvas, map;
   let ships = $derived(
@@ -17,11 +17,6 @@
         }),
       )
       .filter(Boolean),
-  );
-  let filtered = $derived(
-    ships.filter((ship) =>
-      `${ship.name} ${ship.mmsi}`.toLowerCase().includes(query.toLowerCase()),
-    ),
   );
   let chosen = $derived(ships.find((ship) => ship.mmsi === selected));
   function select(id) {
@@ -90,25 +85,12 @@
         </div>
       </section>
       <aside class="directory-panel panel">
-        <div class="panel-heading"><h2>Recorded ships</h2></div>
-        <div class="search-wrap">
-          <input
-            type="search"
-            aria-label="Search recorded ships"
-            placeholder="Search name or MMSI"
-            bind:value={query}
-          />
-        </div>
-        <div class="directory-scroll">
-          {#each filtered as ship (ship.mmsi)}<button
-              class="vessel-row {selected === ship.mmsi ? 'selected' : ''}"
-              onclick={() => select(ship.mmsi)}
-              ><span class="vessel-text"
-                ><strong class="vessel-name">{ship.name || "(no name)"}</strong
-                ><span class="vessel-id">MMSI {ship.mmsi}</span></span
-              ><span class="vessel-age">{ship.sog_kn ?? "?"} kn</span></button
-            >{/each}
-        </div>
+        <VesselDirectory
+          vessels={ships}
+          {selected}
+          onSelect={select}
+          recorded
+        />
         {#if chosen}<section class="selection">
             <h3>{chosen.name || "(no name)"}</h3>
             <p>MMSI {chosen.mmsi} · Real AIS</p>

@@ -158,6 +158,15 @@ class LiveState:
                 "metadata_received_utc": _iso(vessel["_metadata"]),
                 "age_s": age, "stale": age is None or age > self.stale_seconds}
 
+    @property
+    def contact_count(self):
+        """Count contacts without constructing or exposing public observations."""
+        return len(self._vessels)
+
+    def contact_ids(self):
+        """Return an isolated set of public IDs without calculating ages/fields."""
+        return {str(mmsi) for mmsi in self._vessels}
+
     def snapshot(self, now=None):
         """Return isolated JSON-safe public dictionaries and cache counters."""
         now = datetime.now(timezone.utc) if now is None else _utc(now)

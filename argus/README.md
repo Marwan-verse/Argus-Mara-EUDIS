@@ -18,6 +18,12 @@ section. Its `score` counts satisfied cues; it is not a threat probability.
 `countdown.py` also calculates assumed response arrival times. Additional modules
 are unnecessary for this v1 replay.
 
+The detector now maintains reception gaps in one pass through each ordered track.
+Recorder Parquet imports stream allowed columns in 4,096-row batches. The optional
+live service uses lightweight cache IDs/counts for publication and health checks.
+See [performance measurements](../docs/11-performance.md) and run
+`.venv/bin/python scripts/measure_backend.py` to repeat the simulated checks.
+
 `weather.py` (D36) fetches the live Met Éireann point forecast for the desktop app's optional
 "Live weather" switch, and turns a grid of point forecasts into the map's rain/cloud overlay and wind arrows. It is real, current, display-only data and never feeds `brain.py` or
 `countdown.py`. Try it with `python -m argus.weather [LAT LON]`.
