@@ -384,3 +384,13 @@ stay local and ignored. Without a matching photograph, the card displays a
 labelled placeholder. The reference screenshot's photograph is not reused for
 other vessels. The card scrolls and stays within the viewport after dragging,
 resizing or Windows display scaling.
+
+### Map ping
+
+The target-shaped **Ping** button sits directly below the ruler on the right
+toolbar. Click it, then click a map position to show a labelled cyan ping for
+15 seconds. Panning and zooming keep it anchored to that coordinate. Click Ping
+again while armed to cancel, or press **Escape** on the map to clear it. A new
+ping replaces the previous one. **Reduce panel motion** also stops the ping's
+pulsing rings. Pings are local operator annotations; they are not sent to a
+ship or another team member and do not create an alert.

@@ -233,6 +233,9 @@ class ArgusApp:
         self.map_layers["World ports"].set(True)
         self.irish_ports_only = tk.BooleanVar(value=True)
         self.map_tool: str | None = None
+        self._map_ping: tuple[float, float] | None = None
+        self._ping_after = None
+        self._ping_started = 0.0
         self.map_note_points: list[tuple[float, float]] = []
         self.measure_points: list[tuple[float, float]] = []
         self.measurement_line: list[tuple[float, float]] = []
@@ -1694,21 +1697,91 @@ class ArgusApp:
         self._change_map_center((fix["lat"], fix["lon"]))
 
     def _set_map_tool(self, tool: str) -> None:
+        if tool == 'ping' and self.map_tool == 'ping':
+            self._clear_map_ping()
+            return
         self.map_tool = tool
         self.measure_points.clear()
         if tool == "measure":
             self.measurement_line.clear()
             self.map_status_label.configure(text="Measure · click two points on the map")
+        elif tool == 'ping':
+            self.map_status_label.configure(text='Ping · click the map to mark a point · Escape to clear')
+            if hasattr(self, 'ais_tracker'):
+                self.ais_tracker.follow.set(False)
+            self.map.focus_set()
         else:
             self.map_status_label.configure(text="Map note · click the map to place a marker")
+        self._update_ping_button()
         self.map.configure(cursor="tcross")
         self._draw_map()
+
+    def _update_ping_button(self) -> None:
+        button = getattr(self, 'toolbar_buttons', {}).get('ping')
+        if button is not None:
+            button.configure(fg_color=CONTROL if self.map_tool == 'ping' else 'transparent')
+
+    def _clear_map_ping(self, _event=None) -> str:
+        timer = getattr(self, '_ping_after', None)
+        if timer is not None:
+            self.root.after_cancel(timer)
+        self._ping_after = None
+        self._map_ping = None
+        self.map.delete('map_ping')
+        if self.map_tool == 'ping':
+            self.map_tool = None
+            self.map.configure(cursor='')
+        self._update_ping_button()
+        self.map_status_label.configure(text='Ping cleared')
+        return 'break'
+
+    def _place_map_ping(self, point: tuple[float, float]) -> None:
+        self._clear_map_ping()
+        self._map_ping = point
+        self._ping_started = time.monotonic()
+        self.map_status_label.configure(text=f'Ping · {coordinates(*point)} · visible for 15 seconds')
+        self._animate_map_ping()
+
+    def _animate_map_ping(self) -> None:
+        self._ping_after = None
+        if self._map_ping is None:
+            return
+        if time.monotonic() - self._ping_started >= 15:
+            self._map_ping = None
+            self.map.delete('map_ping')
+            if self.map_status_label.cget('text').startswith('Ping'):
+                self.map_status_label.configure(text='Ping expired · drag to pan / wheel to zoom')
+            return
+        self._draw_map_ping()
+        reduced = hasattr(self, 'tools') and self.tools.reduced_motion.get()
+        self._ping_after = self.root.after(250 if reduced else 80, self._animate_map_ping)
+
+    def _draw_map_ping(self) -> None:
+        self.map.delete('map_ping')
+        if getattr(self, '_map_ping', None) is None:
+            return
+        x, y = self._project(*self._map_ping)
+        width, height = self._map_size
+        if not (-40 <= x <= width + 40 and -40 <= y <= height + 40):
+            return
+        reduced = hasattr(self, 'tools') and self.tools.reduced_motion.get()
+        phase = 0 if reduced else ((time.monotonic() - self._ping_started) % 1.4) / 1.4
+        for radius, color in ((12, TEAL), (20 + phase * 22, '#527c8b')):
+            self.map.create_oval(x-radius, y-radius, x+radius, y+radius,
+                                 outline=color, width=2, tags='map_ping')
+        self.map.create_oval(x-3, y-3, x+3, y+3, fill=TEAL, outline=INK, tags='map_ping')
+        self.map.create_line(x-8, y, x+8, y, fill=TEAL, tags='map_ping')
+        self.map.create_line(x, y-8, x, y+8, fill=TEAL, tags='map_ping')
+        self.map.create_text(max(90, min(x, width-90)), max(18, y-48),
+            text=f'PING · {coordinates(*self._map_ping)}', fill=INK,
+            font=('Segoe UI', 10, 'bold'), tags='map_ping')
 
     def clear_map_notes(self) -> None:
         self.map_note_points.clear()
         self.measure_points.clear()
         self.measurement_line.clear()
         self.map_tool = None
+        self._update_ping_button()
         self.map.configure(cursor="")
         self.map_status_label.configure(text="Map notes and measurement cleared")
         self._draw_map()
@@ -1992,7 +2065,9 @@ class ArgusApp:
             self._inspect_map_item(event)
         if not was_drag and self.map_tool:
             point = world_to_geo(*self._world_at(event.x, event.y), self.map_zoom)
-            if self.map_tool == "pin":
+            if self.map_tool == 'ping':
+                self._place_map_ping(point)
+            elif self.map_tool == "pin":
                 self.map_note_points.append(point)
                 self.map_status_label.configure(text=f"Map note added · {coordinates(*point)}")
                 self.map_tool = None
@@ -2007,6 +2082,7 @@ class ArgusApp:
                 else:
                     self.map_status_label.configure(text="First point set · click a second point to measure")
             self.map.configure(cursor="tcross" if self.map_tool else "")
+            self._update_ping_button()
             self._draw_map()
             self._schedule_tile_refresh()
 
@@ -2396,6 +2472,7 @@ class ArgusApp:
             self.map.create_rectangle(width - pixels - 24, height - 56, width - 8, height - 27, fill=CARD, outline=LINE)
             self.map.create_line(width - pixels - 16, height - 35, width - 16, height - 35, width=2, fill=INK)
             self.map.create_text(width - 16, height - 48, text=f"{km:g} km · z{self.map_zoom}", anchor="e", fill=INK, font=("Segoe UI", 8))
+        self._draw_map_ping()
 
     def _utc(self, position_s: float) -> str:
         start = datetime.fromisoformat(self.scenario["t0_utc"].replace("Z", "+00:00"))
