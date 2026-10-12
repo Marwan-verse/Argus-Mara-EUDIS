@@ -3,6 +3,7 @@ import queue
 import json
 import tkinter as tk
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -54,6 +55,31 @@ class DesktopAISTests(unittest.TestCase):
         self.assertEqual(self.app.position_s, 5400)
         self.assertIsNone(self.app.approved)
         self.assertIn("simulated", self.tracker.status)
+
+    def test_each_queued_fix_is_recorded_and_history_survives_cache_reload(self):
+        poller = self.connect()
+        start = datetime.now(timezone.utc) - timedelta(minutes=3)
+        for index in range(2):
+            data = snapshot()
+            data['sequence'] += index
+            data['vessels'][0].update(lat=53 + index / 100,
+                received_utc=(start + timedelta(minutes=index)).isoformat())
+            poller.events.put(('data', data))
+        self.tracker.poll()
+        self.assertEqual(len(self.tracker.history.tracks['123456789']), 2)
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'latest.json'
+            self.tracker.cache_path = path
+            self.tracker.save_cache()
+            with patch.dict('os.environ', {'ARGUS_LIVE_SERVER': 'https://ais.example.org'}):
+                restored = DesktopAIS(self.app, self.factory, cache_path=path)
+            try:
+                self.assertEqual(restored.history.tracks, self.tracker.history.tracks)
+            finally:
+                restored.close()
+            self.tracker.cache_path = None
+        self.tracker.disconnect()
+        self.assertEqual(self.tracker.history.total, 0)
 
     def test_invalid_response_retains_valid_data_and_disconnect_clears_it(self):
         poller = self.connect()

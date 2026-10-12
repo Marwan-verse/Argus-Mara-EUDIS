@@ -125,6 +125,9 @@ def validate_envelope(payload: object) -> dict:
         metadata_received = row.get("metadata_received_utc")
         if metadata_received is not None:
             utc_timestamp(metadata_received)
+        destination_received = row.get("destination_received_utc")
+        if destination_received is not None:
+            utc_timestamp(destination_received)
         for key, maximum in (("sog_kn", 102.2), ("cog_deg", 359.9)):
             if row.get(key) is not None and not _number(row[key], 0, maximum):
                 raise ValueError("Invalid AIS speed or course.")
@@ -136,6 +139,8 @@ def validate_envelope(payload: object) -> dict:
             "lat": row.get("lat"), "lon": row.get("lon"), "sog_kn": row.get("sog_kn"),
             "cog_deg": row.get("cog_deg"), "received_utc": received,
             "received_s": received_s, "metadata_received_utc": metadata_received,
+            "destination": _text(row.get("destination"), 20).strip(" @") or None,
+            "destination_received_utc": destination_received,
             "label": row["label"],
         })
     clean_removals = [_mmsi(value) for value in removals]
@@ -175,7 +180,14 @@ class LiveState:
                 # New particulars can arrive without a new position; retain the
                 # last observed fix while updating the name and type.
                 vessels[row["mmsi"]] = {**previous, "name": row["name"], "type": row["type"],
-                    "metadata_received_utc": row["metadata_received_utc"]}
+                    "metadata_received_utc": row["metadata_received_utc"],
+                    "destination": row["destination"],
+                    "destination_received_utc": row["destination_received_utc"]}
+            if previous is not None and previous.get("destination_received_utc") and (
+                    row["destination_received_utc"] is None or
+                    utc_timestamp(previous["destination_received_utc"]) > utc_timestamp(row["destination_received_utc"])):
+                vessels[row["mmsi"]].update(destination=previous["destination"],
+                    destination_received_utc=previous["destination_received_utc"])
         if len(vessels) > MAX_VESSELS:
             raise ValueError("The live vessel limit was exceeded.")
         self.vessels = vessels

@@ -253,6 +253,23 @@ An alternative service can be entered in the directory or supplied through
 `ARGUS_LIVE_SERVER`; switching services clears the previous service's contacts.
 Disconnect clears displayed contacts and stops polling.
 
+Selecting a ship also draws its **recorded path** in cyan, with a marker at the
+first retained fix. Other ships' paths stay hidden. **Clear ship selection**
+removes the path; **Show selected ship path** toggles it and **Fit recorded path**
+frames the received fixes. Local history survives app restarts in the same
+ignored cache, with limits of 24 hours, 720 fixes per ship and 100,000 fixes in
+total. Older contacts can be evicted to stay within the limit. Long gaps (over
+15 minutes), source-stream changes and provenance changes break the line.
+The starting fix describes where local recording began; a departure port is
+unknown and voyages before recording cannot be recovered from the public feed.
+
+**Declared destination** shows the vessel's unverified AIS Message 5 text and
+its separate received UTC, following the
+[USCG Message 5 definition](https://www.navcen.uscg.gov/ais-class-a-static-voyage-message-5).
+No destination line or future route is invented. Until a declaration is received
+(or when the service has not yet deployed the optional field), it reads
+**Not reported**. Destination updates do not reset the age of a position fix.
+
 The **EXERCISE** map control opens the fictional replay and its explicit operator
 review. Exercise overlays and playback controls are hidden in the initial Irish
 AIS view. Hiding the exercise returns to Ireland. Live AIS never changes the

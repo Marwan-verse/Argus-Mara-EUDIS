@@ -84,6 +84,21 @@ def _metadata(row):
     return name, ship_type, length
 
 
+def _destination(row):
+    """Message 5 destination is declared text, never an inferred port or route."""
+    if row.get("msg_type") != "ShipStaticData":
+        return False, None
+    try:
+        raw = row.get("raw")
+        message = json.loads(raw) if isinstance(raw, str) and len(raw) <= 65_536 else {}
+        body = (message.get("Message") or {}).get("ShipStaticData") or {}
+        if isinstance(body, dict) and isinstance(body.get("Destination"), str):
+            return True, _name(body["Destination"][:20])
+    except (ValueError, TypeError, AttributeError, RecursionError):
+        pass
+    return False, None
+
+
 class LiveState:
     """Latest observed position and identity, bounded by ``max_vessels``.
 
@@ -123,6 +138,7 @@ class LiveState:
                 self._vessels.popitem(last=False)
                 self.evicted_contacts += 1
             vessel = {"mmsi": mmsi, "name": None, "ship_type": None, "ais_length_m": None,
+                      "destination": None, "_destination": None,
                       "lat": None, "lon": None, "sog_kn": None, "cog_deg": None,
                       "heading_deg": None, "nav_status": None, "_position": None,
                       "_metadata": None, "_last": received, "label": "real"}
@@ -142,6 +158,11 @@ class LiveState:
                     vessel[field] = value
             vessel["_metadata"] = received
             changed = True
+        declared, destination = _destination(row)
+        if declared and (vessel["_destination"] is None or received >= vessel["_destination"]):
+            vessel["destination"] = destination
+            vessel["_destination"] = received
+            changed = True
         if changed:
             label = row.get("label", "real")
             vessel["label"] = label if isinstance(label, str) and label in LABELS else "real"
@@ -156,6 +177,7 @@ class LiveState:
                 "mmsi": str(vessel["mmsi"]),
                 "received_utc": _iso(vessel["_position"]),
                 "metadata_received_utc": _iso(vessel["_metadata"]),
+                "destination_received_utc": _iso(vessel["_destination"]),
                 "age_s": age, "stale": age is None or age > self.stale_seconds}
 
     @property

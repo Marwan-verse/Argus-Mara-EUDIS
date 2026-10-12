@@ -6,8 +6,10 @@ import os
 import queue
 import tkinter as tk
 from tkinter import ttk
+import customtkinter as ctk
 
 from argus.live_client import LivePoller, LiveState, server_url
+from desktop_tracks import ReceivedTracks
 
 DEFAULT_SERVER = "https://shared-live-ais-production.up.railway.app"
 
@@ -81,6 +83,8 @@ class DesktopAIS:
         self.app = app
         self.poller_factory = poller_factory
         self.state = LiveState()
+        self.history = ReceivedTracks()
+        self.last_cache_s = 0
         self.poller = None
         self.closed = False
         self.status = "Connecting to shared Irish AIS"
@@ -93,6 +97,7 @@ class DesktopAIS:
         self.minimum_speed = tk.StringVar(app.root, value='')
         self.maximum_speed = tk.StringVar(app.root, value='')
         self.follow = tk.BooleanVar(app.root, value=False)
+        self.show_path = tk.BooleanVar(app.root, value=True)
         self.filter_error = ''
         self.filter_label = self.type_selector = None
         self.tabs = self.detail_tab = None
@@ -105,9 +110,14 @@ class DesktopAIS:
         self.timer = app.root.after(500, self.poll)
         if cache_path is not None:
             try:
+                if cache_path.stat().st_size > 40 * 1024 * 1024:
+                    raise ValueError('Oversized AIS cache')
                 cached = json.loads(cache_path.read_text(encoding="utf-8"))
                 if cached.get("server", DEFAULT_SERVER) == self.address.get():
                     self.state.apply(cached)
+                    now = datetime.now(timezone.utc).timestamp()
+                    self.history.restore(cached.get('desktop_tracks', {}), self.state.vessels, now)
+                    self.history.capture(self.state.vessels, self.state.stream_id, now)
                     self.connected_address = self.address.get()
                     self.status = "Cached AIS observations · waiting for live refresh"
             except (OSError, ValueError, TypeError):
@@ -142,11 +152,17 @@ class DesktopAIS:
         self.tabs.add(directory, text='Ships')
         self.tabs.add(self.detail_tab, text='Selected ship')
         self.tabs.add(filters, text='Filters')
-        self.detail = ttk.Label(self.detail_tab, wraplength=330, justify="left")
+        detail_body = ctk.CTkScrollableFrame(self.detail_tab, fg_color='#141e28')
+        detail_body.pack(fill='both', expand=True)
+        self.detail = ttk.Label(detail_body, wraplength=310, justify="left")
         self.detail.pack(anchor="w", pady=10)
-        ttk.Checkbutton(self.detail_tab, text='Follow selected ship', variable=self.follow,
+        ttk.Checkbutton(detail_body, text='Show selected ship path', variable=self.show_path,
+                        command=self.app._draw_map).pack(anchor='w')
+        ttk.Checkbutton(detail_body, text='Follow selected ship', variable=self.follow,
                         command=self.update_follow).pack(anchor='w')
-        ttk.Button(self.detail_tab, text='Center selected ship', command=self.center).pack(anchor='w', pady=10)
+        ttk.Button(detail_body, text='Center selected ship', command=self.center).pack(anchor='w', pady=10)
+        ttk.Button(detail_body, text='Fit recorded path', command=self.fit_path).pack(anchor='w')
+        ttk.Button(detail_body, text='Clear ship selection', command=self.clear_selection).pack(anchor='w', pady=8)
         ttk.Checkbutton(filters, text='Fresh fixes only', variable=self.fresh_only).pack(anchor='w')
         self.type_selector = ttk.Combobox(filters, textvariable=self.kind, state='readonly',
             values=['All types'] + sorted({vessel_type(v.get('type')) for v in self.state.vessels.values()}))
@@ -202,6 +218,7 @@ class DesktopAIS:
         # A server switch must not mix observations from different services.
         if getattr(self, "connected_address", address) != address:
             self.state = LiveState()
+            self.history = ReceivedTracks()
             self.selected = None
         self.connected_address = address
         self.poller = self.poller_factory(address)
@@ -217,11 +234,13 @@ class DesktopAIS:
             "sequence": self.state.sequence,
             "generated_utc": datetime.fromtimestamp(self.state.generated_s, timezone.utc).isoformat(),
             "feed": self.state.feed, "vessels": list(self.state.vessels.values())}
+        payload['desktop_tracks'] = dict(self.history.tracks)
         try:
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
             temporary = self.cache_path.with_suffix(".tmp")
             temporary.write_text(json.dumps(payload), encoding="utf-8")
             temporary.replace(self.cache_path)
+            self.last_cache_s = datetime.now(timezone.utc).timestamp()
         except OSError:
             pass  # Failure to cache cannot stop a read-only feed.
 
@@ -230,6 +249,7 @@ class DesktopAIS:
             self.poller.stop()
             self.poller = None
         self.state = LiveState()
+        self.history = ReceivedTracks()
         self.selected = None
         self.follow.set(False)
         self.status = "Disconnected · received positions cleared"
@@ -264,14 +284,20 @@ class DesktopAIS:
                     break
                 if kind == "data":
                     try:
-                        changed = self.state.apply(value) or changed
+                        applied = self.state.apply(value)
+                        changed = applied or changed
+                        if applied:
+                            self.history.capture(self.state.vessels, self.state.stream_id,
+                                                 datetime.now(timezone.utc).timestamp())
                         self.status = f"Connected · {self.state.feed['status']} · {self.state.feed['label']}"
                     except ValueError:
                         self.status = "Invalid AIS response · last valid observations retained"
                 else:
                     self.status = f"Connection: {value} · last fixes retained"
+        now = datetime.now(timezone.utc).timestamp()
+        self.history.prune(now, set(self.state.vessels))
         self.refresh()
-        if changed:
+        if changed and now - self.last_cache_s >= 15:
             self.save_cache()
         self.update_header()
         if self.follow.get():
@@ -360,10 +386,19 @@ class DesktopAIS:
             freshness = 'No position' if vessel['received_s'] is None else 'Fresh' if now - vessel['received_s'] <= self.state.feed.get('stale_seconds', 900) else 'Stale'
             speed = 'Unavailable' if vessel['sog_kn'] is None else f"{vessel['sog_kn']:.1f} kn"
             course = 'Unavailable' if vessel['cog_deg'] is None else f"{vessel['cog_deg']:.1f}°"
+            points = self.history.tracks.get(self.selected, [])
+            origin = (f"First recorded fix: {points[0]['lat']:.5f}, {points[0]['lon']:.5f}\n"
+                      f"Path starts UTC: {points[0]['received_utc']}\n"
+                      f"Recorded path: {len(points)} fixes / {points[0]['label']}\n") if points else 'Recorded path: awaiting fresh received fixes\n'
+            destination = vessel.get('destination') or 'Not reported'
+            destination_time = vessel.get('destination_received_utc') or 'Unavailable'
             text = (f"{vessel['name']} · MMSI {vessel['mmsi']}\nType: {vessel_type(vessel.get('type'))}\n"
                     f"Speed: {speed} / Course: {course}\n{position}\n"
                     f"{freshness} / fix age {age_text(vessel['received_s'], now)}\n"
-                    f"Received UTC: {vessel['received_utc'] or 'Unavailable'}\nEvidence: {vessel['label']}")
+                    f"Received UTC: {vessel['received_utc'] or 'Unavailable'}\nEvidence: {vessel['label']}\n\n"
+                    f"Declared destination: {destination}\nDestination received UTC: {destination_time}\n\n"
+                    f"{origin}Local history: up to 24 h / 720 fixes per ship.\n"
+                    'Reception gaps stay open. Departure port is unknown; declared destination is unverified.')
         if self.detail is not None and self.detail.winfo_exists():
             self.detail.configure(text=text)
 
@@ -387,12 +422,49 @@ class DesktopAIS:
         self.follow.set(False)
         self.app._fit_points([(v['lat'], v['lon']) for v in self.filtered() if v['received_s'] is not None])
 
+    def fit_path(self):
+        self.follow.set(False)
+        points = self.history.tracks.get(self.selected, [])
+        if points:
+            self.app._fit_points([(p['lat'], p['lon']) for p in points])
+
+    def clear_selection(self):
+        self.selected = None
+        self.follow.set(False)
+        if self.table is not None and self.table.winfo_exists():
+            self.table.selection_remove(self.table.selection())
+        self.update_detail()
+        self.app._draw_map()
+
+    def draw_path(self, visible_contacts):
+        if not self.show_path.get() or self.selected not in visible_contacts:
+            return
+        tags = ('received_ais', 'selected_ais_path')
+        sections = self.history.sections(self.selected)
+        for section in sections:
+            points = [self.app._project(p['lat'], p['lon']) for p in section]
+            # Also split at the projection seam of the current wrapped map view.
+            previous = None
+            for x, y in points:
+                if previous and abs(x - previous[0]) < 256 * 2 ** self.app.map_zoom / 2:
+                    self.app.map.create_line(*previous, x, y, fill='#47c7da', width=2, tags=tags)
+                previous = (x, y)
+        history = self.history.tracks.get(self.selected, [])
+        if history:
+            first = history[0]
+            x, y = self.app._project(first['lat'], first['lon'])
+            self.app.map.create_oval(x-4, y-4, x+4, y+4, outline='#47c7da', width=2, tags=tags)
+            self.app.map.create_text(x+10, y-12, anchor='w', fill='#47c7da', tags=tags,
+                text=f"First recorded · {first['received_utc']} · {first['label']}")
+
     def draw(self):
         if not self.visible.get():
             return
         now = datetime.now(timezone.utc).timestamp()
         width, height = self.app._map_size
-        for vessel in self.filtered():
+        contacts = self.filtered()
+        self.draw_path({v['mmsi'] for v in contacts})
+        for vessel in contacts:
             if vessel['received_s'] is None:
                 continue
             x, y = self.app._project(vessel['lat'], vessel['lon'])
@@ -447,4 +519,6 @@ class DesktopAIS:
         self.closed = True
         if self.poller:
             self.poller.stop()
+        if self.state.stream_id is not None and hasattr(self, 'connected_address'):
+            self.save_cache()
         self.app.root.after_cancel(self.timer)

@@ -55,3 +55,14 @@ Reconnection and expiry must accept a full reset. The current Python client in
 Full schema, provider states and Railway deployment are in [README.md](README.md).
 This API shares current observations. The private Parquet history is a separate
 data-workstream export and has no public route.
+
+Optional `destination` is the vessel's declared AIS Message 5 text (up to 20
+characters), with `destination_received_utc` recording the receipt of that
+declaration. Null or an absent field means unavailable. A blank/default report
+clears the declaration; position reports never refresh its age. Keep this text
+separate from a verified port or predicted route. Existing clients can ignore
+these additive fields; older deployed services may omit them.
+
+The desktop retains its own bounded received-fix history in ignored local data.
+Its selected path starts at the earliest retained fix, not an inferred departure
+port; it cannot recover voyages that happened before the client received them.
