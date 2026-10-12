@@ -120,12 +120,19 @@ can close long HTTP streams, so reconnecting is part of normal operation.
 
 Public contact fields: `mmsi` (decimal string), `name`, `ship_type`,
 `ais_length_m`, `lat`, `lon`, `sog_kn`, `cog_deg`, `heading_deg`, `nav_status`,
-`received_utc` (position receipt), `metadata_received_utc`, `age_s`, `stale`
+`received_utc` (position receipt), `metadata_received_utc`, `destination`,
+`destination_received_utc`, `age_s`, `stale`
 and `label`. Null coordinates/time mean no position received, not `(0, 0)`.
 AIS sentinel values are null; genuine zero speed/course are preserved. Stale
 means older than 900 seconds by default; consumers should calculate growing age
 from `generated_utc` and elapsed time rather than expect stationary vessels to
 receive one update per second.
+
+`destination` is unverified declared text from AIS Message 5, limited to 20
+characters. Its separate receipt timestamp changes only when a destination
+report arrives. Missing declarations are null; blank/default declarations clear
+the previous text. No departure port or future route is inferred. Redeploy the
+service to expose these additive fields; existing clients remain compatible.
 
 Provider states: `no_key`, `connecting`, `live`, `reconnecting`, `auth_error`,
 `archive_error`, `stopping`. The map separately reports viewer connection and

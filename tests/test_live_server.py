@@ -41,6 +41,25 @@ class LiveServerTests(unittest.IsolatedAsyncioTestCase):
         async with self.http.get(self.server.make_url(path)) as response:
             return response.status, await response.json()
 
+    async def test_http_destination_is_declared_text_and_keeps_position_time(self):
+        # Exercise the collector -> public HTTP -> client boundary independently
+        # of platform-specific durable directory fsync (covered by archive tests).
+        from argus.live_client import validate_envelope
+        fix = row()
+        declaration = {**row(), 'msg_type': 'ShipStaticData',
+            'raw': json.dumps({'Message': {'ShipStaticData': {
+                'Destination': 'DUBLIN@@', 'PrivateTestField': 'ARCHIVE_ONLY'}}})}
+        with patch.object(self.service.archive, 'append'):
+            await self.service.accept(fix)
+            initial = (await asyncio.wait_for(self.get('/api/v1/vessels'), timeout=5))[1]
+            await self.service.accept(declaration)
+            received = (await asyncio.wait_for(self.get('/api/v1/vessels'), timeout=5))[1]
+        contact = validate_envelope(received)['rows'][0]
+        self.assertEqual(contact['destination'], 'DUBLIN')
+        self.assertEqual(contact['received_utc'], initial['vessels'][0]['received_utc'])
+        self.assertIsNotNone(contact['destination_received_utc'])
+        self.assertNotIn('ARCHIVE_ONLY', json.dumps(received))
+
     async def test_no_key_is_empty_and_process_ready(self):
         status, data = await self.get("/api/v1/vessels")
         self.assertEqual(status, 200)

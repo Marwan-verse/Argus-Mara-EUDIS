@@ -30,6 +30,24 @@ def update(sequence=2, **fields):
 
 
 class LiveClientTests(unittest.TestCase):
+    def test_destination_updates_without_moving_fix_and_cannot_regress(self):
+        state = LiveState()
+        state.apply(snapshot())
+        self.assertIsNone(state.vessels['123456789']['destination'])
+        state.apply(update(upserts=[vessel(destination='DUBLIN@@',
+            destination_received_utc='2026-10-08T20:05:00Z', lat=None, lon=None, received_utc=None)]))
+        row = state.vessels['123456789']
+        self.assertEqual(row['destination'], 'DUBLIN')
+        self.assertEqual(row['received_utc'], '2026-10-08T20:00:00Z')
+        state.apply(update(3, upserts=[vessel(destination='OLDER',
+            destination_received_utc='2026-10-08T20:04:00Z', received_utc='2026-10-08T20:06:00Z')]))
+        self.assertEqual(state.vessels['123456789']['destination'], 'DUBLIN')
+        state.apply(update(4, upserts=[vessel(destination=None,
+            destination_received_utc='2026-10-08T20:07:00Z', lat=None, lon=None, received_utc=None)]))
+        self.assertIsNone(state.vessels['123456789']['destination'])
+        with self.assertRaises(ValueError):
+            state.apply(update(5, upserts=[vessel(destination_received_utc='bad-time')]))
+
     def test_https_and_loopback_only(self):
         self.assertEqual(server_url("https://example.org/"), "https://example.org")
         self.assertEqual(server_url("http://[::1]:8080"), "http://[::1]:8080")

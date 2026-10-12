@@ -23,6 +23,25 @@ def static(body, **overrides):
 
 
 class LiveStateTests(unittest.TestCase):
+    def test_declared_destination_has_its_own_age_and_blank_clears_it(self):
+        state = LiveState()
+        state.ingest(position())
+        declared = state.ingest(static({'Destination': '  DUBLIN@@  ', 'Private': 'not public'}))
+        self.assertEqual(declared['destination'], 'DUBLIN')
+        self.assertEqual(declared['destination_received_utc'], '2026-10-09T00:05:00.000Z')
+        self.assertEqual(declared['received_utc'], '2026-10-09T00:00:00.000Z')
+        newer = state.ingest(position(recv_utc=START + timedelta(minutes=10)))
+        self.assertEqual(newer['destination_received_utc'], declared['destination_received_utc'])
+        state.ingest(static({'Destination': 'OLD'}, recv_utc=START + timedelta(minutes=4)))
+        state.ingest(static({'ReportA': {'Destination': 'CLASS B IGNORED'}},
+                            msg_type='StaticDataReport', recv_utc=START + timedelta(minutes=11)))
+        self.assertEqual(state.snapshot()['vessels'][0]['destination'], 'DUBLIN')
+        cleared = state.ingest(static({'Destination': '@@@@@@@@@@@@@@@@@@@@'},
+                                      recv_utc=START + timedelta(minutes=12)))
+        self.assertIsNone(cleared['destination'])
+        self.assertEqual(cleared['destination_received_utc'], '2026-10-09T00:12:00.000Z')
+        self.assertNotIn('Private', cleared)
+
     def test_static_updates_identity_without_refreshing_position_age(self):
         state = LiveState(stale_seconds=60)
         state.ingest(position())
