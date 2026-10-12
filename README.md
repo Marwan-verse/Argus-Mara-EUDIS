@@ -45,7 +45,8 @@ to inspect it, or a numbered cluster to zoom in. Port names appear at closer zoo
 **Cable directory** searches 497 historical route records and fits a selected
 route, including systems crossing the date line. **Fit exercise** frames the
 scenario track and cable. The scale bar and cursor coordinates help orientation.
-These additions remain offline and preserve the white desktop interface.
+These additions remain offline. The desktop now uses the dark console theme
+described in the integrated AIS section below.
 
 **Optional shared live AIS:** [live/README.md](live/README.md) explains the single
 Railway collector, private persistent archive, English browser map and live mode
@@ -225,3 +226,116 @@ the answer is "after the hackathon". ([plan §4.6](docs/04-work-plan.md))
 | [PRIOR_WORK.md](PRIOR_WORK.md) | Draft declaration of work completed before the event |
 | [skills/](skills/) | Portable codebase and interface skills for teammates |
 | [scripts/check_contracts.py](scripts/check_contracts.py) | Checks the two demo JSON files before integration |
+
+## Integrated desktop AIS and SAR next step (12 October)
+
+Launch `RUN-GUI-WINDOWS.bat`. The native layout now follows the Osiris reference:
+a full-window chart, compact gold identity header, UTC/feed readouts, narrow icon
+rails, bottom map-mode controls and floating panels. The old sidebar, summary
+cards and permanent assessment column are removed from the main application.
+F11 toggles fullscreen.
+
+The application automatically connects to the team's shared service at
+`https://shared-live-ais-production.up.railway.app`. It starts with the Irish
+coastal region in view and draws every received position, independent of the
+90-row directory page. Green ships have fresh fixes, muted ships are stale and
+cyan identifies the selected contact. Shapes follow received AIS course when
+available; positions are never predicted. Provider reception is incomplete;
+these are all received contacts, not a claim to observe every ship at sea.
+
+Click any ship to open its name, MMSI, received UTC and evidence label. The
+triangle icon opens the directory. Search any contact by name or MMSI, use
+**Center selected** or **Fit AIS**, and use **Show more** to extend the directory.
+The latest validated snapshot is cached in ignored
+`data/desktop/ais_latest.json` for immediate display and offline use, with its
+actual timestamps. Cached observations are never presented as a live connection.
+An alternative service can be entered in the directory or supplied through
+`ARGUS_LIVE_SERVER`; switching services clears the previous service's contacts.
+Disconnect clears displayed contacts and stops polling.
+
+The **EXERCISE** map control opens the fictional replay and its explicit operator
+review. Exercise overlays and playback controls are hidden in the initial Irish
+AIS view. Hiding the exercise returns to Ireland. Live AIS never changes the
+fictional countdown or creates a live threat score or operational response.
+
+The diamond icon opens the [SAR next-step plan](docs/08-sar-next-step.md). Raw
+SAR detection remains planned work. Local display geometry and the fictional
+contracts stay usable without a live connection.
+
+### Irish ports and left alerts panel
+
+The **Alerts** panel is permanently visible on the left of the chart. It separates
+live AIS status (no live detector is running) from labelled fictional exercise
+alerts. **Review exercise alert** opens the existing countdown and explicit
+operator approval. No live threat assessment or operational action is created.
+
+Irish ports are displayed by default. The offline layer adds all 142 commercial,
+fishing and ferry records from the Marine Irish Digital Atlas layers served by
+[Ireland's Marine Atlas](https://atlas.marine.ie/arcgis/rest/services/TransportNetworks/MapServer),
+alongside 21 NGA Irish reference records. Multiple categories can refer to the same
+harbour; this is not a count of unique ports or an exhaustive list of every pier
+or marina. These are historical catalogue locations, not surveyed navigation
+fixes. The source records specify **CC BY 4.0**; attribution and source hashes
+are stored in `ui/assets/irish_ports.json`.
+
+Click a port to inspect its source/category and center it, or open the anchor
+icon for the directory (initially filtered to **Irish coast**). **Irish coast ports
+only** in Map layers can be turned off for the global NGA layer.
+
+Rebuild the derived catalogue with `python scripts/prepare_irish_ports.py --fetch`.
+Downloaded source responses stay in ignored `data/maps/`; the compact attributed
+reference layer is bundled for offline use.
+
+### Desktop navigation and review controls
+
+- **Ship filters:** the AIS panel's **Filters** tab controls fresh fixes, reported
+  vessel type and minimum/maximum speed in knots. Filters affect both the directory
+  and map. Missing speeds do not match an active speed range; invalid limits show
+  an explanation. Reset restores all contacts. AIS type codes are displayed using
+  broad [USCG AIS type labels](https://www.navcen.uscg.gov/ais-class-a-static-voyage-message-5).
+- **Selected ship:** the details tab shows speed, course, type, source, received
+  UTC and fix age. **Follow selected ship** recentres on received fixes only.
+  Panning, opening an exercise, fitting a view or choosing a search result stops
+  following. No movement is predicted.
+- **Alert review:** fictional alert cards show the trigger and source, with
+  **New**, **Reviewed** and **Acknowledged** states and summary counts.
+  Review must precede acknowledgement. These states last for the session and
+  never approve an operational response; the existing explicit simulated response
+  approval remains separate.
+- **Legend:** the bottom **Ships**, **Stale**, **Ports** and **Cables** switches
+  directly control the map. **SAR demo** controls the simulated radar layer while
+  the fictional exercise is open. Stale toggles the same freshness filter as the
+  AIS panel.
+- **Saved views:** the left round view icon opens Irish coast, Irish Sea, Western
+  approaches, Dublin Bay and Cork Harbour presets. Save the current centre and
+  zoom with a name; open or delete a custom saved view from the same panel.
+- **Panel layout:** drag the right edge of Alerts or the left edge of the detail
+  panel to resize. The Alerts **×** and **!** icon hide/show the left panel; the
+  detail **×** hides the right panel. Panel widths and alert visibility are saved.
+- **Global search:** click **Search Ctrl+K** or press **Ctrl+K**. Search vessel
+  names, MMSIs, vessel types, ports and saved views, or enter latitude/longitude
+  such as `53.35, -6.25` or `53.35N 6.25W`. Use Up/Down and Enter to select;
+  Escape closes search. Searching includes all contacts regardless of map filters;
+  selecting a ship restores its visibility and clears ship filters.
+
+View, layout and filter preferences are saved only in ignored
+`data/desktop/ui_preferences.json`. Contact observations retain their source UTC
+and provenance; the shared scenario and alert JSON files are unchanged.
+
+### Desktop visual polish
+
+The desktop uses Segoe UI for controls and prose, with monospace UTC, counts and
+countdowns. Original locally rendered outline icons share an 18 px size and
+consistent stroke. Gold marks controls, cyan marks selection, amber marks alerts,
+and quieter neutral colours describe ordinary layers.
+
+Alert cards initially show their vessel, source badge, state and large countdown.
+**Details** expands the trigger explanation and review-state selector; **Review**
+opens the same fictional exercise. Observation age and operator approval remain
+explicit. The header separates connection status, received/fresh counts and UTC.
+
+Stale ship fixes use smaller muted dots; selected ships retain a cyan ring.
+Ordinary port markers have no bright borders, and historical cable lines are
+thinner and muted. Hover over an icon for its tooltip. Buttons and search fields
+have visible keyboard focus. Panel and search opening transitions last about
+130 ms; **Reduce panel motion** in Map layers disables them and is saved locally.
