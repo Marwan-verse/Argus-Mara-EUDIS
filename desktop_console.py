@@ -75,6 +75,10 @@ def build(app):
     except tk.TclError:
         pass
     app.map.bind("<Motion>", app._map_motion)
+    # Trackpads: two-finger scrolling of lists on Tk 9, and pinch to zoom the map on macOS.
+    from desktop_gestures import PinchZoom, install_touchpad_scroll
+    install_touchpad_scroll(app.root)
+    app.pinch = PinchZoom(app)
 
     def button(parent, icon, action, title=None):
         control = ctk.CTkButton(parent, text='', image=app.tools.icons.get(icon), command=action, width=38, height=36,

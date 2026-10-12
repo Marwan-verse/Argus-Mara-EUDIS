@@ -41,7 +41,7 @@ class AlertBoardTests(unittest.TestCase):
     def test_authorised_work_is_low_and_countdowns_raise_levels(self):
         repair = next(item for item in self.items if item["name"] == "CABLE WARDEN")
         self.assertEqual(repair["assessment"]["level"], "low")
-        self.assertTrue(any("Authorised" in note for note in repair["assessment"]["notes"]))
+        self.assertTrue(any("authorised operation" in note for note in repair["assessment"]["notes"]))
         heron = next(item for item in self.items if item["name"] == "GREY HERON")
         self.assertEqual(heron["assessment"]["level"], "high")
         self.assertEqual(update(self.items, 60), [])

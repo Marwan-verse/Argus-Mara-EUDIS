@@ -1,0 +1,3 @@
+# Optional on macOS: trackpad pinch-to-zoom on the desktop map (desktop_gestures.py).
+# The app runs without it; UPDATE-AND-RUN-MAC.command installs it when it can.
+pyobjc-framework-Cocoa==12.2.2

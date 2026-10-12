@@ -177,26 +177,27 @@ def assess(obs: dict) -> dict:
     critical_gate = high_gate and p == 4
     if b == 0 and RANK[level] > RANK["medium"]:
         level = "medium"
-        notes.append("No behaviour cue, so the level stops at Medium.")
+        notes.append("Capped at Medium: no behavioural indicator.")
     if RANK[level] >= RANK["high"] and not high_gate:
         level = "medium"
-        notes.append("High needs a behaviour pattern, a method possible at this depth and the line within 2 h.")
+        notes.append("Capped at Medium: High requires a behavioural pattern, a feasible damage method at this "
+                     "depth and the line within 2 h.")
     if level == "critical" and not critical_gate:
         level = "high"
-        notes.append("Critical needs the vessel inside the corridor or within 30 min of it.")
+        notes.append("Capped at High: Critical requires the vessel in the corridor or within 30 min of it.")
 
     if obs.get("fault_confirmed"):
         level = "critical"
-        notes.append("Override: a line fault or fibre impact was reported at this position and time.")
+        notes.append("Raised to Critical: line fault or fibre disturbance reported at this position and time.")
     if obs.get("ignored_instruction"):
         level = "critical"
-        notes.append("Override: the vessel ignored a recorded warning or instruction near the line.")
+        notes.append("Raised to Critical: vessel did not comply with a recorded instruction near the line.")
     if obs.get("no_response_in_time") and level in ("medium", "high"):
         level = LEVELS[RANK[level] + 1]
-        notes.append("Raised one level: no response option arrives before the earliest ETA.")
+        notes.append("Raised one level: no response asset can arrive before the earliest ETA.")
     if obs.get("authorised") and RANK[level] > RANK["low"]:
         level = "low"
-        notes.append("Authorised operation (notified repair or survey): capped at Low.")
+        notes.append("Capped at Low: notified, authorised operation (repair or survey).")
 
     return {"score": score, "level": level, "level_name": LEVEL_NAMES[level], "rank": RANK[level],
             "groups": {"B": b, "I": i, "P": p, "A": a, "C": c},

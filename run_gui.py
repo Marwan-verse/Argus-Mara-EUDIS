@@ -1794,6 +1794,8 @@ class ArgusApp:
     def close(self) -> None:
         if hasattr(self, 'alert_board'):
             self.alert_board.close()
+        if hasattr(self, 'pinch'):
+            self.pinch.close()
         if hasattr(self, 'tools'):
             self.tools.close()
         if hasattr(self, "ais_tracker"):

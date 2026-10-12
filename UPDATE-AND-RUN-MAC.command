@@ -34,6 +34,14 @@ if ! .venv/bin/python -c "import customtkinter, PIL" >/dev/null 2>&1; then
   fi
 fi
 
+if [ ! -f .venv/.pinch-checked ] && ! .venv/bin/python -c "import AppKit" >/dev/null 2>&1; then
+  echo "Adding trackpad pinch-to-zoom (one time)..."
+  if ! .venv/bin/python -m pip install --quiet --disable-pip-version-check -r requirements-mac.txt; then
+    echo "Pinch-to-zoom is unavailable; everything else works."
+  fi
+  touch .venv/.pinch-checked
+fi
+
 if ! .venv/bin/python run_gui.py; then
   echo "The app stopped with an error."
   finish 1
