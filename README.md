@@ -19,7 +19,8 @@ and external data replacement are pending. See [DECISIONS.md](DECISIONS.md) D29â
 
 **Run the native desktop application:** double-click `RUN-GUI-WINDOWS.bat` on Windows.
 It creates an ignored `.venv` and installs the UI packages on first run. In a Git clone,
-`UPDATE-AND-RUN-WINDOWS.bat` first pulls the latest commits of the checked-out branch. Alternatively,
+`UPDATE-AND-RUN-WINDOWS.bat` (Windows) or `UPDATE-AND-RUN-MAC.command` (macOS) first pulls
+the latest commits of the checked-out branch, then starts the app. Alternatively,
 create a virtual environment, run `python -m pip install -r requirements.txt`, then
 `python run_gui.py`. The app needs Python 3.10+ with Tkinter (Tcl/Tk) enabled; on
 Windows, include **Tcl/Tk and IDLE** in the Python installer. Use
