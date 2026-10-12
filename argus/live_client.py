@@ -131,6 +131,9 @@ def validate_envelope(payload: object) -> dict:
         for key, maximum in (("sog_kn", 102.2), ("cog_deg", 359.9)):
             if row.get(key) is not None and not _number(row[key], 0, maximum):
                 raise ValueError("Invalid AIS speed or course.")
+        nav_status = row.get('nav_status')
+        if nav_status is not None and (type(nav_status) is not int or not 0 <= nav_status <= 14):
+            raise ValueError('Invalid AIS navigation status.')
         if row.get("label") not in ("real", "simulated"):
             raise ValueError("The AIS provenance label is missing.")
         clean_rows.append({
@@ -141,6 +144,7 @@ def validate_envelope(payload: object) -> dict:
             "received_s": received_s, "metadata_received_utc": metadata_received,
             "destination": _text(row.get("destination"), 20).strip(" @") or None,
             "destination_received_utc": destination_received,
+            "nav_status": nav_status,
             "label": row["label"],
         })
     clean_removals = [_mmsi(value) for value in removals]

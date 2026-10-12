@@ -146,6 +146,13 @@ class LiveClientTests(unittest.TestCase):
         self.assertEqual(row["name"], "Name unavailable")
         self.assertIsNone(row["sog_kn"])
 
+    def test_navigation_status_keeps_true_zero_and_rejects_invalid_codes(self):
+        clean = validate_envelope(snapshot(vessels=[vessel(nav_status=0)]))
+        self.assertEqual(clean['rows'][0]['nav_status'], 0)
+        for status in (True, 15, -1, 1.5):
+            with self.subTest(status=status), self.assertRaises(ValueError):
+                validate_envelope(snapshot(vessels=[vessel(nav_status=status)]))
+
     def test_polling_network_runs_off_main_thread_and_recovers_without_losing_cursor(self):
         calls, thread_ids = [], []
         main_thread = threading.get_ident()

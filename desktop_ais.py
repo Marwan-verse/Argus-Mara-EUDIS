@@ -84,6 +84,8 @@ class DesktopAIS:
         self.poller_factory = poller_factory
         self.state = LiveState()
         self.history = ReceivedTracks()
+        self.fleet = set()
+        self.card = None
         self.last_cache_s = 0
         self.poller = None
         self.closed = False
@@ -115,6 +117,9 @@ class DesktopAIS:
                 cached = json.loads(cache_path.read_text(encoding="utf-8"))
                 if cached.get("server", DEFAULT_SERVER) == self.address.get():
                     self.state.apply(cached)
+                    fleet = cached.get('desktop_fleet', [])
+                    if isinstance(fleet, list) and len(fleet) <= 5000:
+                        self.fleet = {m for m in fleet if isinstance(m, str) and len(m) == 9 and m.isascii() and m.isdigit() and int(m) > 0}
                     now = datetime.now(timezone.utc).timestamp()
                     self.history.restore(cached.get('desktop_tracks', {}), self.state.vessels, now)
                     self.history.capture(self.state.vessels, self.state.stream_id, now)
@@ -235,6 +240,7 @@ class DesktopAIS:
             "generated_utc": datetime.fromtimestamp(self.state.generated_s, timezone.utc).isoformat(),
             "feed": self.state.feed, "vessels": list(self.state.vessels.values())}
         payload['desktop_tracks'] = dict(self.history.tracks)
+        payload['desktop_fleet'] = sorted(self.fleet)
         try:
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
             temporary = self.cache_path.with_suffix(".tmp")
@@ -337,6 +343,7 @@ class DesktopAIS:
 
     def refresh(self):
         if self.status_label is None or not self.status_label.winfo_exists():
+            self.update_detail()
             return
         self.status_label.configure(text=self.status)
         now = datetime.now(timezone.utc).timestamp()
@@ -401,6 +408,8 @@ class DesktopAIS:
                     'Reception gaps stay open. Departure port is unknown; declared destination is unverified.')
         if self.detail is not None and self.detail.winfo_exists():
             self.detail.configure(text=text)
+        if self.card is not None:
+            self.card.refresh()
 
     def positions(self):
         return [v for v in self.state.vessels.values() if v['received_s'] is not None]
@@ -430,6 +439,8 @@ class DesktopAIS:
 
     def clear_selection(self):
         self.selected = None
+        if self.card is not None:
+            self.card.hide()
         self.follow.set(False)
         if self.table is not None and self.table.winfo_exists():
             self.table.selection_remove(self.table.selection())
@@ -447,15 +458,14 @@ class DesktopAIS:
             previous = None
             for x, y in points:
                 if previous and abs(x - previous[0]) < 256 * 2 ** self.app.map_zoom / 2:
-                    self.app.map.create_line(*previous, x, y, fill='#47c7da', width=2, tags=tags)
+                    self.app.map.create_line(*previous, x, y, fill='#a89b72', width=5, tags=tags)
+                    self.app.map.create_line(*previous, x, y, fill='#ffd15a', width=3, tags=tags)
                 previous = (x, y)
         history = self.history.tracks.get(self.selected, [])
         if history:
             first = history[0]
             x, y = self.app._project(first['lat'], first['lon'])
-            self.app.map.create_oval(x-4, y-4, x+4, y+4, outline='#47c7da', width=2, tags=tags)
-            self.app.map.create_text(x+10, y-12, anchor='w', fill='#47c7da', tags=tags,
-                text=f"First recorded · {first['received_utc']} · {first['label']}")
+            self.app.map.create_oval(x-3, y-3, x+3, y+3, outline='#ffd15a', width=1.5, tags=tags)
 
     def draw(self):
         if not self.visible.get():
@@ -473,7 +483,7 @@ class DesktopAIS:
             stale = now - vessel['received_s'] > self.state.feed.get('stale_seconds', 900)
             color = "#71828c" if stale else "#6bba97"
             if vessel['mmsi'] == self.selected:
-                color = "#47c7da"
+                color = "#ffd15a"
             angle = math.radians(vessel['cog_deg'] or 0)
             shape = []
             for across, along in ((0, -6), (4, 4), (0, 2), (-4, 4)):
@@ -485,11 +495,17 @@ class DesktopAIS:
             else:
                 self.app.map.create_polygon(shape, fill=color, outline='', tags=tags)
             if vessel['mmsi'] == self.selected:
-                self.app.map.create_oval(x - 14, y - 14, x + 14, y + 14, outline=color, width=1.5,
+                self.app.map.create_oval(x - 10, y - 10, x + 10, y + 10, outline=color, width=1.5,
                                          tags=tags)
-                self.app.map.create_text(x + 16, y, anchor="w", fill=color,
-                    text=f"{vessel['name']} · {vessel['label']} · {age_text(vessel['received_s'], now)}",
-                    tags=tags)
+                # A bold, outlined name remains readable over any map layer.
+                name_tags = (*tags, 'selected_ais_name')
+                label_x, anchor = (x - 15, 'e') if x > width - 320 else (x + 15, 'w')
+                name = vessel['name'] if len(vessel['name']) <= 36 else vessel['name'][:35] + '…'
+                for dx, dy in ((-2, 0), (2, 0), (0, -2), (0, 2), (-1, -1), (1, 1)):
+                    self.app.map.create_text(label_x + dx, y + dy, anchor=anchor, fill='#ffffff',
+                        text=name, font=('Segoe UI', 15, 'bold'), tags=name_tags)
+                self.app.map.create_text(label_x, y, anchor=anchor, fill='#26333c',
+                    text=name, font=('Segoe UI', 15, 'bold'), tags=name_tags)
         if not self.positions():
             self.app.map.create_text(width / 2, height / 2, fill="#d9bb47", font=("Consolas", 15),
                 text="CONNECTING TO IRISH AIS" if self.poller else "AIS DISCONNECTED",
@@ -513,12 +529,20 @@ class DesktopAIS:
             self.table.see(mmsi)
         self.update_detail()
         self.tabs.select(self.detail_tab)
+        if getattr(self.app, 'console_layout', False):
+            self.app.hide_console_panel()
+            if self.card is None:
+                from desktop_vessel_card import VesselCard
+                self.card = VesselCard(self)
+            self.card.show()
         self.app._draw_map()
 
     def close(self):
         self.closed = True
         if self.poller:
             self.poller.stop()
+        if self.card is not None:
+            self.card.close()
         if self.state.stream_id is not None and hasattr(self, 'connected_address'):
             self.save_cache()
         self.app.root.after_cancel(self.timer)
