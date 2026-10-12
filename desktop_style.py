@@ -72,6 +72,9 @@ class Icons:
             for points in (((12, 1), (12, 5)), ((12, 19), (12, 23)),
                            ((1, 12), (5, 12)), ((19, 12), (23, 12))):
                 line(points)
+        elif name == 'refresh':
+            draw.arc(tuple(int(v * scale) for v in (4, 4, 20, 20)), 300, 230, fill=color, width=2 * scale)
+            line([(3, 4), (7, 6), (9, 2)])
         elif name == 'plus':
             line([(4, 12), (20, 12)])
             line([(12, 4), (12, 20)])
