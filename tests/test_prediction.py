@@ -1,5 +1,7 @@
 """Dark-vessel prediction must stay usable during AIS gaps and never invent observations."""
 
+import contextlib
+import io
 import json
 import unittest
 from pathlib import Path
@@ -7,14 +9,17 @@ from pathlib import Path
 from argus.countdown import nm_between
 from argus.prediction import (
     DEFAULT_V_MAX_KN,
+    _times,
     anchor_reachable_path,
     dark_countdown,
     distance_to_path_nm,
     earliest_possible_contact_s,
     last_fix_at,
+    main,
     position_at,
     predict,
     reappearance_check,
+    report,
     v_max_kn,
 )
 
@@ -135,6 +140,44 @@ class PredictionGeometryTests(unittest.TestCase):
         self.assertEqual(path[1], [53.0, -5.0])
         self.assertAlmostEqual(path[2][1], -4.5, places=6)
         self.assertIsNone(dark_countdown([FIX], {**cable, "anchor_reachable": []}, 60))
+
+
+class CommandLineTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.scenario = json.loads((ROOT / "demo/scenario.json").read_text(encoding="utf-8"))
+
+    def run_main(self, *argv):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            main(list(argv))
+        return output.getvalue()
+
+    def test_report_checks_the_latest_gap_only_after_it_ends(self):
+        self.assertIsNone(report(self.scenario, 2400)["reappearance"])
+        check = report(self.scenario, 3600)["reappearance"]
+        self.assertEqual((check["from_t"], check["to_t"], check["verdict"]), (1740, 3000, "consistent"))
+
+    def test_hypothetical_reappearance_far_away_is_inconsistent(self):
+        check = report(self.scenario, 3000, reappear=(53.5, -5.4))["reappearance"]
+        self.assertTrue(check["hypothetical"])
+        self.assertEqual(check["from_t"], 1740)
+        self.assertEqual(check["verdict"], "physically_inconsistent")
+
+    def test_text_and_json_output(self):
+        text = self.run_main("--t", "1740", "2400")
+        self.assertIn("OBSERVED AIS", text)
+        self.assertIn("PREDICTED", text)
+        self.assertIn("earliest possible contact", text)
+        data = json.loads(self.run_main("--t", "1800:3000:600", "--json"))
+        self.assertEqual([item["t"] for item in data], [1800, 2400, 3000])
+        self.assertEqual(data[1]["position"]["status"], "predicted")
+
+    def test_time_ranges_include_the_end(self):
+        self.assertEqual(_times(["60", "100:300:100"]), [60, 100, 200, 300])
+        for bad in ("1:2", "a", "1:5:0"):
+            with self.assertRaises(ValueError):
+                _times([bad])
 
 
 if __name__ == "__main__":
