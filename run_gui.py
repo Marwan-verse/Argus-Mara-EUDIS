@@ -8,6 +8,8 @@ JSON contracts as the browser demo and never starts a server. Global Natural Ear
 geometry is the default; optional NASA imagery loads only the visible map tiles.
 Optional live Met Éireann weather (a point summary plus rain/cloud shading and wind arrows
 sampled on a grid) is off by default and is display context only.
+The docked AIS tracker connects on demand to an existing shared service and draws
+received observations independently of the fictional exercise and its countdown.
 """
 
 from __future__ import annotations
@@ -35,18 +37,21 @@ from argus import weather
 from argus.contracts import validate_alerts, validate_scenario
 from argus.countdown import step
 from argus.map_view import coordinates, find_ports, geographic_extent, route_name, search_text
+from desktop_ais import DesktopAIS
 
 
 ROOT = Path(__file__).resolve().parent
-BG = "#f1f5fa"
-CARD = "#ffffff"
-INK = "#172b42"
-MUTED = "#64748b"
-LINE = "#dce5ee"
-TEAL = "#2556c8"
-AMBER = "#b86514"
-SEA = "#e9f3f8"
-PURPLE = "#5546b5"
+BG = "#0b1118"
+CARD = "#141e28"
+INK = "#e4ebf0"
+MUTED = "#a8b6c2"
+LINE = "#2c3d4c"
+TEAL = "#47c7da"
+AMBER = "#e1b164"
+SEA = "#202d39"
+PURPLE = "#d1b464"
+CONTROL = "#1c2a36"
+HOVER = "#283a4a"
 MAX_AIS_GAP_S = 120
 TILE_SIZE = 256
 MIN_MAP_ZOOM = 1
@@ -110,6 +115,20 @@ def load_world_assets(root: Path = ROOT) -> tuple[dict, dict, dict]:
     if len(ports["ports"]) != ports["count"] or len(cables["cables"]) != cables["count"]:
         raise ValueError("A global map layer is incomplete")
     return land, ports, cables
+
+
+def load_irish_ports(root: Path = ROOT) -> dict:
+    data = json.loads((root / "ui/assets/irish_ports.json").read_text(encoding="utf-8"))
+    rows = data['ports']
+    if data.get('label') != 'real' or data.get('count') != len(rows) or not rows:
+        raise ValueError('The Irish port catalogue is incomplete')
+    if len({p[0] for p in rows}) != len(rows):
+        raise ValueError('Irish port identifiers must be unique')
+    for identifier, name, lat, lon, country in rows:
+        if (not isinstance(identifier, int) or not name or not (-90 <= lat <= 90 and -180 <= lon <= 180)
+                or country not in ('IE', 'GB') or str(identifier) not in data['details']):
+            raise ValueError('Invalid Irish port reference')
+    return data
 
 
 def clock(seconds: float) -> str:
@@ -178,6 +197,11 @@ class ArgusApp:
                 self.coastline_rings.append((ring, (min(lons), min(lats), max(lons), max(lats))))
         self.world_land, ports, cables = load_world_assets()
         self.world_ports = ports["ports"]
+        irish = load_irish_ports()
+        self.port_metadata = irish["details"]
+        self.world_ports.extend(irish["ports"])
+        self.irish_port_indices = {i for i, p in enumerate(self.world_ports)
+                                  if p[4] == "IE" or str(p[0]) in self.port_metadata}
         self.world_cables = cables["cables"]
         self.selected_port = None
         self.selected_cable = None
@@ -190,6 +214,7 @@ class ArgusApp:
                 lons, lats = zip(*ring)
                 self.land_rings[level].append((ring, (min(lons), min(lats), max(lons), max(lats))))
         self.alert = min(alerts["alerts"], key=lambda item: item["t"])
+        self.alerts = alerts["alerts"]
         self.vessel = next(v for v in scenario["vessels"] if v["mmsi"] == self.alert["mmsi"])
         self.cable = next(c for c in scenario["cables"] if c["id"] == self.alert["segment_id"])
         self.duration = max(v["track"][-1]["t"] for v in scenario["vessels"] if v["track"])
@@ -201,10 +226,12 @@ class ArgusApp:
         self._moving_scale = False
         self._map_size = (0, 0)
         self._last_second = -1
-        self.map_center = (53.15, -5.55)
-        self.map_zoom = 8
+        self.map_center = (53.25, -11.25)
+        self.map_zoom = 6
         self.map_mode = tk.StringVar(value="Offline coastline")
         self.map_layers = {name: tk.BooleanVar(value=True) for name in ("AIS track", "Radar contacts", "Cable", "Anchor reach", "Response assets", "World ports", "Historical cable routes", "Rain and cloud", "Wind")}
+        self.map_layers["World ports"].set(True)
+        self.irish_ports_only = tk.BooleanVar(value=True)
         self.map_tool: str | None = None
         self.map_note_points: list[tuple[float, float]] = []
         self.measure_points: list[tuple[float, float]] = []
@@ -246,6 +273,8 @@ class ArgusApp:
             "ports": "Port directory", "cables": "Cable directory",
             "notes": "Map notes", "evidence": "Evidence review",
             "decision": "Decision review", "weather": "Live weather",
+            "ais": "AIS ship tracker", "sar_plan": "SAR next step",
+            "views": "Saved map views",
         }
         self._decision_choice = tk.StringVar(value="")
         self._decision_acknowledged = tk.BooleanVar(value=False)
@@ -254,6 +283,7 @@ class ArgusApp:
         self._active_dock_location = "right"
         self._initial_split_set = False
         self._configure_window()
+        self.ais_tracker = DesktopAIS(self, cache_path=ROOT / "data/desktop/ais_latest.json")
         self._build_modern()
         self.render()
         self.root.after(80, self._tick)
@@ -262,7 +292,17 @@ class ArgusApp:
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
     def _configure_window(self) -> None:
-        self.root.title("Argus Mara — desktop exercise")
+        self.root.title("Argus Mara — maritime intelligence")
+        ctk.set_appearance_mode("dark")
+        ctk.ThemeManager.theme['CTkFont']['family'] = 'Segoe UI'
+        ctk.ThemeManager.theme['CTkFont']['size'] = 13
+        for name, values in {
+            'CTkButton': {'fg_color': [CONTROL, CONTROL], 'hover_color': [HOVER, HOVER], 'text_color': [INK, INK], 'corner_radius': 8},
+            'CTkEntry': {'fg_color': [CONTROL, CONTROL], 'border_color': [LINE, LINE], 'text_color': [INK, INK], 'corner_radius': 8},
+            'CTkOptionMenu': {'fg_color': [CONTROL, CONTROL], 'button_color': [CONTROL, CONTROL], 'button_hover_color': [HOVER, HOVER], 'text_color': [INK, INK]},
+            'DropdownMenu': {'fg_color': [CARD, CARD], 'hover_color': [HOVER, HOVER], 'text_color': [INK, INK]},
+        }.items():
+            ctk.ThemeManager.theme[name].update(values)
         self.root.geometry("1480x900")
         self.root.minsize(1100, 720)
         self.root.configure(fg_color=BG)
@@ -270,27 +310,50 @@ class ArgusApp:
         if "clam" in style.theme_names():
             style.theme_use("clam")
         style.configure("TFrame", background=CARD)
-        style.configure("TLabel", background=CARD, foreground=INK, font=("Segoe UI", 10))
+        style.configure("TLabel", background=CARD, foreground=INK, font=("Segoe UI", 11))
         style.configure("Muted.TLabel", foreground=MUTED)
         style.configure("Title.TLabel", font=("Segoe UI Semibold", 19))
         style.configure("Heading.TLabel", font=("Segoe UI Semibold", 11))
         style.configure("Countdown.TLabel", font=("Consolas", 31, "bold"), foreground=INK)
-        style.configure("TButton", font=("Segoe UI", 10), padding=(10, 7))
+        style.configure("TButton", font=("Segoe UI", 11), padding=(12, 8))
+        style.configure("TButton", background=CONTROL, foreground=INK, bordercolor=LINE)
+        style.map("TButton", background=[("active", HOVER)], foreground=[("disabled", MUTED)])
+        style.configure("TEntry", fieldbackground=BG, foreground=INK, insertcolor=INK)
+        style.configure('TEntry', font=('Segoe UI', 11), padding=7)
+        style.map('TEntry', bordercolor=[('focus', TEAL), ('!focus', LINE)])
+        style.configure('TCombobox', font=('Segoe UI', 11), fieldbackground=CONTROL,
+                        foreground=INK, background=CONTROL, arrowcolor=INK, bordercolor=LINE)
+        self.root.option_add('*TCombobox*Listbox.background', CARD)
+        self.root.option_add('*TCombobox*Listbox.foreground', INK)
+        self.root.option_add('*TCombobox*Listbox.selectBackground', HOVER)
+        self.root.option_add('*TCombobox*Listbox.selectForeground', INK)
+        style.configure('TCheckbutton', font=('Segoe UI', 11))
+        style.configure("TCheckbutton", foreground=INK)
+        style.configure("TRadiobutton", foreground=INK)
+        style.map("TCheckbutton", background=[("active", CONTROL)])
+        style.map("TRadiobutton", background=[("active", CONTROL)])
         style.configure("Accent.TButton", font=("Segoe UI Semibold", 10), padding=(12, 8))
         style.configure("TCheckbutton", background=CARD)
         style.configure("TRadiobutton", background=CARD)
         style.configure("Dock.TNotebook", background=CARD, borderwidth=0, tabmargins=(0, 4, 0, 0))
-        style.configure("Dock.TNotebook.Tab", padding=(15, 9), font=("Segoe UI Semibold", 10), background="#eef3f9", foreground=MUTED)
+        style.configure("Dock.TNotebook.Tab", padding=(12, 9), font=("Segoe UI", 11), background=CONTROL, foreground=MUTED)
         style.map("Dock.TNotebook.Tab", background=[("selected", CARD)], foreground=[("selected", TEAL)])
         style.configure("TNotebook", background=CARD, borderwidth=0)
         style.configure("TNotebook.Tab", padding=(12, 8), font=("Segoe UI", 9))
         style.configure("TPanedwindow", sashwidth=10, sashrelief="flat", background=BG)
-        style.configure("Treeview", background=CARD, fieldbackground=CARD, foreground=INK, rowheight=30, borderwidth=0)
-        style.configure("Treeview.Heading", background="#edf3f8", foreground=MUTED, font=("Segoe UI Semibold", 9))
-        style.map("Treeview", background=[("selected", "#dfeafe")], foreground=[("selected", INK)])
+        style.configure("Treeview", background=CARD, fieldbackground=CARD, foreground=INK, font=('Segoe UI', 11), rowheight=32, borderwidth=0)
+        style.configure("Treeview.Heading", background=CONTROL, foreground=MUTED, font=("Segoe UI", 10))
+        style.map("Treeview", background=[("selected", "#294254")], foreground=[("selected", INK)])
         self.root.bind("<space>", self._space)
 
     def _build_modern(self) -> None:
+        if hasattr(self, "ais_tracker"):
+            from desktop_console import build
+            build(self)
+        else:
+            self._build_dashboard()
+
+    def _build_dashboard(self) -> None:
         """Native dashboard shell around the existing map, replay and movable docks."""
         self.root.configure(fg_color=BG)
         shell = ctk.CTkFrame(self.root, fg_color=BG, corner_radius=0)
@@ -302,22 +365,25 @@ class ArgusApp:
         sidebar.pack_propagate(False)
         ctk.CTkLabel(sidebar, text="◈", text_color=PURPLE,
                      font=ctk.CTkFont("Segoe UI Symbol", 32)).pack(anchor="w", padx=23, pady=(25, 0))
-        ctk.CTkLabel(sidebar, text="ARGUS MARA", text_color=INK,
+        ctk.CTkLabel(sidebar, text="ARGUS MARA", text_color=PURPLE,
                      font=ctk.CTkFont("Segoe UI", 18, "bold")).pack(anchor="w", padx=23)
         ctk.CTkLabel(sidebar, text="OPERATOR CONSOLE", text_color=MUTED,
-                     font=ctk.CTkFont("Segoe UI", 9, "bold")).pack(anchor="w", padx=23, pady=(1, 34))
+                     font=ctk.CTkFont("Segoe UI", 9, "bold")).pack(anchor="w", padx=23, pady=(1, 18))
 
         def nav(text: str, action, selected: bool = False) -> None:
-            ctk.CTkButton(sidebar, text=text, command=action, anchor="w", height=39,
-                          corner_radius=11, font=ctk.CTkFont("Segoe UI", 12, "bold" if selected else "normal"),
-                          fg_color="#e9e7fa" if selected else "transparent",
-                          hover_color="#edf2fb", text_color=PURPLE if selected else INK).pack(
-                              fill="x", padx=13, pady=3)
+            ctk.CTkButton(sidebar, text=text, command=action, anchor="w", height=31,
+                          corner_radius=5, font=ctk.CTkFont("Segoe UI", 11, "bold" if selected else "normal"),
+                          fg_color="#293528" if selected else "transparent",
+                          hover_color="#294254", text_color=PURPLE if selected else INK).pack(
+                              fill="x", padx=13, pady=2)
 
         ctk.CTkLabel(sidebar, text="WORKSPACE", text_color=MUTED,
                      font=ctk.CTkFont("Segoe UI", 10, "bold")).pack(anchor="w", padx=23, pady=(0, 8))
         nav("◫   Situation", lambda: self.right_notebook.select(0), True)
         nav("◉   Vessel details", lambda: self.open_window("contacts"))
+        if hasattr(self, "ais_tracker"):
+            nav("△   AIS ship tracker", lambda: self.open_window("ais"))
+            nav("◇   SAR next step", lambda: self.open_window("sar_plan"))
         nav("◷   Timeline", lambda: self.open_window("timeline"))
         nav("◇   Map layers", lambda: self.open_window("layers"))
         nav("⚓   Port directory", lambda: self.open_window("ports"))
@@ -325,7 +391,7 @@ class ArgusApp:
         nav("▣   Evidence review", self.review_evidence)
         nav("✓   Response board", lambda: self.open_window("responses"))
         nav("☁   Live weather", lambda: self.open_window("weather"))
-        ctk.CTkFrame(sidebar, height=1, fg_color=LINE).pack(fill="x", padx=22, pady=23)
+        ctk.CTkFrame(sidebar, height=1, fg_color=LINE).pack(fill="x", padx=22, pady=12)
         ctk.CTkLabel(sidebar, text="MAP SHORTCUTS", text_color=MUTED,
                      font=ctk.CTkFont("Segoe UI", 10, "bold")).pack(anchor="w", padx=23, pady=(0, 8))
         nav("⌖   Center vessel", self.center_vessel)
@@ -336,13 +402,13 @@ class ArgusApp:
                          side="bottom", anchor="w", padx=23, pady=24)
 
         body = ctk.CTkFrame(shell, fg_color=BG, corner_radius=0)
-        body.pack(side="left", fill="both", expand=True, padx=(22, 22), pady=(18, 16))
+        body.pack(side="left", fill="both", expand=True, padx=(12, 12), pady=(12, 10))
         header = ctk.CTkFrame(body, fg_color="transparent")
         header.pack(fill="x", pady=(0, 16))
         title_box = ctk.CTkFrame(header, fg_color="transparent")
         title_box.pack(side="left")
         ctk.CTkLabel(title_box, text="Maritime situation", text_color=INK,
-                     font=ctk.CTkFont("Segoe UI", 26, "bold")).pack(anchor="w")
+                     font=ctk.CTkFont("Segoe UI", 23, "bold")).pack(anchor="w")
         ctk.CTkLabel(title_box, text="Fictional replay  /  Irish Sea  /  operator review",
                      text_color=MUTED, font=ctk.CTkFont("Segoe UI", 11)).pack(anchor="w")
         self.time_label = ctk.CTkLabel(header, text="", fg_color=CARD, corner_radius=14,
@@ -355,7 +421,7 @@ class ArgusApp:
         metrics.grid_columnconfigure((0, 1, 2, 3), weight=1, uniform="metric")
 
         def metric(column: int, caption: str, value: str, accent: str) -> ctk.CTkLabel:
-            card = ctk.CTkFrame(metrics, fg_color=CARD, corner_radius=15, border_width=1, border_color=LINE)
+            card = ctk.CTkFrame(metrics, fg_color=CARD, corner_radius=6, border_width=1, border_color=LINE)
             card.grid(row=0, column=column, sticky="ew", padx=(0, 9 if column < 3 else 0))
             ctk.CTkFrame(card, width=4, height=41, fg_color=accent, corner_radius=3).pack(
                 side="left", padx=(13, 13), pady=13)
@@ -380,7 +446,7 @@ class ArgusApp:
         main.bind("<Configure>", self._set_initial_split, add="+")
         self.workspace.add(main, weight=4)
 
-        left = ctk.CTkFrame(main, fg_color=CARD, corner_radius=16, border_width=1, border_color=LINE)
+        left = ctk.CTkFrame(main, fg_color=CARD, corner_radius=6, border_width=1, border_color=LINE)
         left.grid_columnconfigure(0, weight=1)
         left.grid_rowconfigure(2, weight=1)
         map_head = ctk.CTkFrame(left, fg_color="transparent")
@@ -398,14 +464,14 @@ class ArgusApp:
         self.map_selector = ctk.CTkOptionMenu(map_bar, variable=self.map_mode,
                                               values=["Offline coastline", ONLINE_MAP],
                                               command=self._change_map_mode, width=180, height=31,
-                                              fg_color="#edf3fb", button_color="#e2ebf9",
-                                              button_hover_color="#d5e4f8", text_color=INK,
+                                              fg_color="#1a2c3b", button_color="#203747",
+                                              button_hover_color="#294254", text_color=INK,
                                               dropdown_fg_color=CARD, dropdown_text_color=INK)
         self.map_selector.pack(side="left")
         ctk.CTkButton(map_bar, text="Ports", command=lambda: self.open_window("ports"),
-                      width=58, height=31, fg_color="#edf3fb", text_color=TEAL).pack(side="left", padx=6)
+                      width=58, height=31, fg_color="#1a2c3b", text_color=TEAL).pack(side="left", padx=6)
         ctk.CTkButton(map_bar, text="Layers", command=lambda: self.open_window("layers"),
-                      width=58, height=31, fg_color="#edf3fb", text_color=TEAL).pack(side="left")
+                      width=58, height=31, fg_color="#1a2c3b", text_color=TEAL).pack(side="left")
         ctk.CTkSwitch(map_bar, text="Live weather", variable=self.live_weather,
                       command=self._toggle_weather, progress_color=TEAL, text_color=INK,
                       font=ctk.CTkFont("Segoe UI", 11)).pack(side="left", padx=(12, 0))
@@ -417,7 +483,7 @@ class ArgusApp:
         for text, action in (("−", lambda: self._zoom_by(-1)), ("+", lambda: self._zoom_by(1)),
                              ("⌂", self.fit_map), ("World", self.fit_world)):
             ctk.CTkButton(map_bar, text=text, command=action, width=53 if text == "World" else 32, height=31,
-                          corner_radius=9, fg_color="#edf3fb", hover_color="#dfeafb",
+                          corner_radius=9, fg_color="#1a2c3b", hover_color="#294254",
                           text_color=TEAL, font=ctk.CTkFont("Segoe UI", 16)).pack(side="right", padx=(5, 0))
         self.map = tk.Canvas(left, bg=SEA, highlightthickness=0)
         self.map.grid(row=2, column=0, sticky="nsew", padx=12)
@@ -444,7 +510,7 @@ class ArgusApp:
                                                   text_color=MUTED, font=ctk.CTkFont("Segoe UI", 10))
         self.map_attribution_label.pack(side="right")
 
-        panel = ctk.CTkFrame(main, fg_color=CARD, corner_radius=16, border_width=1, border_color=LINE)
+        panel = ctk.CTkFrame(main, fg_color=CARD, corner_radius=6, border_width=1, border_color=LINE)
         panel.grid_columnconfigure(0, weight=1)
         panel.grid_rowconfigure(1, weight=1)
         panel_toolbar = ctk.CTkFrame(panel, fg_color="transparent")
@@ -452,12 +518,12 @@ class ArgusApp:
         ctk.CTkLabel(panel_toolbar, text="Operator panels", text_color=INK,
                      font=ctk.CTkFont("Segoe UI", 16, "bold")).pack(side="left")
         self.windows_plus = ctk.CTkButton(panel_toolbar, text="+", command=self.open_windows_menu,
-                                          width=32, height=30, corner_radius=9, fg_color=PURPLE,
-                                          hover_color="#443694", font=ctk.CTkFont("Segoe UI", 19))
+                                          width=32, height=30, corner_radius=9, fg_color=PURPLE, text_color=BG,
+                                          hover_color="#80703c", font=ctk.CTkFont("Segoe UI", 19))
         self.windows_plus.pack(side="right", padx=(8, 0))
         self.close_panel_button = ctk.CTkButton(panel_toolbar, text="Close tab", command=self.close_current_panel,
-                                                width=75, height=30, corner_radius=9, fg_color="#edf3fb",
-                                                hover_color="#dfeafb", text_color=INK,
+                                                width=75, height=30, corner_radius=9, fg_color="#1a2c3b",
+                                                hover_color="#294254", text_color=INK,
                                                 font=ctk.CTkFont("Segoe UI", 11))
         self.close_panel_button.pack(side="right")
         self.right_notebook = ttk.Notebook(panel, style="Dock.TNotebook")
@@ -466,14 +532,14 @@ class ArgusApp:
         overview = ttk.Frame(self.right_notebook)
         self.right_notebook.add(overview, text="Situation")
         content = ctk.CTkScrollableFrame(overview, fg_color=CARD, corner_radius=0,
-                                         scrollbar_button_color="#ccd7e7")
+                                         scrollbar_button_color="#294254")
         content.pack(fill="both", expand=True)
         ctk.CTkLabel(content, text=self.vessel["name"], text_color=INK,
                      font=ctk.CTkFont("Segoe UI", 20, "bold")).pack(anchor="w", pady=(5, 2))
         self.state_label = ctk.CTkLabel(content, text="", text_color=AMBER,
                                         font=ctk.CTkFont("Segoe UI", 11, "bold"))
         self.state_label.pack(anchor="w", pady=(0, 12))
-        eta_card = ctk.CTkFrame(content, fg_color="#f2f5ff", corner_radius=13)
+        eta_card = ctk.CTkFrame(content, fg_color="#142837", corner_radius=13)
         eta_card.pack(fill="x", pady=(0, 13))
         ctk.CTkLabel(eta_card, text="EXPECTED TIME TO CABLE", text_color=MUTED,
                      font=ctk.CTkFont("Segoe UI", 10, "bold")).pack(anchor="w", padx=15, pady=(13, 0))
@@ -497,14 +563,14 @@ class ArgusApp:
                                          text_color=INK, font=ctk.CTkFont("Segoe UI", 11))
         self.options_label.pack(anchor="w", fill="x", pady=(6, 12))
         self.approve_button = ctk.CTkButton(content, text="Review response", command=self.review_response,
-                                            fg_color=PURPLE, hover_color="#443694", height=39,
+                                            fg_color=PURPLE, text_color=BG, hover_color="#80703c", height=39,
                                             corner_radius=10, font=ctk.CTkFont("Segoe UI", 12, "bold"))
         self.approve_button.pack(fill="x", pady=(0, 7))
         self.approval_label = ctk.CTkLabel(content, text="Operator approval required", text_color=MUTED,
                                           wraplength=345, justify="left", font=ctk.CTkFont("Segoe UI", 10))
         self.approval_label.pack(anchor="w")
         ctk.CTkButton(content, text="Review evidence", command=self.review_evidence,
-                      fg_color="#edf3fb", hover_color="#dfeafb", text_color=TEAL,
+                      fg_color="#1a2c3b", hover_color="#294254", text_color=TEAL,
                       height=35, corner_radius=10).pack(fill="x", pady=(13, 5))
         ctk.CTkLabel(content, text="Radar association, speed change and vessel intent remain unconfirmed. No action is sent.",
                      text_color=MUTED, wraplength=345, justify="left",
@@ -520,28 +586,28 @@ class ArgusApp:
         ctk.CTkLabel(bottom_header, text="Bottom workspace", text_color=INK,
                      font=ctk.CTkFont("Segoe UI", 14, "bold")).pack(side="left")
         ctk.CTkButton(bottom_header, text="Move tabs right · close pane", command=self.move_bottom_tabs_right,
-                      width=180, height=29, fg_color="#edf3fb", text_color=INK,
-                      hover_color="#dfeafb").pack(side="right")
+                      width=180, height=29, fg_color="#1a2c3b", text_color=INK,
+                      hover_color="#294254").pack(side="right")
         self.bottom_notebook = ttk.Notebook(self.bottom_dock, style="Dock.TNotebook")
         self.bottom_notebook.pack(fill="both", expand=True, padx=13, pady=(0, 10))
         self._bind_dock(self.bottom_notebook)
 
-        controls = ctk.CTkFrame(body, fg_color=CARD, corner_radius=15, border_width=1, border_color=LINE)
+        controls = ctk.CTkFrame(body, fg_color=CARD, corner_radius=6, border_width=1, border_color=LINE)
         controls.pack(fill="x", pady=(14, 0))
         row = ctk.CTkFrame(controls, fg_color="transparent")
         row.pack(fill="x", padx=14, pady=(11, 0))
         self.play_button = ctk.CTkButton(row, text="Play", command=self.toggle_play, width=75,
-                                         height=33, fg_color=PURPLE, hover_color="#443694")
+                                         height=33, fg_color=PURPLE, text_color=BG, hover_color="#80703c")
         self.play_button.pack(side="left")
         for title, action in (("Restart", lambda: self.seek(0)),
                               ("Jump to alert", lambda: self.seek(self.alert["t"]))):
             ctk.CTkButton(row, text=title, command=action, height=33, width=100,
-                          fg_color="#edf3fb", hover_color="#dfeafb", text_color=INK).pack(side="left", padx=(7, 0))
+                          fg_color="#1a2c3b", hover_color="#294254", text_color=INK).pack(side="left", padx=(7, 0))
         ctk.CTkLabel(row, text="Speed", text_color=MUTED).pack(side="left", padx=(17, 7))
         self.speed_selector = ctk.CTkOptionMenu(row, values=["1×", "30×", "60×", "120×", "240×"],
                                                 command=lambda value: self.rate.set(int(value[:-1])),
-                                                width=83, height=33, fg_color="#edf3fb",
-                                                button_color="#dfeafb", button_hover_color="#d0e0f5",
+                                                width=83, height=33, fg_color="#1a2c3b",
+                                                button_color="#294254", button_hover_color="#294254",
                                                 text_color=INK, dropdown_fg_color=CARD,
                                                 dropdown_text_color=INK)
         self.speed_selector.set(f"{self.rate.get()}×")
@@ -550,20 +616,20 @@ class ArgusApp:
                                        font=ctk.CTkFont("Segoe UI", 11, "bold"))
         self.beat_label.pack(side="right", padx=(10, 1))
         self.tools_plus = ctk.CTkButton(row, text="+", command=self.open_tools_menu, width=33,
-                                        height=33, corner_radius=9, fg_color=PURPLE,
-                                        hover_color="#443694", font=ctk.CTkFont("Segoe UI", 19))
+                                        height=33, corner_radius=9, fg_color=PURPLE, text_color=BG,
+                                        hover_color="#80703c", font=ctk.CTkFont("Segoe UI", 19))
         self.tools_plus.pack(side="right", padx=(9, 0))
         ctk.CTkLabel(row, text="Bottom panel / tools", text_color=MUTED).pack(side="right")
         self.timeline = ctk.CTkSlider(controls, from_=0, to=self.duration, command=self._scale_changed,
-                                      fg_color="#dce6f5", progress_color=PURPLE,
-                                      button_color=PURPLE, button_hover_color="#443694", height=17)
+                                      fg_color="#203747", progress_color=PURPLE,
+                                      button_color=PURPLE, button_hover_color="#80703c", height=17)
         self.timeline.pack(fill="x", padx=19, pady=(14, 7))
         beats_row = ctk.CTkFrame(controls, fg_color="transparent")
         beats_row.pack(fill="x", padx=12, pady=(0, 11))
         for title, value in self._beats():
             ctk.CTkButton(beats_row, text=title, command=lambda t=value: self.seek(t),
-                          height=27, width=96, corner_radius=8, fg_color="#edf3fb",
-                          hover_color="#dfeafb", text_color=TEAL,
+                          height=27, width=96, corner_radius=8, fg_color="#1a2c3b",
+                          hover_color="#294254", text_color=TEAL,
                           font=ctk.CTkFont("Segoe UI", 10)).pack(side="left", padx=(0, 5))
         self.root.after(180, self._set_initial_split)
 
@@ -581,6 +647,8 @@ class ArgusApp:
             label.configure(wraplength=wrap)
 
     def _set_initial_split(self, _event=None) -> None:
+        if getattr(self, "console_layout", False):
+            return
         width = self.main_split.winfo_width()
         # The horizontal paned window is added to the workspace before its
         # two child panes are built.  Tk can therefore send a Configure event
@@ -640,7 +708,7 @@ class ArgusApp:
 
         def set_bottom_height() -> None:
             height = self.workspace.winfo_height()
-            if height > 300:
+            if height > 300 and len(self.workspace.panes()) >= 2:
                 self.workspace.sashpos(0, int(height * 0.68))
 
         self.root.after_idle(set_bottom_height)
@@ -661,7 +729,7 @@ class ArgusApp:
             widget = self._panel_widgets[key]
             target = self._notebook_for(destination)
         elif widget is None:
-            widget = ttk.Frame(target, padding=18)
+            widget = ttk.Frame(target, padding=12 if getattr(self, 'console_layout', False) else 18)
             self._panel_widgets[key] = widget
             self._panel_locations[key] = destination
             self._populate_panel(key, widget)
@@ -671,20 +739,38 @@ class ArgusApp:
                 child.destroy()
             self._populate_panel(key, widget)
         target.select(widget)
+        if getattr(self, "console_layout", False) and destination == "right":
+            self.show_console_panel(self._panel_titles[key])
+            if key in ("contacts", "timeline", "responses", "evidence", "decision"):
+                self.enable_exercise()
         self._active_dock_location = destination
         self._update_close_panel_button()
 
     def _populate_panel(self, key: str, frame: ttk.Frame) -> None:
         titles = self._panel_titles
-        ttk.Label(frame, text=titles[key], style="Title.TLabel").pack(anchor="w", pady=(0, 10))
+        if not getattr(self, 'console_layout', False):
+            ttk.Label(frame, text=titles[key], style="Title.TLabel").pack(anchor="w", pady=(0, 10))
 
-        if key == "ports":
+        if key == 'views':
+            self.tools.build_views(frame)
+        elif key == "ais":
+            self.ais_tracker.build(frame)
+        elif key == "sar_plan":
+            text = tk.Text(frame, wrap="word", padx=15, pady=12, font=("Segoe UI", 11),
+                           bg=CARD, fg=INK, insertbackground=INK, relief="flat")
+            scrollbar = ttk.Scrollbar(frame, command=text.yview)
+            text.configure(yscrollcommand=scrollbar.set)
+            scrollbar.pack(side="right", fill="y")
+            text.pack(fill="both", expand=True)
+            text.insert("1.0", (ROOT / "docs/08-sar-next-step.md").read_text(encoding="utf-8"))
+            text.configure(state="disabled")
+        elif key == "ports":
             self._build_port_directory(frame)
         elif key == "cables":
             self._build_cable_directory(frame)
         elif key == "evidence":
             ttk.Label(frame, text="Evidence review · simulated exercise", style="Muted.TLabel").pack(anchor="w", pady=(0, 10))
-            text = tk.Text(frame, wrap="word", padx=15, pady=12, font=("Segoe UI", 10), bg="white", fg=INK)
+            text = tk.Text(frame, wrap="word", padx=15, pady=12, font=("Segoe UI", 10), bg=CARD, fg=INK)
             text.pack(fill="both", expand=True)
             text.insert("1.0", self._evidence_text())
             text.configure(state="disabled")
@@ -805,6 +891,12 @@ class ArgusApp:
             ttk.Label(frame, text="All capability and arrival figures are assumptions; this panel sends no action.", style="Muted.TLabel").pack(anchor="w", pady=(8, 0))
 
         elif key == "layers":
+            if hasattr(self, 'tools'):
+                ttk.Checkbutton(frame, text='Reduce panel motion', variable=self.tools.reduced_motion,
+                                command=self.tools.schedule_save).pack(anchor='w', pady=4)
+            if hasattr(self, "irish_ports_only"):
+                ttk.Checkbutton(frame, text="Irish coast ports only", variable=self.irish_ports_only,
+                                command=lambda: self._draw_map(force_static=True)).pack(anchor="w", pady=4)
             ttk.Label(frame, text="Choose a map background and the overlays to show.", style="Muted.TLabel").pack(anchor="w", pady=(0, 12))
             ttk.Label(frame, text="Basemap", style="Heading.TLabel").pack(anchor="w")
             selector = ttk.Combobox(frame, textvariable=self.map_mode, values=("Offline coastline", ONLINE_MAP), state="readonly", width=31)
@@ -821,7 +913,7 @@ class ArgusApp:
         elif key == "world_data":
             sources = [
                 ("World land", "Natural Earth · real public domain geometry. Simplified display map, not a navigational chart."),
-                (f"World ports · {len(self.world_ports):,}", "NGA World Port Index · real reference locations. Points may not mark individual berths."),
+                (f"Port records · {len(self.world_ports):,}", "NGA World Port Index plus Ireland's Marine Atlas / Marine Irish Digital Atlas (CC BY 4.0) · real reference locations. Points may not mark individual berths."),
                 (f"Cable systems · {len(self.world_cables):,}", "Historical TeleGeography map snapshot · reconstructed, simplified stylized routes. CC BY-NC-SA 3.0 (creativecommons.org/licenses/by-nc-sa/3.0/); noncommercial display only. May include planned systems. Never use these lines for proximity alerts."),
                 ("Imagery", "NASA Earthdata GIBS Blue Marble Next Generation · online display imagery. This imagery is not a live satellite feed."),
                 ("Weather", "Met Éireann forecast API (data.gov.ie) · real live point forecast at the exercise cable, plus rain/cloud shading and wind arrows from a grid of model points (not radar), CC BY 4.0. Off by default; shows current weather, not the fictional replay's, and never changes alerts or ETAs."),
@@ -836,7 +928,9 @@ class ArgusApp:
 
         elif key == "notes":
             ttk.Label(frame, text="Map notes live for this session only.", style="Muted.TLabel").pack(anchor="w", pady=(0, 8))
-            listbox = tk.Listbox(frame, font=("Segoe UI", 10), relief="flat", borderwidth=1, highlightthickness=1, highlightbackground=LINE)
+            listbox = tk.Listbox(frame, font=("Segoe UI", 10), relief="flat", borderwidth=1,
+                                 bg=CARD, fg=INK, selectbackground=HOVER, selectforeground=INK,
+                                 highlightthickness=1, highlightbackground=LINE)
             listbox.pack(fill="both", expand=True)
             for index, (lat, lon) in enumerate(self.map_note_points, 1):
                 listbox.insert("end", f"{index}.  {lat:.5f}°N, {lon:.5f}°W")
@@ -1151,7 +1245,7 @@ class ArgusApp:
         label = self.map.create_text(14, top + 4, text=text, anchor="nw", fill=INK, font=("Segoe UI Semibold", 8))
         _x1, y1, x2, y2 = self.map.bbox(label)
         line = y2 - y1
-        background = self.map.create_rectangle(8, top, x2 + 8, y2 + 8, fill="white", outline=LINE)
+        background = self.map.create_rectangle(8, top, x2 + 8, y2 + 8, fill=CARD, outline=LINE)
         self.map.tag_raise(label)
         rows = []
         if rain_on:
@@ -1185,16 +1279,16 @@ class ArgusApp:
         self._populate_panel("weather", widget)
 
     def _build_port_directory(self, frame) -> None:
-        ttk.Label(frame, text="Search all local NGA reference ports by name, country code or WPI ID.",
+        ttk.Label(frame, text="Irish commercial, fishing and ferry ports / Marine Atlas and NGA reference records.",
                   style="Muted.TLabel", wraplength=340).pack(anchor="w")
         self.port_query = tk.StringVar()
         ttk.Label(frame, text="Search ports").pack(anchor="w", pady=(10, 0))
         entry = ttk.Entry(frame, textvariable=self.port_query)
         entry.pack(fill="x", pady=(10, 6))
-        self.port_country = tk.StringVar(value="All countries")
-        ttk.Label(frame, text="Country code").pack(anchor="w")
+        self.port_country = tk.StringVar(value="Irish coast" if getattr(self, "console_layout", False) else "All countries")
+        ttk.Label(frame, text="Port region / country code").pack(anchor="w")
         ttk.Combobox(frame, textvariable=self.port_country, state="readonly",
-                     values=["All countries"] + sorted({p[4] for p in self.world_ports})).pack(fill="x")
+                     values=["Irish coast", "All countries"] + sorted({p[4] for p in self.world_ports})).pack(fill="x")
         self.port_visible = tk.BooleanVar(value=False)
         ttk.Checkbutton(frame, text="Only ports in the current map view", variable=self.port_visible,
                         command=self._refresh_port_directory).pack(anchor="w", pady=8)
@@ -1204,7 +1298,7 @@ class ArgusApp:
         holder.pack(fill="both", expand=True)
         self.port_table = ttk.Treeview(holder, columns=("name", "country", "wpi"), show="headings",
                                        selectmode="browse", height=8)
-        for column, title, width in (("name", "Port", 170), ("country", "Country", 65), ("wpi", "WPI", 60)):
+        for column, title, width in (("name", "Port", 170), ("country", "Country", 65), ("wpi", "Ref ID", 75)):
             self.port_table.heading(column, text=title)
             self.port_table.column(column, width=width, minwidth=50, stretch=column == "name")
         scroll = ttk.Scrollbar(holder, orient="vertical", command=self.port_table.yview)
@@ -1215,7 +1309,7 @@ class ArgusApp:
                                      wraplength=340, justify="left")
         self.port_detail.pack(anchor="w", pady=10)
         ttk.Button(frame, text="Center selected port", command=self._center_selected_port).pack(anchor="w")
-        ttk.Label(frame, text="Real reference data · NGA World Port Index\nPositions are not precise berths or navigation fixes.",
+        ttk.Label(frame, text="Real reference data / Marine Irish Digital Atlas (CC BY 4.0) and NGA. Historical catalogue locations, not surveyed berths. Different categories may describe the same harbour.",
                   style="Muted.TLabel", wraplength=340).pack(anchor="w", pady=(10, 0))
         self.port_table.bind("<<TreeviewSelect>>", self._port_table_selected)
         self.port_table.bind("<Double-1>", lambda _event: self._center_selected_port())
@@ -1242,13 +1336,20 @@ class ArgusApp:
         if not hasattr(self, "port_table") or not self.port_table.winfo_exists():
             return
         visible = self._visible_port_indices() if self.port_visible.get() else None
-        indices = find_ports(self.world_ports, self.port_query.get(), self.port_country.get(), visible)
+        country = self.port_country.get()
+        if country == "Irish coast":
+            irish_indices = getattr(self, "irish_port_indices", {i for i, p in enumerate(self.world_ports) if p[4] == "IE"})
+            visible = irish_indices if visible is None else visible & irish_indices
+            country = "All countries"
+        indices = find_ports(self.world_ports, self.port_query.get(), country, visible)
         self.port_table.delete(*self.port_table.get_children())
         for index in indices:
             number, name, _lat, _lon, country = self.world_ports[index]
-            self.port_table.insert("", "end", iid=str(index), values=(name, country, number))
+            metadata = getattr(self, "port_metadata", {}).get(str(number), {})
+            title = f"{name} ({metadata['category']})" if metadata else name
+            self.port_table.insert("", "end", iid=str(index), values=(title, country, number))
         self.port_count.configure(text=f"{len(indices):,} of {len(self.world_ports):,} ports" +
-                                  (" · current view" if visible is not None else " · worldwide"))
+                                  (" · Irish coast" if self.port_country.get() == "Irish coast" else " · current view" if visible is not None else " · worldwide"))
         if self.selected_port in indices:
             self.port_table.selection_set(str(self.selected_port))
             self.port_table.see(str(self.selected_port))
@@ -1263,7 +1364,9 @@ class ArgusApp:
         self.selected_port = index
         number, name, lat, lon, country = self.world_ports[index]
         if hasattr(self, "port_detail") and self.port_detail.winfo_exists():
-            self.port_detail.configure(text=f"{name} · {country} · WPI {number}\n{coordinates(lat, lon)}\nReal · reference location")
+            metadata = getattr(self, "port_metadata", {}).get(str(number))
+            source = f"{metadata['source']} / {metadata['category']} / {metadata['licence']}" if metadata else "NGA World Port Index"
+            self.port_detail.configure(text=f"{name} · {country} · ref {number}\n{coordinates(lat, lon)}\nReal / {source}\nReference location, not a navigation fix")
         if changed:
             self._draw_map(force_static=True)
 
@@ -1271,6 +1374,8 @@ class ArgusApp:
         if self.selected_port is None:
             return
         port = self.world_ports[self.selected_port]
+        if hasattr(self, "irish_ports_only") and self.selected_port not in self.irish_port_indices:
+            self.irish_ports_only.set(False)
         self.map_layers["World ports"].set(True)
         self.map_zoom = min(10, MAX_IMAGERY_ZOOM if self.map_mode.get() == ONLINE_MAP else MAX_MAP_ZOOM)
         self._change_map_center((port[2], port[3]))
@@ -1401,6 +1506,72 @@ class ArgusApp:
                 pass
         self._hide_bottom_if_empty()
         self._update_close_panel_button()
+        if getattr(self, "console_layout", False) and len(self.right_notebook.tabs()) == 1:
+            self.hide_console_panel()
+
+    def show_console_panel(self, title="Exercise") -> None:
+        already_open = self.panel_visible
+        self.panel_visible = True
+        self.panel_caption.configure(text=title)
+        self._position_console_panel()
+        if not already_open:
+            self.tools.animate('details', self.floating_panel, (-46, 16), (-70, 16), {'relx': 1, 'anchor': 'ne'})
+
+    def _position_console_panel(self) -> None:
+        available = self.chart_host.winfo_width()
+        right_width, left_width = self.tools.detail_width, self.tools.alert_width
+        if available > 800:
+            right_width = min(right_width, max(330, available - left_width - 294))
+            left_width = min(left_width, max(240, available - right_width - 294))
+        if hasattr(self, "alerts_panel"):
+            self.alerts_panel.configure(width=left_width, height=max(320, self.chart_host.winfo_height() - 150))
+        if getattr(self, "panel_visible", False):
+            height = max(350, self.chart_host.winfo_height() - 90)
+            self.floating_panel.configure(width=right_width, height=height)
+            self.floating_panel.place(relx=1, x=-70, y=16, anchor="ne")
+
+    def hide_console_panel(self) -> None:
+        self.tools.cancel_animation('details')
+        self.tools.hide_tooltip()
+        self.panel_visible = False
+        self.floating_panel.place_forget()
+
+    def enable_exercise(self) -> None:
+        self.ais_tracker.follow.set(False)
+        self.exercise_visible.set(True)
+        self.replay_controls.configure(width=600)
+        self.replay_controls.place(x=70, rely=1, y=-110, anchor="sw")
+        self.render()
+
+    def show_exercise(self) -> None:
+        self.enable_exercise()
+        self.right_notebook.select(0)
+        self.show_console_panel("Fictional exercise")
+        self.fit_map()
+
+    def open_exercise_alert(self, alert) -> None:
+        self.alert = alert
+        self.vessel = next(v for v in self.scenario['vessels'] if v['mmsi'] == alert['mmsi'])
+        self.cable = next(c for c in self.scenario['cables'] if c['id'] == alert['segment_id'])
+        self.seek(alert['t'])
+        self.show_exercise()
+
+    def hide_exercise(self) -> None:
+        self.exercise_visible.set(False)
+        self.playing = False
+        self.replay_controls.place_forget()
+        self.hide_console_panel()
+        self.fit_ireland()
+        self.render()
+
+    def fit_ireland(self) -> None:
+        if hasattr(self, 'ais_tracker'):
+            self.ais_tracker.follow.set(False)
+        self._fit_points([(49, -18), (57.5, -4.5)])
+
+    def toggle_fullscreen(self, _event=None) -> str:
+        self.root.attributes("-fullscreen", not self.root.attributes("-fullscreen"))
+        return "break"
 
     def _move_panel(self, key: str, destination: str) -> None:
         widget = self._panel_widgets.get(key)
@@ -1411,12 +1582,14 @@ class ArgusApp:
         target = self._notebook_for(destination)
         source.forget(widget)
         widget.destroy()
-        replacement = ttk.Frame(target, padding=18)
+        replacement = ttk.Frame(target, padding=12 if getattr(self, 'console_layout', False) else 18)
         self._panel_widgets[key] = replacement
         self._panel_locations[key] = destination
         self._populate_panel(key, replacement)
         target.add(replacement, text=self._panel_titles[key])
         target.select(replacement)
+        if getattr(self, "console_layout", False) and destination == "right":
+            self.show_console_panel(self._panel_titles[key])
         self._hide_bottom_if_empty()
         self._update_close_panel_button()
 
@@ -1543,8 +1716,19 @@ class ArgusApp:
             self.open_window("notes", self._panel_locations.get("notes", "right"))
 
     def close(self) -> None:
+        if hasattr(self, 'tools'):
+            self.tools.close()
+        if hasattr(self, "ais_tracker"):
+            self.ais_tracker.close()
         self._tile_executor.shutdown(wait=False, cancel_futures=True)
         self._weather_executor.shutdown(wait=False, cancel_futures=True)
+        # Cancel callbacks before Tk deletes their registered commands. This
+        # also prevents a closed window's timers leaking into another window.
+        for callback in self.root.tk.call('after', 'info'):
+            try:
+                self.root.after_cancel(callback)
+            except tk.TclError:
+                pass
         self.root.destroy()
 
     def _project(self, lat: float, lon: float) -> tuple[float, float]:
@@ -1585,7 +1769,7 @@ class ArgusApp:
             if any(padded[0] <= box[2] + 3 and padded[2] >= box[0] - 3 and
                    padded[1] <= box[3] + 3 and padded[3] >= box[1] - 3 for box in occupied):
                 continue
-            self.map.create_rectangle(*padded, fill="white", outline=LINE, width=1)
+            self.map.create_rectangle(*padded, fill=CARD, outline=LINE, width=1)
             self.map.create_text(x + dx, y + dy, text=text, anchor=anchor,
                                  fill=INK, font=font, justify="left")
             occupied.append(padded)
@@ -1754,12 +1938,16 @@ class ArgusApp:
         self.root.after(150, self._poll_tiles)
 
     def _map_resized(self, _event=None) -> None:
+        if getattr(self, "console_layout", False):
+            self._position_console_panel()
         self._draw_map(force_static=True)
         self._schedule_tile_refresh()
         if hasattr(self, "port_visible") and self.port_visible.get():
             self._schedule_port_directory()
 
     def _change_map_mode(self, _event=None) -> None:
+        if isinstance(_event, str) and _event in ("Offline coastline", ONLINE_MAP):
+            self.map_mode.set(_event)
         if self.map_mode.get() == ONLINE_MAP:
             self.map_zoom = min(self.map_zoom, MAX_IMAGERY_ZOOM)
             self._tile_status = "Loading NASA imagery…"
@@ -1772,6 +1960,8 @@ class ArgusApp:
             self._draw_map(force_static=True)
 
     def _pan_start(self, event) -> None:
+        if hasattr(self, 'ais_tracker'):
+            self.ais_tracker.follow.set(False)
         self._drag_state = {"x": event.x, "y": event.y, "last_x": event.x, "last_y": event.y, "moved": False}
         self.map.configure(cursor="tcross" if self.map_tool else "fleur")
 
@@ -1827,13 +2017,19 @@ class ArgusApp:
             return
         for item in reversed(self.map.find_overlapping(event.x - 3, event.y - 3, event.x + 3, event.y + 3)):
             for tag in self.map.gettags(item):
+                if tag.startswith("ais-ship:") and hasattr(self, "ais_tracker"):
+                    vessel = self.ais_tracker.state.vessels.get(tag.split(":", 1)[1])
+                    if vessel:
+                        self.map_status_label.configure(text=f"{vessel['name']} / MMSI {vessel['mmsi']} / {vessel['label']} / received {vessel['received_utc']}")
+                    return
                 if tag.startswith("world-port-cluster:"):
                     cluster = self._port_clusters[tag]
-                    self.map_status_label.configure(text=f"NGA · {len(cluster)} ports · click to zoom into cluster")
+                    self.map_status_label.configure(text=f"{len(cluster)} port records · click to zoom into cluster")
                     return
                 if tag.startswith("world-port:"):
                     number, name, lat, lon, country = self.world_ports[int(tag.split(":")[1])]
-                    self.map_status_label.configure(text=f"NGA port · {name} ({country}) · WPI {number} · {lat:.3f}, {lon:.3f}")
+                    source = "Marine Atlas" if str(number) in getattr(self, "port_metadata", {}) else "NGA WPI"
+                    self.map_status_label.configure(text=f"{source} · {name} ({country}) · ref {number} · {lat:.3f}, {lon:.3f}")
                     return
                 if tag.startswith("world-cable:"):
                     index = int(tag.split(":")[1])
@@ -1846,6 +2042,10 @@ class ArgusApp:
     def _inspect_map_item(self, event) -> None:
         tags = [tag for item in reversed(self.map.find_overlapping(event.x - 5, event.y - 5, event.x + 5, event.y + 5))
                 for tag in self.map.gettags(item)]
+        for tag in tags:
+            if tag.startswith("ais-ship:") and hasattr(self, "ais_tracker"):
+                self.ais_tracker.select_on_map(tag.split(":", 1)[1])
+                return
         for tag in tags:
             if tag.startswith("world-port-cluster:"):
                 members = self._port_clusters[tag]
@@ -1965,7 +2165,7 @@ class ArgusApp:
                 for lon, lat in ring:
                     x, y = geo_to_world(lat, lon, z)
                     coords.extend((x - center_x + width / 2 + shift, y - center_y + height / 2))
-                self.map.create_polygon(coords, fill="#fcfdfd", outline="#aebbc3", width=1)
+                self.map.create_polygon(coords, fill="#090c0f", outline="#38424b", width=1)
         if z >= 8 and self.map_mode.get() != ONLINE_MAP:
             for ring, (lon_min, lat_min, lon_max, lat_max) in self.coastline_rings:
                 north_y = geo_to_world(lat_max, 0, z)[1] - center_y + height / 2
@@ -1978,7 +2178,7 @@ class ArgusApp:
                 for lon, lat in ring:
                     x, y = geo_to_world(lat, lon, z)
                     coords.extend((x - center_x + width / 2, y - center_y + height / 2))
-                self.map.create_polygon(coords, fill="#fcfdfd", outline="#aebbc3", width=1)
+                self.map.create_polygon(coords, fill="#090c0f", outline="#38424b", width=1)
 
     def _draw_graticule(self, width: int, height: int) -> None:
         z = self.map_zoom
@@ -1992,7 +2192,7 @@ class ArgusApp:
             lon = first_lon + index * spacing
             x = (lon + 180) / 360 * world - center_x + width / 2
             if 0 <= x <= width:
-                self.map.create_line(x, 0, x, height, fill="#d9e5e9")
+                self.map.create_line(x, 0, x, height, fill="#163343")
         lat_top = world_to_geo(center_x, center_y - height / 2, z)[0]
         lat_bottom = world_to_geo(center_x, center_y + height / 2, z)[0]
         first_lat = math.ceil(lat_bottom / spacing) * spacing
@@ -2002,7 +2202,7 @@ class ArgusApp:
                 continue
             y = geo_to_world(lat, 0, z)[1] - center_y + height / 2
             if 0 <= y <= height:
-                self.map.create_line(0, y, width, y, fill="#d9e5e9")
+                self.map.create_line(0, y, width, y, fill="#163343")
 
     def _draw_world_cables(self, width: int, height: int) -> None:
         z = self.map_zoom
@@ -2029,8 +2229,8 @@ class ArgusApp:
                         continue
                     coords = [coordinate for x, y in points for coordinate in (x + shift, y)]
                     selected = index == self.selected_cable
-                    self.map.create_line(coords, fill=PURPLE if selected else "#8979bd",
-                                         width=3.5 if selected else 1.3 if z < 6 else 1.8,
+                    self.map.create_line(coords, fill=TEAL if selected else "#617387",
+                                         width=2.5 if selected else .8 if z < 6 else 1.1,
                                          tags=(f"world-cable:{index}",))
 
     def _draw_world_ports(self, width: int, height: int) -> list:
@@ -2041,6 +2241,8 @@ class ArgusApp:
         labels = []
         self._port_clusters = {}
         for index, port in enumerate(self.world_ports):
+            if hasattr(self, "irish_ports_only") and self.irish_ports_only.get() and index not in self.irish_port_indices:
+                continue
             _number, _name, lat, lon, _country = port
             wx, wy = geo_to_world(lat, lon, z)
             wx += round((center_x - wx) / world) * world
@@ -2056,9 +2258,9 @@ class ArgusApp:
                     clusters.setdefault((int(sx // 25), int(y // 25)), []).append((index, sx, y))
                 else:
                     selected = index == self.selected_port
-                    radius = 6 if selected else 3.5
+                    radius = 6 if selected else 2.8
                     self.map.create_oval(sx - radius, y - radius, sx + radius, y + radius,
-                                         fill=TEAL if selected else "#156d83", outline="white", width=1.3,
+                                         fill=TEAL if selected else "#8ba2ad", outline=TEAL if selected else '', width=1.5 if selected else 0,
                                          tags=(f"world-port:{index}",))
                     if selected or (z >= 8 and len(labels) < 40):
                         labels.append((-1 if selected else 3, "port", _name, sx, y))
@@ -2071,12 +2273,12 @@ class ArgusApp:
                 tag = f"world-port-cluster:{len(self._port_clusters)}" if count > 1 else f"world-port:{index}"
                 if count > 1:
                     self._port_clusters[tag] = members
-                radius = 3.5 if count == 1 else 7
+                radius = 2.8 if count == 1 else 7
                 self.map.create_oval(x - radius, y - radius, x + radius, y + radius,
-                                     fill="#156d83", outline="white", width=1,
+                                     fill="#78909c", outline='', width=0,
                                      tags=(tag,))
                 if count > 1:
-                    self.map.create_text(x, y, text=str(count), fill="white", font=("Segoe UI", 7, "bold"), tags=(tag,))
+                    self.map.create_text(x, y, text=str(count), fill=BG, font=("Segoe UI", 8, "bold"), tags=(tag,))
         return labels
 
     def _draw_map(self, force_static: bool = False) -> None:
@@ -2085,11 +2287,12 @@ class ArgusApp:
             return
         self._map_size = size
         width, height = size
+        exercise = not hasattr(self, "exercise_visible") or self.exercise_visible.get()
         self.map.delete("all")
         self.map.create_rectangle(0, 0, width, height, fill=SEA, outline="")
         map_labels: list[tuple[int, str, str, float, float]] = []
         grid_label_boxes: list[tuple[int, int, int, int]] = []
-        if self.map_mode.get() != ONLINE_MAP:
+        if self.map_mode.get() != ONLINE_MAP and not getattr(self, "console_layout", False):
             self._draw_graticule(width, height)
         self._draw_global_land(width, height)
         if self.map_mode.get() == ONLINE_MAP:
@@ -2108,7 +2311,7 @@ class ArgusApp:
             self.map.create_text(12, 12, text="GLOBAL COASTLINE · DISPLAY ONLY", anchor="nw",
                                  fill=MUTED, font=("Segoe UI Semibold", 9), tags="map_title")
             self.map_status_label.configure(text="Drag to pan · wheel, two-finger scroll or +/- to zoom" if not self.map_tool else self.map_status_label.cget("text"))
-            self.map_attribution_label.configure(text="Natural Earth · NGA · TeleGeography")
+            self.map_attribution_label.configure(text="Natural Earth · Marine Atlas CC BY 4.0 · NGA · TeleGeography")
 
         self._draw_weather_overlay(width, height)
         if self.map_layers["Historical cable routes"].get():
@@ -2116,27 +2319,29 @@ class ArgusApp:
         if self.map_layers["World ports"].get():
             map_labels.extend(self._draw_world_ports(width, height))
         self._draw_wind_arrows(width, height)
+        if hasattr(self, "ais_tracker"):
+            self.ais_tracker.draw()
 
-        if self.map_layers["Anchor reach"].get():
+        if exercise and self.map_layers["Anchor reach"].get():
             for cable in self.scenario["cables"]:
                 self.map.create_line(*self._points(cable["anchor_reachable"]), fill="#e4b45f", width=11, dash=(3, 4))
-        if self.map_layers["Cable"].get():
+        if exercise and self.map_layers["Cable"].get():
             for cable in self.scenario["cables"]:
                 self.map.create_line(*self._points(cable["path"]), fill="white", width=7)
                 self.map.create_line(*self._points(cable["path"]), fill=TEAL, width=3)
-        if self.map_layers["Response assets"].get():
+        if exercise and self.map_layers["Response assets"].get():
             for asset in self.scenario["assets"]:
                 if asset.get("lat") is None or asset.get("lon") is None:
                     continue
                 x, y = self._project(asset["lat"], asset["lon"])
-                self.map.create_oval(x - 7, y - 7, x + 7, y + 7, fill="white", outline=INK, width=2)
+                self.map.create_oval(x - 7, y - 7, x + 7, y + 7, fill=CONTROL, outline=TEAL, width=2)
                 map_labels.append((2, "asset", asset["name"].split("(")[0].strip(), x, y))
 
-        if self.map_layers["AIS track"].get():
+        if exercise and self.map_layers["AIS track"].get():
             for section in trail_sections(self.vessel["track"], self.position_s):
                 if len(section) > 1:
-                    self.map.create_line(*self._points(section), fill="#168b92", width=3)
-        if self.map_layers["Radar contacts"].get():
+                    self.map.create_line(*self._points(section), fill="#45dbe6", width=3)
+        if exercise and self.map_layers["Radar contacts"].get():
             for detection in self.scenario["detections"]:
                 if detection["t"] > self.position_s:
                     continue
@@ -2145,22 +2350,22 @@ class ArgusApp:
                                         fill="#f6d293", outline="#8f4d00", width=2)
                 label = f"SAR {self._utc(detection['t'])} · {detection.get('length_m', '?')} m"
                 map_labels.append((1, "radar", label, x, y))
-        if self.position_s >= self.alert["t"]:
+        if exercise and self.position_s >= self.alert["t"]:
             at_alert = fix_at(self.vessel["track"], self.alert["t"])
             if at_alert:
                 crossing = step(at_alert["lat"], at_alert["lon"], at_alert["cog_deg"], at_alert["sog_kn"] * self.alert["eta_expected_s"] / 3600)
                 self.map.create_line(*self._points([(at_alert["lat"], at_alert["lon"]), crossing]), fill=AMBER, width=2, dash=(5, 5))
-        fix = fix_at(self.vessel["track"], self.position_s) if self.map_layers["AIS track"].get() else None
+        fix = fix_at(self.vessel["track"], self.position_s) if exercise and self.map_layers["AIS track"].get() else None
         if fix:
             x, y = self._project(fix["lat"], fix["lon"])
-            self.map.create_oval(x - 13, y - 13, x + 13, y + 13, fill="white", outline="white", width=2)
-            self.map.create_oval(x - 9, y - 9, x + 9, y + 9, fill=TEAL, outline="white", width=2)
+            self.map.create_oval(x - 13, y - 13, x + 13, y + 13, fill=SEA, outline=PURPLE, width=2)
+            self.map.create_oval(x - 9, y - 9, x + 9, y + 9, fill=PURPLE, outline=SEA, width=2)
             map_labels.append((0, "vessel", f"{self.vessel['name']}\n{fix['sog_kn']:.1f} kn · {fix['cog_deg']:.0f}°", x, y))
         elif not fix_at(self.vessel["track"], self.position_s) and self.position_s < self.vessel["track"][-1]["t"]:
             self.map.create_text(width / 2, 42, text="AIS RECEPTION GAP · marker withdrawn", fill=AMBER, font=("Segoe UI Semibold", 10))
         for index, (lat, lon) in enumerate(self.map_note_points, 1):
             x, y = self._project(lat, lon)
-            self.map.create_oval(x - 8, y - 8, x + 8, y + 8, fill="#172530", outline="white", width=2)
+            self.map.create_oval(x - 8, y - 8, x + 8, y + 8, fill="#d7be70", outline="white", width=2)
             self.map.create_text(x, y, text=str(index), fill="white", font=("Segoe UI", 8, "bold"))
         if self.measure_points:
             for lat, lon in self.measure_points:
@@ -2177,10 +2382,10 @@ class ArgusApp:
         for _priority, kind, label, x, y in sorted(map_labels, key=lambda item: item[0]):
             self._draw_map_callout(label, x, y, kind, reserved)
         self._draw_weather_legend()
-        self.map.create_rectangle(4, height - 24, width - 4, height - 3, fill="white", outline="")
+        self.map.create_rectangle(4, height - 24, width - 4, height - 3, fill=CARD, outline="")
         self.map.create_text(10, height - 13,
-                             text="● NGA world ports · violet: historical stylized cables · exercise overlays fictional",
-                             anchor="w", fill="#33465b", font=("Segoe UI", 8))
+                             text="Irish AIS observations · received positions only" if not exercise else "Reference ports and cables · exercise overlays fictional",
+                             anchor="w", fill="#93a8b5", font=("Segoe UI", 8))
         if width >= 350:
             lat = self.map_center[0]
             km_per_pixel = math.cos(math.radians(lat)) * 40075.017 / (TILE_SIZE * 2 ** self.map_zoom)
@@ -2188,7 +2393,7 @@ class ArgusApp:
             power = 10 ** math.floor(math.log10(max(target, .00001)))
             km = next(v * power for v in (1, 2, 5, 10) if v * power >= target)
             pixels = km / km_per_pixel
-            self.map.create_rectangle(width - pixels - 24, height - 56, width - 8, height - 27, fill="white", outline=LINE)
+            self.map.create_rectangle(width - pixels - 24, height - 56, width - 8, height - 27, fill=CARD, outline=LINE)
             self.map.create_line(width - pixels - 16, height - 35, width - 16, height - 35, width=2, fill=INK)
             self.map.create_text(width - 16, height - 48, text=f"{km:g} km · z{self.map_zoom}", anchor="e", fill=INK, font=("Segoe UI", 8))
 
@@ -2203,6 +2408,14 @@ class ArgusApp:
         return max(0, self.alert["eta_expected_s"] - elapsed), max(0, self.alert["eta_earliest_s"] - elapsed)
 
     def render(self) -> None:
+        if hasattr(self, 'tools'):
+            self.tools.update_legend()
+        for alert, label in getattr(self, "alert_cards", []):
+            if self.exercise_visible.get() and self.alert['id'] == alert['id']:
+                remaining = self._remaining()
+                label.configure(text=clock(remaining[0]) if remaining else '--:--:--')
+            else:
+                label.configure(text='--:--:--')
         self.time_label.configure(text=f"{self._utc(self.position_s)} · T+{clock(self.position_s)}")
         self.play_button.configure(text="Pause" if self.playing else "Play")
         self._moving_scale = True
@@ -2251,8 +2464,10 @@ class ArgusApp:
             self.seek(float(value))
 
     def _space(self, event: tk.Event) -> None:
-        if isinstance(event.widget, (ttk.Button, ttk.Combobox, ttk.Scale, tk.Text,
-                                     ctk.CTkButton, ctk.CTkOptionMenu, ctk.CTkSlider)):
+        if isinstance(event.widget, (ttk.Button, ttk.Entry, ttk.Combobox, ttk.Scale, tk.Text, tk.Entry,
+                                     ctk.CTkButton, ctk.CTkEntry, ctk.CTkOptionMenu, ctk.CTkSlider)):
+            return
+        if hasattr(self, "exercise_visible") and not self.exercise_visible.get():
             return
         self.toggle_play()
 
@@ -2357,12 +2572,13 @@ def main() -> int:
     if args.check:
         try:
             land, ports, cables = load_world_assets()
+            irish = load_irish_ports()
         except (OSError, ValueError, KeyError, TypeError) as error:
             parser.exit(1, f"Unable to load global map layers: {error}\n")
         print(f"Desktop demo ready: {len(scenario['vessels'])} vessel(s), {len(alerts['alerts'])} alert(s), "
-              f"{land['count']} global land rings, {ports['count']} world ports, {cables['count']} historical cable routes.")
+              f"{land['count']} global land rings, {ports['count']} world ports, {irish['count']} Irish port records, {cables['count']} historical cable routes.")
         return 0
-    ctk.set_appearance_mode("light")
+    ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("blue")
     root = ctk.CTk()
     ArgusApp(root, scenario, alerts, coastline)
