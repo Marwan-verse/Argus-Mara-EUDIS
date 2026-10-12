@@ -1938,6 +1938,8 @@ class ArgusApp:
         self.root.after(150, self._poll_tiles)
 
     def _map_resized(self, _event=None) -> None:
+        if not hasattr(self, "map_status_label"):
+            return  # The console is still being built; its scheduled fit draws the first frame.
         if getattr(self, "console_layout", False):
             self._position_console_panel()
         self._draw_map(force_static=True)

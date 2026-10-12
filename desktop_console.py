@@ -99,6 +99,8 @@ def build(app):
     app.alerts_panel = ctk.CTkFrame(chart, width=300, height=620, fg_color=ui.CARD,
                                    corner_radius=8, border_width=1, border_color=ui.LINE)
     app.alerts_panel.place(x=64, y=16)
+    # Keep the size set by _position_console_panel; packed content would otherwise shrink the panel.
+    app.alerts_panel.pack_propagate(False)
     alerts = ctk.CTkScrollableFrame(app.alerts_panel, fg_color=ui.CARD, corner_radius=6)
     alerts.pack(fill="both", expand=True, padx=8, pady=8)
     alerts_title = ctk.CTkFrame(alerts, fg_color='transparent')
