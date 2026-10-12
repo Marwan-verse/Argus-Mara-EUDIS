@@ -7,6 +7,7 @@ import re
 import tkinter as tk
 from tkinter import ttk
 import customtkinter as ctk
+from desktop_console import RAIL_WIDTH
 from desktop_style import Icons
 
 from argus.map_view import search_text
@@ -61,7 +62,7 @@ def search_results(app, query, custom_views=None):
 class ConsoleTools:
     def __init__(self, app):
         self.app = app
-        self.alert_width, self.detail_width = 300, 405
+        self.alert_width, self.detail_width = 320, 405
         self.alerts_visible = True
         self.custom_views = {}
         self.alert_statuses = {a['id']: tk.StringVar(app.root, value='New') for a in app.alerts}
@@ -92,7 +93,7 @@ class ConsoleTools:
 
     def setup(self):
         import run_gui as ui
-        for attribute, default, minimum, maximum in (('alert_width', 300, 240, 480), ('detail_width', 405, 330, 620)):
+        for attribute, default, minimum, maximum in (('alert_width', 320, 260, 480), ('detail_width', 405, 330, 620)):
             value = self.settings.get(attribute, default)
             setattr(self, attribute, max(minimum, min(maximum, value)) if type(value) is int else default)
         self.alerts_visible = self.settings.get('alerts_visible', True) is not False
@@ -105,11 +106,10 @@ class ConsoleTools:
         self.app.root.bind('<Control-k>', self.open_search)
         self.app.root.bind('<Control-K>', self.open_search)
         self.app._position_console_panel()
-        if not self.alerts_visible:
-            self.app.alerts_panel.place_forget()
         self.legend = ctk.CTkFrame(self.app.chart_host, fg_color=ui.BG, corner_radius=8)
         self.legend_controls = {}
-        self.legend.place(x=455, rely=1, y=-54, anchor='sw')
+        self.place_legend()
+        self.app.root.after_idle(self.place_legend)
         tracker = self.app.ais_tracker
         for title, variable, color, inverse in (
             ('Ships', tracker.visible, '#6bba97', False),
@@ -117,6 +117,7 @@ class ConsoleTools:
             ('Ports', self.app.map_layers['World ports'], '#9badb8', False),
             ('Cables', self.app.map_layers['Historical cable routes'], '#73899e', False),
             ('SAR demo', self.app.map_layers['Radar contacts'], ui.AMBER, False),
+            ('Sim alerts', self.app.map_layers['Simulated alerts'], '#a48bd8', False),
         ):
             control = ctk.CTkCheckBox(self.legend, text=title, variable=variable, onvalue=not inverse,
                 offvalue=inverse, command=lambda: self.app._draw_map(force_static=True), width=65,
@@ -126,7 +127,8 @@ class ConsoleTools:
             self.legend_controls[title] = control
             if title == 'SAR demo':
                 self.legend_sar = control
-            self.attach_tooltip(control, f'{title}: toggle this map layer' if title != 'Stale' else 'Show or hide fixes older than the feed freshness interval')
+            self.attach_tooltip(control, {'Stale': 'Show or hide fixes older than the feed freshness interval',
+                                          'Sim alerts': 'Simulated alert markers: fictional vessels, not live data'}.get(title, f'{title}: toggle this map layer'))
         for variable in (tracker.visible, tracker.fresh_only, tracker.kind, tracker.minimum_speed, tracker.maximum_speed):
             variable.trace_add('write', lambda *_: self.schedule_save())
         filters = self.settings.get('filters', {})
@@ -142,6 +144,15 @@ class ConsoleTools:
                 pass
         self.update_alert_counts()
         self.update_legend()
+
+    def place_legend(self):
+        """Keep the legend just right of the map mode buttons, whatever their font width."""
+        modes = getattr(self.app, 'modes_bar', None)
+        x = 455
+        if modes is not None:
+            scaling = ctk.ScalingTracker.get_widget_scaling(modes)
+            x = 16 + modes.winfo_reqwidth() / scaling + 10
+        self.legend.place(x=x, rely=1, y=-54, anchor='sw')
 
     @staticmethod
     def valid_view(name, view):
@@ -178,12 +189,19 @@ class ConsoleTools:
 
     def resize_handle(self, parent, kind, edge):
         import run_gui as ui
-        handle = ctk.CTkFrame(parent, width=5, fg_color=ui.LINE, corner_radius=0, cursor='sb_h_double_arrow')
-        handle.place(relx=1 if edge == 'right' else 0, x=-5 if edge == 'right' else 0, y=6, relheight=.97)
+        docked = kind == 'alerts'
+        handle = ctk.CTkFrame(parent, width=4 if docked else 5, fg_color=ui.LINE, corner_radius=0, cursor='sb_h_double_arrow')
+        if docked:
+            # The docked board's right border doubles as its resize handle.
+            handle.place(relx=1, x=-4, y=0, relheight=1)
+            handle.bind('<Enter>', lambda _: handle.configure(fg_color=ui.TEAL), add=True)
+            handle.bind('<Leave>', lambda _: handle.configure(fg_color=ui.LINE), add=True)
+        else:
+            handle.place(relx=1 if edge == 'right' else 0, x=-5 if edge == 'right' else 0, y=6, relheight=.97)
         handle.bind('<ButtonPress-1>', lambda e: self.start_resize(kind, e.x_root))
         handle.bind('<B1-Motion>', lambda e: self.resize(kind, e.x_root))
         handle.bind('<ButtonRelease-1>', lambda _: self.schedule_save())
-        handle.bind('<Enter>', lambda _: self.app.map_status_label.configure(text=f'Drag this edge to resize {kind}'))
+        handle.bind('<Enter>', lambda _: self.app.map_status_label.configure(text=f'Drag this edge to resize {kind}'), add=True)
 
     def start_resize(self, kind, x):
         self.drag = (x, self.alert_width if kind == 'alerts' else self.detail_width)
@@ -192,21 +210,19 @@ class ConsoleTools:
         if not self.drag:
             return
         start, width = self.drag
-        available = self.app.chart_host.winfo_width()
+        # The docked alerts narrow the map; the detail panel floats over the map.
+        scaling = ctk.ScalingTracker.get_widget_scaling(self.app.chart_frame)
         if kind == 'alerts':
-            self.alert_width = max(240, min(480, available - self.detail_width - 294, width + x - start))
+            total = self.app.chart_frame.winfo_width() / scaling
+            self.alert_width = max(260, min(480, total - RAIL_WIDTH - 420, width + x - start))
         else:
-            self.detail_width = max(330, min(620, available - self.alert_width - 294, width + start - x))
+            available = self.app.chart_host.winfo_width() / scaling
+            self.detail_width = max(330, min(620, available - 294, width + start - x))
         self.app._position_console_panel()
 
     def toggle_alerts(self):
         self.alerts_visible = not self.alerts_visible
-        if self.alerts_visible:
-            self.animate('alerts', self.app.alerts_panel, (44, 16), (64, 16), {})
-            self.app.alerts_panel.lift()
-        else:
-            self.cancel_animation('alerts')
-            self.app.alerts_panel.place_forget()
+        self.app.layout_columns()
         self.schedule_save()
 
     def review_alert(self, alert):
@@ -232,7 +248,10 @@ class ConsoleTools:
         self.update_alert_counts()
 
     def update_alert_counts(self):
-        if hasattr(self.app, 'alert_counts_label'):
+        board = getattr(self.app, 'alert_board', None)
+        if board is not None:
+            board.refresh_statuses()
+        elif hasattr(self.app, 'alert_counts_label'):
             states = [v.get() for v in self.alert_statuses.values()]
             self.app.alert_counts_label.configure(text=f"{states.count('New')} new / {states.count('Reviewed')} reviewed / {states.count('Acknowledged')} acknowledged")
 
@@ -276,17 +295,20 @@ class ConsoleTools:
         self.tooltip_timer = None
         if not widget.winfo_exists():
             return
+        # The outer chart frame spans the rail, the docked alerts and the map.
+        host = getattr(self.app, 'chart_frame', self.app.chart_host)
         if self.tooltip is None:
-            self.tooltip = ctk.CTkLabel(self.app.chart_host, text='', fg_color=ui.CONTROL,
+            self.tooltip = ctk.CTkLabel(host, text='', fg_color=ui.CONTROL,
                 text_color=ui.INK, corner_radius=6, font=ctk.CTkFont('Segoe UI', 12), wraplength=260)
         self.tooltip.configure(text=title)
         self.tooltip.update_idletasks()
-        x = widget.winfo_rootx() - self.app.chart_host.winfo_rootx()
-        y = max(8, widget.winfo_rooty() - self.app.chart_host.winfo_rooty())
-        if x > self.app.chart_host.winfo_width() - 300:
-            self.tooltip.place(x=x-8, y=y, anchor='ne')
+        scaling = ctk.ScalingTracker.get_widget_scaling(self.tooltip)
+        x = widget.winfo_rootx() - host.winfo_rootx()
+        y = max(8, widget.winfo_rooty() - host.winfo_rooty())
+        if x > host.winfo_width() - 300:
+            self.tooltip.place(x=(x-8) / scaling, y=y / scaling, anchor='ne')
         else:
-            self.tooltip.place(x=x+widget.winfo_width()+8, y=y, anchor='nw')
+            self.tooltip.place(x=(x+widget.winfo_width()+8) / scaling, y=y / scaling, anchor='nw')
         self.tooltip.lift()
 
     def hide_tooltip(self):

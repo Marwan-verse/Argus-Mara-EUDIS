@@ -229,7 +229,7 @@ class ArgusApp:
         self.map_center = (53.25, -11.25)
         self.map_zoom = 6
         self.map_mode = tk.StringVar(value="Offline coastline")
-        self.map_layers = {name: tk.BooleanVar(value=True) for name in ("AIS track", "Radar contacts", "Cable", "Anchor reach", "Response assets", "World ports", "Historical cable routes", "Rain and cloud", "Wind")}
+        self.map_layers = {name: tk.BooleanVar(value=True) for name in ("AIS track", "Radar contacts", "Cable", "Anchor reach", "Response assets", "World ports", "Historical cable routes", "Simulated alerts", "Rain and cloud", "Wind")}
         self.map_layers["World ports"].set(True)
         self.irish_ports_only = tk.BooleanVar(value=True)
         self.map_tool: str | None = None
@@ -1521,17 +1521,20 @@ class ArgusApp:
             self.tools.animate('details', self.floating_panel, (-46, 16), (-70, 16), {'relx': 1, 'anchor': 'ne'})
 
     def _position_console_panel(self) -> None:
+        # The alert board is docked beside the rail; the map host holds the floating panels.
+        self.layout_columns()
         available = self.chart_host.winfo_width()
-        right_width, left_width = self.tools.detail_width, self.tools.alert_width
-        if available > 800:
-            right_width = min(right_width, max(330, available - left_width - 294))
-            left_width = min(left_width, max(240, available - right_width - 294))
-        if hasattr(self, "alerts_panel"):
-            self.alerts_panel.configure(width=left_width, height=max(320, self.chart_host.winfo_height() - 150))
+        right_width = self.tools.detail_width
+        if available > 500:
+            right_width = min(right_width, max(330, available - 294))
         if getattr(self, "panel_visible", False):
-            height = max(350, self.chart_host.winfo_height() - 90)
+            # Stay clear of the mode bar, and of the replay bar while the exercise is shown.
+            bottom = 200 if self.exercise_visible.get() else 120
+            height = max(350, self.chart_host.winfo_height() - bottom)
             self.floating_panel.configure(width=right_width, height=height)
             self.floating_panel.place(relx=1, x=-70, y=16, anchor="ne")
+        if hasattr(self, "alert_board") and self.alert_board.dialog.visible:
+            self.alert_board.dialog.place()
 
     def hide_console_panel(self) -> None:
         self.tools.cancel_animation('details')
@@ -1543,7 +1546,7 @@ class ArgusApp:
         self.ais_tracker.follow.set(False)
         self.exercise_visible.set(True)
         self.replay_controls.configure(width=600)
-        self.replay_controls.place(x=70, rely=1, y=-110, anchor="sw")
+        self.replay_controls.place(x=16, rely=1, y=-110, anchor="sw")
         self.render()
 
     def show_exercise(self) -> None:
@@ -1789,6 +1792,8 @@ class ArgusApp:
             self.open_window("notes", self._panel_locations.get("notes", "right"))
 
     def close(self) -> None:
+        if hasattr(self, 'alert_board'):
+            self.alert_board.close()
         if hasattr(self, 'tools'):
             self.tools.close()
         if hasattr(self, "ais_tracker"):
@@ -2095,6 +2100,9 @@ class ArgusApp:
             return
         for item in reversed(self.map.find_overlapping(event.x - 3, event.y - 3, event.x + 3, event.y + 3)):
             for tag in self.map.gettags(item):
+                if tag.startswith("sim-alert:") and hasattr(self, "alert_board"):
+                    self.map_status_label.configure(text=self.alert_board.describe(tag.split(":", 1)[1]))
+                    return
                 if tag.startswith("ais-ship:") and hasattr(self, "ais_tracker"):
                     vessel = self.ais_tracker.state.vessels.get(tag.split(":", 1)[1])
                     if vessel:
@@ -2120,6 +2128,10 @@ class ArgusApp:
     def _inspect_map_item(self, event) -> None:
         tags = [tag for item in reversed(self.map.find_overlapping(event.x - 5, event.y - 5, event.x + 5, event.y + 5))
                 for tag in self.map.gettags(item)]
+        for tag in tags:
+            if tag.startswith("sim-alert:") and hasattr(self, "alert_board"):
+                self.alert_board.open(tag.split(":", 1)[1])
+                return
         for tag in tags:
             if tag.startswith("ais-ship:") and hasattr(self, "ais_tracker"):
                 self.ais_tracker.select_on_map(tag.split(":", 1)[1])
@@ -2399,6 +2411,8 @@ class ArgusApp:
         self._draw_wind_arrows(width, height)
         if hasattr(self, "ais_tracker"):
             self.ais_tracker.draw()
+        if hasattr(self, "alert_board"):
+            self.alert_board.draw()
 
         if exercise and self.map_layers["Anchor reach"].get():
             for cable in self.scenario["cables"]:

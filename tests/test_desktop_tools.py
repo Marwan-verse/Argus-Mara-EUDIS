@@ -140,7 +140,7 @@ class DesktopToolsWindowTests(unittest.TestCase):
             # Both overlay panels resize; alerts can be hidden and restored.
             tools.start_resize('alerts', 100)
             tools.resize('alerts', 140)
-            self.assertEqual(tools.alert_width, 340)
+            self.assertEqual(tools.alert_width, 360)
             tools.start_resize('details', 100)
             tools.resize('details', 50)
             self.assertEqual(tools.detail_width, 455)
