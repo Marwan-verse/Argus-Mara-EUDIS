@@ -177,9 +177,11 @@ def build(app):
         ("alerts", "Show / hide alerts", app.tools.toggle_alerts),
         ("pen", "Add map note", lambda: app._set_map_tool("pin")),
         ("measure", "Measure distance", lambda: app._set_map_tool("measure")),
+        ("ping", "Ping map · click a point · Escape to clear", lambda: app._set_map_tool("ping")),
         ("layers", "Map layers", lambda: app.open_window("layers")),
     ):
         button(right, icon, action, title)
+    app.map.bind('<Escape>', app._clear_map_ping, add='+')
 
     app.floating_panel = ctk.CTkFrame(chart, fg_color=ui.CARD, corner_radius=8,
                                       border_width=1, border_color=ui.LINE)
