@@ -93,11 +93,12 @@ Gates stop one noisy signal from producing a high level. Overrides apply after t
 | Place | Docked between the left icon rail and the map; the map uses the remaining width. The **!** icon or **×** hides it, and dragging its right edge resizes it. |
 | Order | Critical → High → Medium → Low. Within a level, a vessel already in the corridor comes first, then the soonest ETA, then the higher score. |
 | Counters | One counter per level above the list. Click one to show only that level; click it again or **show all** to clear. |
-| Sort | Severity (grouped by level), Time to line, or Newest. |
-| Card | Vessel name, age and a **SIM** (or **EXERCISE**) tag; one-line situation; level and score; corridor, distance or a live countdown; review status. |
-| Review window | Click a card or a map marker. It shows the level and its place on the score scale, the line at risk, the time to the line, every point behind the level, the rule notes, the recommended action and the history. The map moves the vessel into view beside the window. **Show on map** fits the track and the line. Escape closes it. |
+| Sort | Severity (grouped by level), Time to asset, or Newest. |
+| Row | Level code (CRIT, HIGH, MED, LOW) and score; vessel name, age and a **SIM** (or **EXERCISE**) mark; the situation; in corridor, distance or a live ETA; review status. |
+| Review window | Click a row or a map marker. It shows the level and its place on the score scale, the asset at risk, the time to the asset, the **indicators** behind the level with their points, any rule that capped or raised it, the recommended action and the log. The map moves the vessel into view beside the window. **Show on map** fits the track and the asset. Escape closes it. |
 | Decisions | **Acknowledge**: seen and watching. **Escalate** to the duty officer, the line operator, the Irish Coast Guard (MRCC) or Naval Service operations, with an optional note. **Reject** as a false alarm, known benign activity, an authorised operation or a duplicate; the card moves to **Closed** and leaves the map. **Reopen** undoes a decision. |
 | Statuses | New → Reviewed (opened) → Acknowledged, Escalated or Rejected. The footer counts each status. |
+| Trackpad | Two-finger scrolling moves the queue and the review window. On macOS, pinching zooms the map at the pointer; this uses the optional PyObjC package in `requirements-mac.txt`, which `UPDATE-AND-RUN-MAC.command` installs. |
 | Live countdown | ETAs count down every second and the contact is re-scored. GREY HERON goes from High to Critical about 3.5 minutes after start; its card flashes and the change is logged. |
 | Map | Markers are coloured by level; Critical ones pulse. High and Critical names carry a **SIM** label, the selected vessel shows its track and its line (marked "illustrative route"), and a **SIMULATED** badge sits in the corner. **Sim alerts** in the legend or Map layers hides them. |
 | Exercise | The fictional exercise alert is on the same list with the same rules. **Open replay** starts the existing countdown replay with its response options. |
@@ -155,8 +156,10 @@ alert fix; only the two contacts with an ETA count down.
 | `argus/levels.py` | Rules: points, caps, gates, overrides and bands |
 | `argus/alert_board.py` | The simulated board: scenarios, minor alerts, tracks and the countdown update |
 | `desktop_alerts.py` | Docked panel, review window and map markers |
+| `desktop_gestures.py` | Two-finger scrolling on Tk 9 and pinch-to-zoom on macOS |
 | `tests/test_levels.py` | Rule cases, including every worked example above |
 | `tests/test_alert_board.py` | Labels, sorting, counts and the countdown raising a level |
 | `tests/test_desktop_alerts.py` | Panel, decisions, filters, map markers and hiding the panel |
+| `tests/test_desktop_gestures.py` | Trackpad scrolling of the queue and pinch zoom steps |
 
 Run them with `python -m unittest discover -s tests`.

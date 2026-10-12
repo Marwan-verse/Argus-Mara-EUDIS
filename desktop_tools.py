@@ -117,7 +117,7 @@ class ConsoleTools:
             ('Ports', self.app.map_layers['World ports'], '#9badb8', False),
             ('Cables', self.app.map_layers['Historical cable routes'], '#73899e', False),
             ('SAR demo', self.app.map_layers['Radar contacts'], ui.AMBER, False),
-            ('Sim alerts', self.app.map_layers['Simulated alerts'], '#a48bd8', False),
+            ('Sim alerts', self.app.map_layers['Simulated alerts'], '#c3ced6', False),
         ):
             control = ctk.CTkCheckBox(self.legend, text=title, variable=variable, onvalue=not inverse,
                 offvalue=inverse, command=lambda: self.app._draw_map(force_static=True), width=65,

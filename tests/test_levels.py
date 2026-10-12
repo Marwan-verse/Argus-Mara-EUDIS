@@ -49,7 +49,7 @@ class LevelTests(unittest.TestCase):
         # Two fishing passes reach the High band but lack a strong behaviour pattern.
         gated = self.check({"fishing_near_corridor": True, "in_corridor": True, "asset_class": "cluster",
                             "asset_vulnerable": True}, "medium", 9)
-        self.assertTrue(any("High needs" in note for note in gated["notes"]))
+        self.assertTrue(any("High requires" in note for note in gated["notes"]))
         # Identity and context alone never exceed Medium.
         self.check({"no_ais": True, "spoof_signs": True, "in_corridor": True, "asset_class": "power",
                     "watchlist": True}, "medium", 11)

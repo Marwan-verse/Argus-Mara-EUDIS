@@ -406,12 +406,15 @@ ship or another team member and do not create an alert.
 The left **Alerts** panel is the main working list. It shows 40 labelled items:
 the fictional exercise alert, 15 hand-written scenarios and 24 frequent minor alerts,
 sorted Critical → High → Medium → Low. Click a level counter to filter, or change the
-sort to time to the line or newest. Click a card or a map marker to open its review
-window: the score scale, every point behind the level, the time to the line, the
-recommended action and the history. **Acknowledge**, **Escalate** (duty officer, line
+sort to time to the asset or newest. Click a row or a map marker to open its review
+window: the score scale, the indicators behind the level, the time to the asset, the
+recommended action and the log. **Acknowledge**, **Escalate** (duty officer, line
 operator, Irish Coast Guard (MRCC) or Naval Service operations) and **Reject** (with a
 reason) are recorded for the session only; nothing is sent. Countdowns run live, so
 GREY HERON rises from High to Critical after about 3.5 minutes; ↻ restarts the
 simulation. Map markers use the level colours, carry **SIM** labels and sit under a
-**SIMULATED** corner badge; **Sim alerts** in the legend hides them. Full rules:
+**SIMULATED** corner badge; **Sim alerts** in the legend hides them. On a trackpad,
+two fingers scroll the queue, and on macOS a pinch zooms the map. Pinching needs the
+optional PyObjC package in `requirements-mac.txt`; `UPDATE-AND-RUN-MAC.command`
+installs it on its next run. Full rules:
 [Argus Mara alert levels](docs/12-argus-mara-alert-levels.md).
