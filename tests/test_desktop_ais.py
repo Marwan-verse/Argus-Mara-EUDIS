@@ -70,6 +70,7 @@ class DesktopAISTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             path = Path(directory) / 'latest.json'
             self.tracker.cache_path = path
+            self.tracker.fleet.add('123456789')
             self.tracker.save_cache()
             with patch.dict('os.environ', {'ARGUS_LIVE_SERVER': 'https://ais.example.org'}):
                 restored = DesktopAIS(self.app, self.factory, cache_path=path)
@@ -130,12 +131,14 @@ class DesktopAISTests(unittest.TestCase):
             self.tracker.state.apply(snapshot())
             path = Path(directory) / "latest.json"
             self.tracker.cache_path = path
+            self.tracker.fleet.add('123456789')
             self.tracker.save_cache()
             with patch.dict("os.environ", {"ARGUS_LIVE_SERVER": "https://ais.example.org"}):
                 restored = DesktopAIS(self.app, self.factory, cache_path=path)
             try:
                 self.assertEqual(restored.positions()[0]['received_utc'], '2026-10-12T00:00:00Z')
                 self.assertIsNone(restored.poller)
+                self.assertEqual(restored.fleet, {'123456789'})
                 self.assertTrue(restored.status.startswith('Cached'))
                 self.assertNotIn('raw', json.loads(path.read_text())['vessels'][0])
             finally:
