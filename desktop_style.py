@@ -66,6 +66,12 @@ class Icons:
             rect((3, 7, 21, 17))
             for x in (7, 11, 15, 19):
                 line([(x, 7), (x, 11 if x % 3 else 13)])
+        elif name == 'ping':
+            oval((5, 5, 19, 19))
+            oval((10, 10, 14, 14), color)
+            for points in (((12, 1), (12, 5)), ((12, 19), (12, 23)),
+                           ((1, 12), (5, 12)), ((19, 12), (23, 12))):
+                line(points)
         elif name == 'plus':
             line([(4, 12), (20, 12)])
             line([(12, 4), (12, 20)])

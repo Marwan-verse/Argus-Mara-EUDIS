@@ -241,7 +241,7 @@ The application automatically connects to the team's shared service at
 `https://shared-live-ais-production.up.railway.app`. It starts with the Irish
 coastal region in view and draws every received position, independent of the
 90-row directory page. Green ships have fresh fixes, muted ships are stale and
-cyan identifies the selected contact. Shapes follow received AIS course when
+gold identifies the selected boat. Shapes follow received AIS course when
 available; positions are never predicted. Provider reception is incomplete;
 these are all received contacts, not a claim to observe every ship at sea.
 
@@ -254,6 +254,23 @@ actual timestamps. Cached observations are never presented as a live connection.
 An alternative service can be entered in the directory or supplied through
 `ARGUS_LIVE_SERVER`; switching services clears the previous service's contacts.
 Disconnect clears displayed contacts and stops polling.
+
+Selecting a ship also draws its **recorded path** in gold, with a marker at the
+first retained fix. Other ships' paths stay hidden. **Clear ship selection**
+removes the path; **Show selected ship path** toggles it and **Fit recorded path**
+frames the received fixes. Local history survives app restarts in the same
+ignored cache, with limits of 24 hours, 720 fixes per ship and 100,000 fixes in
+total. Older contacts can be evicted to stay within the limit. Long gaps (over
+15 minutes), source-stream changes and provenance changes break the line.
+The starting fix describes where local recording began; a departure port is
+unknown and voyages before recording cannot be recovered from the public feed.
+
+**Declared destination** shows the vessel's unverified AIS Message 5 text and
+its separate received UTC, following the
+[USCG Message 5 definition](https://www.navcen.uscg.gov/ais-class-a-static-voyage-message-5).
+No destination line or future route is invented. Until a declaration is received
+(or when the service has not yet deployed the optional field), it reads
+**Not reported**. Destination updates do not reset the age of a position fix.
 
 The **EXERCISE** map control opens the fictional replay and its explicit operator
 review. Exercise overlays and playback controls are hidden in the initial Irish
@@ -328,7 +345,7 @@ and provenance; the shared scenario and alert JSON files are unchanged.
 
 The desktop uses Segoe UI for controls and prose, with monospace UTC, counts and
 countdowns. Original locally rendered outline icons share an 18 px size and
-consistent stroke. Gold marks controls, cyan marks selection, amber marks alerts,
+consistent stroke. Gold marks controls and selected boats, cyan marks reference selections, amber marks alerts,
 and quieter neutral colours describe ordinary layers.
 
 Alert cards initially show their vessel, source badge, state and large countdown.
@@ -336,8 +353,46 @@ Alert cards initially show their vessel, source badge, state and large countdown
 opens the same fictional exercise. Observation age and operator approval remain
 explicit. The header separates connection status, received/fresh counts and UTC.
 
-Stale ship fixes use smaller muted dots; selected ships retain a cyan ring.
+Stale ship fixes use smaller muted dots; selected boats retain a gold ring.
 Ordinary port markers have no bright borders, and historical cable lines are
 thinner and muted. Hover over an icon for its tooltip. Buttons and search fields
 have visible keyboard focus. Panel and search opening transitions last about
 130 ms; **Reduce panel motion** in Map layers disables them and is saved locally.
+
+### Click-to-open vessel card
+
+Click a received boat marker to open a white, draggable vessel card over the
+chart, following the supplied reference layout. Its header shows the name/type;
+Irish ship-station MMSIs (MID 250) get an Irish flag, following the
+[ITU MID table](https://www.itu.int/gladapp/Allocation/MIDs). Other identities
+retain an AIS badge. The selected marker has a bold outlined name and a gold
+past track. Closing the card clears the selection and path.
+
+The card shows the first locally recorded fix, declared destination, received
+age/UTC, speed/course and reported navigation status using
+[USCG AIS status codes](https://www.navcen.uscg.gov/ais-class-a-reports).
+The voyage arrow is a schematic summary; it does not represent voyage progress
+or predict a route. Departure port remains unknown. ETA and draught read as
+unavailable because the shared feed does not currently supply them.
+
+**Past track** toggles the selected history. **Vessel details** opens the full
+AIS details tab. **Measure route** activates the existing two-point map distance
+tool. **Add to fleet** saves the MMSI in the ignored local AIS cache; click again
+to remove it. These controls do not dispatch an operational action.
+
+For a vessel photograph, place an operator-supplied JPEG or PNG at
+`data/desktop/vessel_photos/<nine-digit-MMSI>.jpg` (or `.jpeg` / `.png`). Images
+stay local and ignored. Without a matching photograph, the card displays a
+labelled placeholder. The reference screenshot's photograph is not reused for
+other vessels. The card scrolls and stays within the viewport after dragging,
+resizing or Windows display scaling.
+
+### Map ping
+
+The target-shaped **Ping** button sits directly below the ruler on the right
+toolbar. Click it, then click a map position to show a labelled cyan ping for
+15 seconds. Panning and zooming keep it anchored to that coordinate. Click Ping
+again while armed to cancel, or press **Escape** on the map to clear it. A new
+ping replaces the previous one. **Reduce panel motion** also stops the ping's
+pulsing rings. Pings are local operator annotations; they are not sent to a
+ship or another team member and do not create an alert.
