@@ -9,11 +9,16 @@ Two layers, both planning estimates on the local flat approximation used by
 Every number below is a team assumption, not vessel-specific physics. The
 cone says where the vessel probably is; only the circle bounds where it can be.
 Positions are [latitude, longitude]; speeds are knots; times are seconds.
+
+Try it on the demo scenario:  python -m argus.prediction --t 1740 2400 3000
 """
 
 from __future__ import annotations
 
+import argparse
+import json
 import math
+from pathlib import Path
 
 from argus.countdown import NM_PER_DEG, nm_between, step
 
@@ -301,3 +306,159 @@ def reappearance_check(last_fix, new_fix, v_max):
         "note": note,
         "label": "predicted",
     }
+
+
+# --- command line: explore the prediction on a scenario file --------------
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def last_gap(track, t):
+    """Latest (before, after) pair too far apart to interpolate, ending at or before t."""
+    found = None
+    for before, after in zip(track, track[1:]):
+        if after["t"] > t:
+            break
+        if after["t"] - before["t"] > MAX_INTERPOLATION_GAP_S:
+            found = before, after
+    return found
+
+
+def report(scenario, t, mmsi=None, v_max=None, reappear=None):
+    """Everything the module says about one vessel at time t, as plain data.
+
+    ``reappear`` is an optional (lat, lon) where the vessel is assumed to show
+    up at time t; otherwise the latest observed AIS gap ending by t is checked.
+    """
+    vessel = next((item for item in scenario["vessels"] if mmsi is None or item["mmsi"] == mmsi), None)
+    if vessel is None:
+        raise ValueError(f"no vessel with MMSI {mmsi}")
+    track = vessel["track"]
+    if reappear is not None:
+        before = next((fix for fix in reversed(track) if fix["t"] < t), None)
+        if before is None:
+            raise ValueError("no AIS fix before the reappearance time")
+        pair = before, {"t": t, "lat": reappear[0], "lon": reappear[1]}
+    else:
+        pair = last_gap(track, t)
+    reappearance = None
+    if pair is not None:
+        before, after = pair
+        speed = v_max if v_max is not None else v_max_kn(track, before["t"])
+        reappearance = {"from_t": before["t"], "to_t": after["t"], "hypothetical": reappear is not None,
+                        **reappearance_check(before, after, speed)}
+    return {
+        "t": t,
+        "vessel": {"mmsi": vessel["mmsi"], "name": vessel.get("name"), "label": vessel.get("label")},
+        "position": position_at(track, t, v_max),
+        "countdowns": [countdown for countdown in
+                       (dark_countdown(track, cable, t, v_max) for cable in scenario["cables"])
+                       if countdown is not None],
+        "reappearance": reappearance,
+    }
+
+
+def _clock(seconds):
+    seconds = int(round(seconds))
+    return f"T+{seconds // 60}:{seconds % 60:02d}"
+
+
+def _minutes(seconds):
+    seconds = int(round(seconds))
+    return f"{seconds // 60} min {seconds % 60:02d} s"
+
+
+def format_report(result):
+    """Readable text for one report(); every estimate is labelled predicted."""
+    vessel, position = result["vessel"], result["position"]
+    lines = [f"{vessel['name']} (MMSI {vessel['mmsi']}, {vessel['label']}) at {_clock(result['t'])} ({result['t']} s)"]
+    if position is None:
+        lines.append("Position      none: before the first AIS fix")
+    elif position["status"] != "predicted":
+        course = position.get("cog_deg")
+        lines.append(f"Position      {position['status'].upper()} AIS  {position['lat']:.5f}, {position['lon']:.5f}"
+                     f"  sog {position.get('sog_kn')} kn, cog {course if course is not None else '-'}")
+    else:
+        prediction = position["prediction"]
+        cone = prediction["cone"]
+        lines += [
+            f"Position      PREDICTED  {position['lat']:.5f}, {position['lon']:.5f}  +/-{position['uncertainty_nm']:.2f} nm",
+            f"              last AIS fix {_clock(prediction['from_fix_t'])}, dark for {_minutes(prediction['elapsed_s'])}",
+            f"Likely cone   course {cone['course_deg']:05.1f} +/-{cone['half_angle_deg']:.0f} deg, "
+            f"{cone['near_nm']:.2f}-{cone['far_nm']:.2f} nm from the last fix" if cone
+            else "Likely cone   none: no usable last speed and course",
+            f"Reachable     up to {prediction['reachable']['radius_nm']:.2f} nm "
+            f"at assumed v_max {prediction['reachable']['v_max_kn']:.1f} kn",
+        ]
+    for countdown in result["countdowns"]:
+        lines += [
+            f"Countdown     {countdown['segment_id']}: earliest possible contact "
+            f"{_clock(countdown['earliest_contact_t'])}, {_minutes(countdown['remaining_s'])} left",
+            f"              worst case: straight line {countdown['distance_nm']:.1f} nm at "
+            f"{countdown['v_max_kn']:.1f} kn from the fix at {_clock(countdown['last_fix_t'])}",
+        ]
+    check = result["reappearance"]
+    if check is None:
+        lines.append("Reappearance  no AIS gap ended by this time")
+    else:
+        kind = "hypothetical fix" if check["hypothetical"] else "AIS gap"
+        cone_text = {True: "in likely cone", False: "outside likely cone", None: "no cone"}[check["in_cone"]]
+        lines += [
+            f"Reappearance  {kind} {_clock(check['from_t'])} -> {_clock(check['to_t'])}: {check['verdict'].upper()}",
+            f"              moved {check['distance_nm']:.2f} nm of {check['reachable_nm']:.2f} nm reachable, "
+            f"needed {check['required_speed_kn']:.1f} kn; {cone_text}",
+            f"              {check['note']}",
+        ]
+    return "\n".join(lines)
+
+
+def _times(tokens):
+    """Seconds from tokens like 2400 or START:END:STEP (END included)."""
+    times = []
+    for token in tokens:
+        try:
+            parts = [int(part) for part in token.split(":")]
+        except ValueError:
+            parts = []
+        if len(parts) == 1:
+            times.append(parts[0])
+        elif len(parts) == 3 and parts[2] > 0:
+            times.extend(range(parts[0], parts[1] + 1, parts[2]))
+        else:
+            raise ValueError(f"bad time {token!r}: use SECONDS or START:END:STEP")
+    return times
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Predict where a dark vessel can be and how soon it could reach a cable.",
+        epilog="Examples: --t 2400 | --t 1500:3300:300 | --t 3000 --reappear 53.2 -5.4 | --json",
+    )
+    parser.add_argument("--scenario", type=Path, default=ROOT / "demo/scenario.json")
+    parser.add_argument("--t", nargs="+", default=["2400"], metavar="SECONDS",
+                        help="scenario time(s) in seconds, or START:END:STEP")
+    parser.add_argument("--mmsi", type=int, help="vessel to report (default: the first one)")
+    parser.add_argument("--v-max", type=float, help="override the assumed maximum speed in knots")
+    parser.add_argument("--reappear", nargs=2, type=float, metavar=("LAT", "LON"),
+                        help="pretend AIS returns at this position at --t")
+    parser.add_argument("--json", action="store_true", help="print raw data instead of text")
+    args = parser.parse_args(argv)
+    try:
+        times = _times(args.t)
+        if args.reappear and len(times) != 1:
+            raise ValueError("--reappear needs exactly one --t")
+        if args.v_max is not None and args.v_max <= 0:
+            raise ValueError("--v-max must be positive")
+        scenario = json.loads(args.scenario.read_text(encoding="utf-8"))
+        results = [report(scenario, t, args.mmsi, args.v_max, args.reappear) for t in times]
+    except (OSError, ValueError, KeyError) as error:
+        parser.exit(1, f"Prediction failed: {error}\n")
+    if args.json:
+        print(json.dumps(results, indent=1, ensure_ascii=False))
+    else:
+        print("\n\n".join(format_report(result) for result in results))
+        print("\nPositions marked PREDICTED are planning estimates from stated assumptions on fictional data.")
+
+
+if __name__ == "__main__":
+    main()
