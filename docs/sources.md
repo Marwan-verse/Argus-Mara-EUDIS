@@ -1,5 +1,31 @@
 # Sources
 
+## Irish coastal vessel presentation imagery (13 October 2026)
+
+- [ESA — Dublin, Ireland](https://www.esa.int/ESA_Multimedia/Images/2022/12/Dublin_Ireland)
+  — full-resolution Sentinel-2 optical raster, credited as 2020 data and published
+  16 December 2022; exact acquisition date is unavailable. The page explicitly
+  offers CC BY-SA 3.0 IGO. Four selected vessel figures and a location overview
+  retain attribution and real-pixel / fictional-identity labels.
+- [EU Space — Cork ahead of Ireland's Presidency](https://eu-space.europa.eu/components/earth-observation-copernicus/image-of-the-day/cork-ahead-irelands-presidency-council-eu)
+  — Sentinel-2 image acquired 23 June 2026 and published 1 July 2026, credited to
+  the European Union. Its linked [EU legal notice](https://european-union.europa.eu/legal-notice_en)
+  permits reuse of EU-owned content under CC BY 4.0 unless otherwise indicated.
+  Two selected vessel figures and a location overview retain that credit.
+- [ESA — The Netherlands](https://www.esa.int/ESA_Multimedia/Images/2019/10/The_Netherlands)
+  — Sentinel-2 optical false-colour composite including near-infrared, credited as
+  2016 data and published 4 October 2019, offered under CC BY-SA 3.0 IGO. Four
+  manually selected offshore contacts provide comparable dark northern European
+  water; their real location remains the North Sea off the Netherlands.
+
+The final [offline image pack](../demo/imagery/README.md) and
+[manifest](../demo/imagery/manifest.json) record downloads, hashes, selected source
+pixel bounds, output hashes, licences and changes. Original rasters remain under
+ignored `data/satellite-imagery/`. These historical optical figures have no AIS
+association. Six derived cable-risk figures add explicit simulated internet-cable
+corridors and behavior, without georeferencing or a measured real cable distance.
+They are presentation scenarios, not Brain detections or historical incidents.
+
 ## Space dataset review (8 October 2026)
 
 These primary-source checks support the [Space dataset plan](10-space-dataset-plan.md).
