@@ -22,6 +22,7 @@ import customtkinter as ctk
 
 from argus.alert_board import line_path, sort_key
 from argus.brain_board import build_board, update
+from argus.explain import explain
 from argus.incident_board import OPEN_RANK, Tracker
 from argus.incidents import QUIET_CLOSE_S, REASONS, STATUSES
 from argus.levels import LEVEL_NAMES, RANK
@@ -41,6 +42,11 @@ RECIPIENTS = ("Duty officer", "Line operator", "Irish Coast Guard (MRCC)", "Nava
 SORTS = ("Severity", "Time to asset", "Newest")
 STATUS_DETAIL = {"New": "Awaiting review", "Reviewed": "No decision", "Acknowledged": "Monitoring"}
 MARKER_SIZE = {"critical": 1.7, "high": 1.5, "medium": 1.25, "low": 1.0}
+# Data-label tags in the review window as (text colour, background).
+CHIP = {"SIMULATED": ("#c3ced6", "#2a3542"), "EXERCISE": ("#e1b164", "#34301f"), "REAL": ("#47c7da", "#173339"),
+        "ASSUMPTION": ("#d8b25c", "#34301f"), "ILLUSTRATIVE": ("#a8b6c2", "#1c2a36"),
+        "RULE OUTCOME": ("#a8b6c2", "#1c2a36")}
+DETECTOR_REASONS = 4
 # List groups after the open incidents by level: quiet incidents, watched contacts, closed incidents.
 GROUP_TITLES = {"critical": "CRITICAL", "high": "HIGH", "medium": "MEDIUM", "quiet": "QUIET · BELOW MEDIUM",
                 "watching": "WATCHING · LOW, NO INCIDENT", "closed": "CLOSED"}
@@ -91,7 +97,7 @@ def badges(item: dict, incident: dict | None) -> list[tuple[str, str]]:
         found.append(("⚠ Review again", "warn"))
     if incident and incident.get("suggest_close"):
         found.append((f"Quiet {QUIET_CLOSE_S // 60} min · close?", "note"))
-    if "ais_spoofing" in item.get("detectors", ()):
+    if item["observations"].get("spoof_signs"):  # a lone GPS glitch is a finding but not a spoofing sign
         found.append(("AIS spoofing?", "warn"))
     relevance = item.get("relevance") or {}
     if relevance.get("small"):
@@ -997,12 +1003,17 @@ class ReviewDialog:
 
     # ----- content --------------------------------------------------------------------
     def show(self, item: dict) -> None:
-        if self.item is None or self.item["id"] != item["id"]:
+        changed = self.item is None or self.item["id"] != item["id"]
+        if changed:
             self.mode = None
         self.item = item
         self.visible = True
         self.place()
         self.refresh()
+        canvas = getattr(self.body, "_parent_canvas", None)
+        if changed and canvas is not None:
+            # A new contact starts at the top, not at the previous contact's scroll position.
+            canvas.yview_moveto(0)
 
     def refresh(self) -> None:
         item, board, ui = self.item, self.board, self.ui
@@ -1107,24 +1118,8 @@ class ReviewDialog:
         ui, item, board = self.ui, self.item, self.board
         for child in self.body.winfo_children():
             child.destroy()
-        assessment = item["assessment"]
         wrap = int(float(self.frame.cget("width"))) - 110
-        self.heading("INDICATORS", top=4)
-        for factor in assessment["factors"]:
-            points = factor["points"]
-            row = tk.Frame(self.body, bg=ui.CARD)
-            row.pack(fill="x", pady=2)
-            text = f"+{points}" if points > 0 else ("−" + str(-points) if points < 0 else "0")
-            tk.Label(row, text=text, width=3, anchor="e", bg=ui.CARD, fg=ui.INK if points else ui.MUTED,
-                     font=(MONO, 10, "bold")).pack(side="left", anchor="n")
-            tk.Label(row, text=factor["text"], bg=ui.CARD, fg=ui.INK if points else ui.MUTED, font=(SANS, 10),
-                     anchor="w", justify="left", wraplength=wrap).pack(side="left", fill="x", expand=True, padx=(10, 0))
-        for note in assessment["notes"]:
-            row = tk.Frame(self.body, bg=ui.CARD)
-            row.pack(fill="x", pady=2)
-            tk.Label(row, text="", width=3, bg=ui.CARD, font=(MONO, 10)).pack(side="left")
-            tk.Label(row, text=note, bg=ui.CARD, fg=SECONDARY, font=(SANS, 10, "italic"), anchor="w", justify="left",
-                     wraplength=wrap).pack(side="left", fill="x", expand=True, padx=(10, 0))
+        self.fill_why(explain(item), wrap)
         self.heading("RECOMMENDED ACTION")
         tk.Label(self.body, text=item["recommendation"], bg=ui.CARD, fg=ui.INK, font=(SANS, 10), anchor="w",
                  justify="left", wraplength=wrap + 40).pack(fill="x", padx=(6, 0))
@@ -1139,13 +1134,80 @@ class ReviewDialog:
             tk.Label(row, text=stamp, bg=ui.CARD, fg=ui.MUTED, font=(MONO, 9)).pack(side="left", anchor="n")
             tk.Label(row, text=text, bg=ui.CARD, fg=SECONDARY, font=(SANS, 10), anchor="w", justify="left",
                      wraplength=wrap - 40).pack(side="left", fill="x", expand=True, padx=(10, 0))
-        source = ("Fictional exercise alert from the demo files." if item.get("exercise") else
-                  "Simulated contact. Vessel, track and observations are fictional; the route is illustrative.")
-        source += (" Brain opens and updates the incident; only a human sets its status." if
-                   board.incident(item["id"]) else " Low: watched, not an incident; it opens one if it reaches Medium.")
+        self.heading("DATA LABELS")
+        for tag, text in explain(item)["labels"]:
+            row = tk.Frame(self.body, bg=ui.CARD)
+            row.pack(fill="x", padx=(6, 0), pady=2)
+            self.chip(row, tag, width=13).pack(side="left", anchor="n")
+            tk.Label(row, text=text, bg=ui.CARD, fg=SECONDARY, font=(SANS, 9), anchor="w", justify="left",
+                     wraplength=wrap - 70).pack(side="left", fill="x", expand=True, padx=(8, 0))
+        source = ("Brain opens and updates the incident; only a human sets its status." if board.incident(item["id"])
+                  else "Low: watched, not an incident; it opens one if it reaches Medium.")
         tk.Label(self.body, text=source + " Decisions are logged locally and not transmitted.", bg=ui.CARD,
                  fg=ui.MUTED, font=(SANS, 9), anchor="w", justify="left", wraplength=wrap + 40).pack(
-            fill="x", padx=(6, 0), pady=(18, 6))
+            fill="x", padx=(6, 0), pady=(12, 6))
+
+    def chip(self, parent, tag: str, width: int = 0) -> tk.Label:
+        """A small data-label tag such as SIMULATED, REAL or ASSUMPTION."""
+        fg, bg = CHIP.get(tag, (self.ui.MUTED, self.ui.CONTROL))
+        return tk.Label(parent, text=tag, bg=bg, fg=fg, font=(SANS, 7, "bold"), padx=5, pady=1, width=width)
+
+    def line(self, prefix: str, text: str, wrap: int, colour: str, prefix_colour: str | None = None,
+             font=(SANS, 10)) -> None:
+        """One indented row: a short mono prefix (points or a bullet) and wrapped text."""
+        row = tk.Frame(self.body, bg=self.ui.CARD)
+        row.pack(fill="x", pady=1)
+        tk.Label(row, text=prefix, width=3, anchor="e", bg=self.ui.CARD, fg=prefix_colour or colour,
+                 font=(MONO, 10, "bold")).pack(side="left", anchor="n")
+        tk.Label(row, text=text, bg=self.ui.CARD, fg=colour, font=font, anchor="w", justify="left",
+                 wraplength=wrap).pack(side="left", fill="x", expand=True, padx=(10, 0))
+
+    def fill_why(self, why: dict, wrap: int) -> None:
+        """Why this level: the five groups with points and factors, rules applied, the line, detectors."""
+        ui = self.ui
+        head = tk.Frame(self.body, bg=ui.CARD)
+        head.pack(fill="x", padx=(6, 0), pady=(4, 6))
+        tk.Label(head, text="WHY THIS LEVEL", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 8, "bold")).pack(side="left")
+        tk.Label(head, text=why["basis"], bg=ui.CARD, fg=ui.MUTED, font=(MONO, 9)).pack(side="right")
+        for group in why["groups"]:
+            row = tk.Frame(self.body, bg=ui.CARD)
+            row.pack(fill="x", padx=(6, 0), pady=(6, 1))
+            active = group["points"] > 0
+            tk.Label(row, text=f"{group['key']}  {group['title']}", bg=ui.CARD, fg=ui.INK if active else ui.MUTED,
+                     font=(SANS, 10, "bold")).pack(side="left")
+            score = f"{group['points']} of {group['cap']} max" if group["cap"] else f"{group['points']} pts"
+            tk.Label(row, text=score if group["factors"] else "nothing observed", bg=ui.CARD, fg=ui.MUTED,
+                     font=(MONO, 9) if group["factors"] else (SANS, 9)).pack(side="right")
+            for factor in group["factors"]:
+                points = factor["points"]
+                text = f"+{points}" if points > 0 else ("−" + str(-points) if points < 0 else "0")
+                self.line(text, factor["text"], wrap, ui.INK if points else ui.MUTED)
+        if why["rules"]:
+            self.heading("RULES APPLIED")
+            for note in why["rules"]:
+                self.line("›", note, wrap, SECONDARY, ui.MUTED, (SANS, 10, "italic"))
+        line = why["line"]
+        self.heading("THREATENED LINE")
+        self.line("›", f"{line['name']}: {line['where']}", wrap, ui.INK, ui.MUTED)
+        for other in line["others"]:
+            self.line("", f"Also named: {other['name']}, {other['where']}. Scored for the most urgent line only.",
+                      wrap, ui.MUTED)
+        small = why["small_vessel"]
+        if small:
+            self.heading("SMALL VESSEL")
+            self.line("›", f"Small: {small['reason']}.", wrap, ui.INK, ui.MUTED)
+            self.line("", small["outcome"], wrap, STYLE["low"][0] if small["capped"] else STYLE["medium"][0])
+        self.heading("FINDINGS BY DETECTOR")
+        for finding in why["findings"]:
+            row = tk.Frame(self.body, bg=ui.CARD)
+            row.pack(fill="x", padx=(6, 0), pady=(4, 1))
+            tk.Label(row, text=finding["title"], bg=ui.CARD, fg=ui.INK, font=(SANS, 10, "bold")).pack(side="left")
+            self.chip(row, finding["label"]).pack(side="left", padx=(8, 0))
+            for reason in finding["reasons"][:DETECTOR_REASONS]:
+                self.line("•", reason, wrap, SECONDARY, ui.MUTED)
+            hidden = len(finding["reasons"]) - DETECTOR_REASONS
+            if hidden > 0:
+                self.line("", f"+{hidden} more", wrap, ui.MUTED)
 
     def fill_actions(self) -> None:
         ui, item, board = self.ui, self.item, self.board

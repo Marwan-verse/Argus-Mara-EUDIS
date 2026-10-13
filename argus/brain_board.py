@@ -150,11 +150,21 @@ def _with_notes(assessment: dict, notes: list[str]) -> dict:
     return {**assessment, "notes": assessment["notes"] + notes} if notes else assessment
 
 
+def _finding_summary(finding: dict) -> dict:
+    """What the review window shows of a finding: detector, data label, line and reasons."""
+    obs = finding.get("obs") or {}
+    return {"detector": finding["detector"], "label": finding.get("label"),
+            "cable_id": (finding.get("related") or {}).get("cable_id"), "reasons": list(finding["reasons"]),
+            "eta_min": obs.get("eta_min"), "distance_nm": obs.get("distance_nm"),
+            "in_corridor": obs.get("in_corridor")}
+
+
 def _rescore(item: dict, result: dict) -> None:
     notes = _detector_notes(result["findings"])
     item.update(observations=result["observations"], assessment=_with_notes(result["assessment"], notes),
                 relevance=result["relevance"], cable_id=result["cable_id"], detector_notes=notes,
-                detectors=[f["detector"] for f in result["findings"]])
+                detectors=[f["detector"] for f in result["findings"]],
+                findings=[_finding_summary(f) for f in result["findings"]])
 
 
 def build_board(scenario: dict | None = None, alerts: list | None = None) -> list[dict]:

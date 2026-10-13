@@ -152,6 +152,38 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertEqual(board.selected, 'SIM-02')
         self.assertTrue(board.dialog.visible)
 
+    def test_review_window_explains_the_level(self):
+        board, dialog = self.board, self.board.dialog
+
+        def texts():
+            found, stack = [], list(dialog.body.winfo_children())
+            while stack:
+                widget = stack.pop(0)
+                stack.extend(widget.winfo_children())
+                if isinstance(widget, tk.Label):
+                    found.append(widget.cget('text'))
+            return found
+
+        board.set_filter('low')
+        self.assertEqual(self.flags('SIM-47'), [])  # a lone GPS glitch is not flagged as spoofing
+        board.set_filter(None)
+        board.open('SIM-46')
+        shown = texts()
+        for heading in ('WHY THIS LEVEL', 'RULES APPLIED', 'THREATENED LINE', 'SMALL VESSEL',
+                        'FINDINGS BY DETECTOR', 'DATA LABELS'):
+            self.assertIn(heading, shown)
+        self.assertIn('B2 I2 P3 A2 C0 = 9', shown)
+        self.assertIn('B  Behaviour', shown)
+        self.assertIn('nothing observed', shown)
+        self.assertIn('AIS spoofing check', shown)
+        for tag in ('SIMULATED', 'REAL', 'ASSUMPTION', 'ILLUSTRATIVE'):
+            self.assertIn(tag, shown)
+        self.assertIn('AIS spoofing?   Small craft · cap lifted', dialog.flags.cget('text'))
+        dialog.body._parent_canvas.yview_moveto(1)
+        board.open('SIM-44')
+        self.assertEqual(dialog.body._parent_canvas.yview()[0], 0)
+        self.assertTrue(any(text.startswith('Also named: Gas interconnector IC2') for text in texts()))
+
     def test_countdown_raises_an_incident_and_the_board_can_hide(self):
         app, board = self.app, self.board
         board.decide('SIM-06', 'Reviewed', 'Reviewed')
