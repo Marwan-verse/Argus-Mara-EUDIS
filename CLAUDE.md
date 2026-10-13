@@ -29,6 +29,7 @@ Decisions are recorded in `DECISIONS.md`. Read it first, and add new decisions t
 - `docs/07-architecture.md`: current code layout, contract units, ownership and change rules.
 - `docs/08-research-and-next-ideas.md`: checked source findings and proposed next improvements.
 - `skills/`: portable teammate skills; `docs/09-team-skills.md` explains installation.
+- `argus/levels.py`, `argus/alert_board.py`, `desktop_alerts.py`: alert level rules, the simulated alert board and the docked desktop alert panel; `docs/12-argus-mara-alert-levels.md` explains them. `desktop_gestures.py` adds trackpad scrolling and macOS pinch-to-zoom.
 - `scripts/check_contracts.py`: local integration check for both JSON files.
 
 ## Conventions

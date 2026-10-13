@@ -54,7 +54,7 @@ layer draws downwind arrows coloured by speed. Map-bar "Rain" and "Wind" switche
 It shows current real weather, not the replay's, and is display-only: alerts,
 countdowns, ETAs and both JSON files are unchanged.
 
-*Dark-vessel prediction (D47, 13 October):* the "Dark prediction" map layer, on by
+*Dark-vessel prediction (D51, 13 October):* the "Dark prediction" map layer, on by
 default, replaces the withdrawn exercise marker during its AIS gap with a labelled
 likely cone, reachable circle, best-guess position and a worst-case line and countdown
 to the anchor-reachable section; when AIS returns, it shows the reappearance check.

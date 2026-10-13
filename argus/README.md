@@ -17,7 +17,7 @@ AIS reception gap and a constant-course projected crossing of an assumed shallow
 section. Its `score` counts satisfied cues; it is not a threat probability.
 `countdown.py` also calculates assumed response arrival times.
 
-`prediction.py` (D47) estimates where a vessel can be while its AIS is dark: a likely
+`prediction.py` (D51) estimates where a vessel can be while its AIS is dark: a likely
 cone (last course ±30°, 0.7–1.1× last speed) and a reachable circle (assumed maximum
 speed), `position_at` for replay and intercept simulations, a worst-case countdown to
 the anchor-reachable section and a reappearance consistency check. Every value is

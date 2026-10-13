@@ -1,0 +1,830 @@
+{
+  "schema_version": 1,
+  "title": "Vessel imagery and internet-cable risk scenarios — Nazar's demo pack",
+  "prepared_date": "2026-10-13",
+  "purpose": "Offline demonstration figures: real satellite vessels with fictional identities and separately labelled simulated internet-cable/behavior overlays.",
+  "imagery_label": "real",
+  "identity_label": "fictional",
+  "selection_label": "assumption",
+  "coordinate_order": "Source-image pixels: [x, y] from the upper-left; bounds are [left, top, right, bottom], with right/bottom exclusive. These are not geographic coordinates.",
+  "limitations": [
+    "Names and AM-IE codes are invented presentation identifiers, not verified identities, MMSIs or IMO numbers.",
+    "Vessels are selected manually from published optical imagery; no AIS association or suspicious behavior is established.",
+    "A single image cannot establish movement, loitering, AIS switch-off, spoofing or cable proximity.",
+    "Enlargement uses nearest-neighbor display; it adds no sensor detail. Published imagery is not georeferenced here and cannot supply measured vessel dimensions.",
+    "The Dublin source gives a data year of 2020 but no exact acquisition date. Its 2022 publication date is not the observation date.",
+    "Cork is a published image acquired on 23 June 2026, not live imagery.",
+    "Cable-risk figures add simulated fibre-optic cable corridors and tracks. Cable routes are illustrative pixel-space overlays, not visible seabed features or real surveyed routes; no real cable proximity or risk is measured."
+  ],
+  "sources": [
+    {
+      "id": "dublin-sentinel2-2020",
+      "title": "Dublin, Ireland",
+      "location": "Dublin Port, Dublin Bay and the coast east of Howth, Ireland",
+      "sensor": "Copernicus Sentinel-2 MSI (optical)",
+      "imagery_label": "real",
+      "acquired_date": null,
+      "data_year": 2020,
+      "date_display": "2020 · exact acquisition date unavailable",
+      "published_date": "2022-12-16",
+      "accessed_date": "2026-10-13",
+      "source_url": "https://www.esa.int/ESA_Multimedia/Images/2022/12/Dublin_Ireland",
+      "download_url": "https://www.esa.int/var/esa/storage/images/esa_multimedia/images/2022/12/dublin_ireland/24642725-2-eng-GB/Dublin_Ireland.tif",
+      "raw_path": "data/satellite-imagery/esa-dublin-sentinel2-2020.tif",
+      "raw_sha256": "7d91eba957482a338948702a8d8d50d8a042d2309d545136e3154581ef8fec54",
+      "source_size_px": [
+        4724,
+        3149
+      ],
+      "credit": "Contains modified Copernicus Sentinel data (2020), processed by ESA",
+      "license": "CC BY-SA 3.0 IGO",
+      "license_url": "https://creativecommons.org/licenses/by-sa/3.0/igo/",
+      "changes": "Selected display regions, nearest-neighbor enlargement, vessel outlines and fictional demo name/code labels added by Argus Mara."
+    },
+    {
+      "id": "cork-sentinel2-2026-06-23",
+      "title": "Cork ahead of Ireland's Presidency of the Council of EU",
+      "location": "Lough Mahon and Cork Harbour, Ireland",
+      "sensor": "Copernicus Sentinel-2 MSI (optical)",
+      "imagery_label": "real",
+      "acquired_date": "2026-06-23",
+      "data_year": 2026,
+      "date_display": "23 June 2026",
+      "published_date": "2026-07-01",
+      "accessed_date": "2026-10-13",
+      "source_url": "https://eu-space.europa.eu/components/earth-observation-copernicus/image-of-the-day/cork-ahead-irelands-presidency-council-eu",
+      "download_url": "https://eu-space.europa.eu/sites/default/files/2026-07/01072026_Ireland%20Presidency.webp",
+      "raw_path": "data/satellite-imagery/eu-cork-sentinel2-2026-06-23.webp",
+      "raw_sha256": "15283a3f801c23efdf98710461b382a0faac9f067eb6d43abbb23c18bc96a22f",
+      "source_size_px": [
+        4961,
+        3508
+      ],
+      "credit": "European Union, Copernicus Sentinel-2 imagery",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "license_basis_url": "https://european-union.europa.eu/legal-notice_en",
+      "license_note": "The source's linked legal notice permits reuse of EU-owned content under CC BY 4.0 unless otherwise indicated; the image is credited to the European Union.",
+      "changes": "Selected display regions, nearest-neighbor enlargement, vessel outlines and fictional demo name/code labels added by Argus Mara."
+    },
+    {
+      "id": "north-sea-sentinel2-2016",
+      "title": "The Netherlands",
+      "location": "North Sea off the Netherlands; comparable northern European water, not Ireland",
+      "sensor": "Copernicus Sentinel-2 MSI (optical, published false-colour composite including near-infrared)",
+      "imagery_label": "real",
+      "acquired_date": null,
+      "data_year": 2016,
+      "date_display": "2016 · exact acquisition date unavailable",
+      "published_date": "2019-10-04",
+      "accessed_date": "2026-10-13",
+      "source_url": "https://www.esa.int/ESA_Multimedia/Images/2019/10/The_Netherlands",
+      "download_url": "https://www.esa.int/var/esa/storage/images/esa_multimedia/images/2019/10/the_netherlands/20813142-1-eng-GB/The_Netherlands.jpg",
+      "raw_path": "data/satellite-imagery/esa-netherlands-sentinel2-2016.jpg",
+      "raw_sha256": "0de75627ee26033ab4536ca800952af9f12aef9a40ea82982b960d24c6069734",
+      "source_size_px": [
+        9725,
+        10223
+      ],
+      "credit": "Contains modified Copernicus Sentinel data (2016), processed by ESA",
+      "license": "CC BY-SA 3.0 IGO",
+      "license_url": "https://creativecommons.org/licenses/by-sa/3.0/igo/",
+      "changes": "Selected display regions, nearest-neighbor enlargement, vessel outlines and fictional demo labels. Risk figures additionally show simulated cable corridors and routes; published false-colour pixels are unchanged."
+    }
+  ],
+  "vessels": [
+    {
+      "code": "AM-IE-001",
+      "demo_name": "LIFFEY DAWN",
+      "identity_label": "fictional",
+      "source_id": "dublin-sentinel2-2020",
+      "location": "Dublin Port",
+      "crop_bounds_px": [
+        2345,
+        1385,
+        2445,
+        1485
+      ],
+      "vessel_bounds_px": [
+        2386,
+        1438,
+        2394,
+        1468
+      ],
+      "image_path": "vessels/AM-IE-001-liffey-dawn.png",
+      "observation": "Visible vessel-shaped object beside a port berth; identity and vessel type unverified.",
+      "demo_use": "Port context or a normal-traffic comparison; not an unusual non-port stop."
+    },
+    {
+      "code": "AM-IE-002",
+      "demo_name": "HARBOUR FINCH",
+      "identity_label": "fictional",
+      "source_id": "dublin-sentinel2-2020",
+      "location": "Dublin Port",
+      "crop_bounds_px": [
+        2370,
+        1430,
+        2470,
+        1530
+      ],
+      "vessel_bounds_px": [
+        2406,
+        1470,
+        2429,
+        1477
+      ],
+      "image_path": "vessels/AM-IE-002-harbour-finch.png",
+      "observation": "Visible vessel-shaped object alongside the quay; identity and vessel type unverified.",
+      "demo_use": "A second vessel for an analyst information-exchange demonstration using fictional names."
+    },
+    {
+      "code": "AM-IE-003",
+      "demo_name": "WICKLOW STAR",
+      "identity_label": "fictional",
+      "source_id": "dublin-sentinel2-2020",
+      "location": "Dublin Bay",
+      "crop_bounds_px": [
+        3140,
+        1670,
+        3280,
+        1810
+      ],
+      "vessel_bounds_px": [
+        3207,
+        1733,
+        3219,
+        1750
+      ],
+      "image_path": "vessels/AM-IE-003-wicklow-star.png",
+      "observation": "Isolated vessel-shaped object in Dublin Bay; no track or AIS evidence is supplied.",
+      "demo_use": "An offshore optical contact for a separately labelled fictional investigation scenario."
+    },
+    {
+      "code": "AM-IE-004",
+      "demo_name": "HOWTH VOYAGER",
+      "identity_label": "fictional",
+      "source_id": "dublin-sentinel2-2020",
+      "location": "Irish Sea off the Dublin coast, east of Howth",
+      "crop_bounds_px": [
+        3455,
+        425,
+        3595,
+        565
+      ],
+      "vessel_bounds_px": [
+        3524,
+        497,
+        3535,
+        507
+      ],
+      "image_path": "vessels/AM-IE-004-howth-voyager.png",
+      "observation": "Small bright vessel-shaped object with a visible trail; speed, heading and identity are unverified.",
+      "demo_use": "Show optical observation limits; unexpected direction requires separate time-series evidence."
+    },
+    {
+      "code": "AM-IE-005",
+      "demo_name": "LEE HORIZON",
+      "identity_label": "fictional",
+      "source_id": "cork-sentinel2-2026-06-23",
+      "location": "Cork Harbour, channel south of Lough Mahon",
+      "crop_bounds_px": [
+        3725,
+        2025,
+        3965,
+        2265
+      ],
+      "vessel_bounds_px": [
+        3826,
+        2115,
+        3860,
+        2166
+      ],
+      "image_path": "vessels/AM-IE-005-lee-horizon.png",
+      "observation": "Visible ship beside waterfront facilities; identity and vessel type unverified.",
+      "demo_use": "Irish harbour context; stopping here does not establish suspicious behavior."
+    },
+    {
+      "code": "AM-IE-006",
+      "demo_name": "ATLANTIC ROWAN",
+      "identity_label": "fictional",
+      "source_id": "cork-sentinel2-2026-06-23",
+      "location": "Cork Harbour, eastern waterfront",
+      "crop_bounds_px": [
+        4765,
+        3035,
+        4935,
+        3205
+      ],
+      "vessel_bounds_px": [
+        4850,
+        3110,
+        4880,
+        3165
+      ],
+      "image_path": "vessels/AM-IE-006-atlantic-rowan.png",
+      "observation": "Visible ship beside a jetty; identity and vessel type unverified.",
+      "demo_use": "A second Cork contact for comparison or an information-exchange demonstration."
+    },
+    {
+      "code": "AM-NS-001",
+      "demo_name": "NORTHSEA KESTREL",
+      "identity_label": "fictional",
+      "source_id": "north-sea-sentinel2-2016",
+      "location": "North Sea off the Netherlands (not Ireland)",
+      "crop_bounds_px": [
+        523,
+        2767,
+        663,
+        2907
+      ],
+      "vessel_bounds_px": [
+        585,
+        2829,
+        601,
+        2842
+      ],
+      "image_path": "vessels/AM-NS-001-northsea-kestrel.png",
+      "observation": "Visible offshore vessel-shaped pixels in a published false-colour scene; identity, AIS status and vessel type unverified.",
+      "demo_use": "Open-water background for a clearly labelled simulated internet-cable risk investigation."
+    },
+    {
+      "code": "AM-NS-002",
+      "demo_name": "GREY HORIZON",
+      "identity_label": "fictional",
+      "source_id": "north-sea-sentinel2-2016",
+      "location": "North Sea off the Netherlands (not Ireland)",
+      "crop_bounds_px": [
+        504,
+        2946,
+        644,
+        3086
+      ],
+      "vessel_bounds_px": [
+        566,
+        3010,
+        581,
+        3027
+      ],
+      "image_path": "vessels/AM-NS-002-grey-horizon.png",
+      "observation": "Visible offshore vessel-shaped pixels in a published false-colour scene; identity, AIS status and vessel type unverified.",
+      "demo_use": "Open-water background for a clearly labelled simulated internet-cable risk investigation."
+    },
+    {
+      "code": "AM-NS-003",
+      "demo_name": "SHELF TRADER",
+      "identity_label": "fictional",
+      "source_id": "north-sea-sentinel2-2016",
+      "location": "North Sea off the Netherlands (not Ireland)",
+      "crop_bounds_px": [
+        894,
+        2996,
+        1034,
+        3136
+      ],
+      "vessel_bounds_px": [
+        952,
+        3057,
+        968,
+        3073
+      ],
+      "image_path": "vessels/AM-NS-003-shelf-trader.png",
+      "observation": "Visible offshore vessel-shaped pixels in a published false-colour scene; identity, AIS status and vessel type unverified.",
+      "demo_use": "Open-water background for a clearly labelled simulated internet-cable risk investigation."
+    },
+    {
+      "code": "AM-NS-004",
+      "demo_name": "DEEPWATER FINCH",
+      "identity_label": "fictional",
+      "source_id": "north-sea-sentinel2-2016",
+      "location": "North Sea off the Netherlands (not Ireland)",
+      "crop_bounds_px": [
+        1635,
+        3281,
+        1775,
+        3421
+      ],
+      "vessel_bounds_px": [
+        1690,
+        3348,
+        1709,
+        3360
+      ],
+      "image_path": "vessels/AM-NS-004-deepwater-finch.png",
+      "observation": "Visible offshore vessel-shaped pixels in a published false-colour scene; identity, AIS status and vessel type unverified.",
+      "demo_use": "Open-water background for a clearly labelled simulated internet-cable risk investigation."
+    }
+  ],
+  "overviews": [
+    {
+      "source_id": "dublin-sentinel2-2020",
+      "title": "Dublin Port and coastal contacts",
+      "crop_bounds_px": [
+        1850,
+        250,
+        3770,
+        2050
+      ],
+      "image_path": "overviews/dublin-port-and-bay.png"
+    },
+    {
+      "source_id": "cork-sentinel2-2026-06-23",
+      "title": "Cork Harbour contacts",
+      "crop_bounds_px": [
+        2400,
+        1550,
+        4961,
+        3250
+      ],
+      "image_path": "overviews/cork-harbour.png"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "vessels/AM-IE-001-liffey-dawn.png",
+      "sha256": "1ed9a2e63efa81009bee51683213291db3946a20ae8c7b1cac6eb2b4e7c63160",
+      "size_px": [
+        1200,
+        800
+      ]
+    },
+    {
+      "path": "vessels/AM-IE-002-harbour-finch.png",
+      "sha256": "b9cabbc441a5e5868de56ed15ed3da744e3909365ab10ea11829b956150e78fd",
+      "size_px": [
+        1200,
+        800
+      ]
+    },
+    {
+      "path": "vessels/AM-IE-003-wicklow-star.png",
+      "sha256": "069e78579f2e0b21a2a58b2c3d7fab95943da982818f3bc5b89ec81694ab0b6d",
+      "size_px": [
+        1200,
+        800
+      ]
+    },
+    {
+      "path": "vessels/AM-IE-004-howth-voyager.png",
+      "sha256": "865451d1c49d9235d2b524e5711b08c91c6b39daf86d073dfee8879289b5926e",
+      "size_px": [
+        1200,
+        800
+      ]
+    },
+    {
+      "path": "vessels/AM-IE-005-lee-horizon.png",
+      "sha256": "c669597021079c8a14b82183754121c48e85398580133d0dbab45387157cc3f3",
+      "size_px": [
+        1200,
+        800
+      ]
+    },
+    {
+      "path": "vessels/AM-IE-006-atlantic-rowan.png",
+      "sha256": "85e3597bfa57c27eb63c66999958e450868490e35d71722b4cd6945edd2adc60",
+      "size_px": [
+        1200,
+        800
+      ]
+    },
+    {
+      "path": "vessels/AM-NS-001-northsea-kestrel.png",
+      "sha256": "13b6617963dda22830c37fe342f1faa1eb96e8ad9817e853471b69caabf54a74",
+      "size_px": [
+        1200,
+        800
+      ]
+    },
+    {
+      "path": "vessels/AM-NS-002-grey-horizon.png",
+      "sha256": "aea99c1dc3dd717be787433e81a68cc9b58e9602795443087315134d69bce6d1",
+      "size_px": [
+        1200,
+        800
+      ]
+    },
+    {
+      "path": "vessels/AM-NS-003-shelf-trader.png",
+      "sha256": "9c4bd41788208d6ea4d8172e7d96bc8623851de146b7830281a983904bb133e5",
+      "size_px": [
+        1200,
+        800
+      ]
+    },
+    {
+      "path": "vessels/AM-NS-004-deepwater-finch.png",
+      "sha256": "8f5609d33d144549d56aafdf89f46fd9bda0fa22d034b413176355ea361c9085",
+      "size_px": [
+        1200,
+        800
+      ]
+    },
+    {
+      "path": "overviews/dublin-port-and-bay.png",
+      "sha256": "72b7418f14d108db57bdbc40b65a5c2914cb916a9c73295a048d5447fc8bec42",
+      "size_px": [
+        1200,
+        800
+      ]
+    },
+    {
+      "path": "overviews/cork-harbour.png",
+      "sha256": "e5af3055680bac25b7c978ac62ab0f02e9470afb338993292b47ee802ebaed09",
+      "size_px": [
+        1200,
+        800
+      ]
+    },
+    {
+      "path": "contact-sheet.png",
+      "sha256": "2c4ca2fd1b2a8e50bead67b41f79fe19c634e45a629dc505fe4fd83a40b1fb25",
+      "size_px": [
+        1800,
+        1800
+      ]
+    },
+    {
+      "path": "cable-risk/R01-AM-IE-003.png",
+      "sha256": "8f55a4d8307959255d1e6bc6fab02cda90e3f1da39199e7ee2f845c6734de4b0",
+      "size_px": [
+        1200,
+        900
+      ]
+    },
+    {
+      "path": "cable-risk/R02-AM-IE-004.png",
+      "sha256": "4c14d362a8ff4ecf43016c2ce2fd427ce157dc38480136fe2383a100c9b40f4c",
+      "size_px": [
+        1200,
+        900
+      ]
+    },
+    {
+      "path": "cable-risk/R03-AM-NS-001.png",
+      "sha256": "a963ee40595350f771c7d2ed204b0129758d1eb30628bc08981d65c99854259a",
+      "size_px": [
+        1200,
+        900
+      ]
+    },
+    {
+      "path": "cable-risk/R04-AM-NS-002.png",
+      "sha256": "ca28b6a51dd064af7f407a4fa0ebe9034361e95dce07166f19d600be41659786",
+      "size_px": [
+        1200,
+        900
+      ]
+    },
+    {
+      "path": "cable-risk/R05-AM-NS-003.png",
+      "sha256": "2f32756330af789b6afdae11d5dc34adc927ddaf42fa08d7d89cf7205d253ccf",
+      "size_px": [
+        1200,
+        900
+      ]
+    },
+    {
+      "path": "cable-risk/R06-AM-NS-004.png",
+      "sha256": "fd050a519f29827e0a6fbf0b065eb6c558fe56dc407de64840c9e8dcd2d8705c",
+      "size_px": [
+        1200,
+        900
+      ]
+    },
+    {
+      "path": "cable-risk/contact-sheet.png",
+      "sha256": "d0badbe29bfe72338a2f0f922fde3c2c4fd12f81003e5e2a6c3ad883bb9bc543",
+      "size_px": [
+        1800,
+        1800
+      ]
+    }
+  ],
+  "risk_scenarios": [
+    {
+      "id": "R01",
+      "vessel_code": "AM-IE-003",
+      "title": "Course change towards an internet cable",
+      "cue": "Fictional course change points towards the exercise cable. Review the supporting track before escalating.",
+      "cable_path_px": [
+        [
+          3148,
+          1766
+        ],
+        [
+          3200,
+          1763
+        ],
+        [
+          3272,
+          1763
+        ]
+      ],
+      "track_path_px": [
+        [
+          3234,
+          1683
+        ],
+        [
+          3240,
+          1705
+        ],
+        [
+          3224,
+          1729
+        ],
+        [
+          3213,
+          1742
+        ]
+      ],
+      "projection_path_px": [
+        [
+          3213,
+          1742
+        ],
+        [
+          3196,
+          1761
+        ],
+        [
+          3186,
+          1774
+        ]
+      ],
+      "label": "simulated",
+      "identity_label": "fictional",
+      "imagery_label": "real",
+      "cable_label": "simulated",
+      "behavior_label": "simulated",
+      "image_path": "cable-risk/R01-AM-IE-003.png",
+      "coordinate_system": "Source raster pixels only; no geographic distance, surveyed cable route or operational risk level.",
+      "operator_action": "Human review required; no action is sent or automated."
+    },
+    {
+      "id": "R02",
+      "vessel_code": "AM-IE-004",
+      "title": "Loitering beside an internet cable",
+      "cue": "Fictional repeated turns keep the contact alongside the exercise cable. Check observation times and ordinary causes.",
+      "cable_path_px": [
+        [
+          3549,
+          433
+        ],
+        [
+          3549,
+          490
+        ],
+        [
+          3549,
+          557
+        ]
+      ],
+      "track_path_px": [
+        [
+          3500,
+          470
+        ],
+        [
+          3520,
+          461
+        ],
+        [
+          3530,
+          480
+        ],
+        [
+          3510,
+          515
+        ],
+        [
+          3495,
+          505
+        ],
+        [
+          3500,
+          480
+        ],
+        [
+          3529,
+          502
+        ]
+      ],
+      "projection_path_px": [],
+      "label": "simulated",
+      "identity_label": "fictional",
+      "imagery_label": "real",
+      "cable_label": "simulated",
+      "behavior_label": "simulated",
+      "image_path": "cable-risk/R02-AM-IE-004.png",
+      "coordinate_system": "Source raster pixels only; no geographic distance, surveyed cable route or operational risk level.",
+      "operator_action": "Human review required; no action is sent or automated."
+    },
+    {
+      "id": "R03",
+      "vessel_code": "AM-NS-001",
+      "title": "Approaching an internet-cable corridor",
+      "cue": "Fictional continuation crosses the exercise cable ahead of the observed contact. Cable geometry and route are illustrative.",
+      "cable_path_px": [
+        [
+          531,
+          2868
+        ],
+        [
+          589,
+          2863
+        ],
+        [
+          655,
+          2863
+        ]
+      ],
+      "track_path_px": [
+        [
+          633,
+          2799
+        ],
+        [
+          612,
+          2818
+        ],
+        [
+          593,
+          2837
+        ]
+      ],
+      "projection_path_px": [
+        [
+          593,
+          2837
+        ],
+        [
+          575,
+          2854
+        ],
+        [
+          556,
+          2880
+        ]
+      ],
+      "label": "simulated",
+      "identity_label": "fictional",
+      "imagery_label": "real",
+      "cable_label": "simulated",
+      "behavior_label": "simulated",
+      "image_path": "cable-risk/R03-AM-NS-001.png",
+      "coordinate_system": "Source raster pixels only; no geographic distance, surveyed cable route or operational risk level.",
+      "operator_action": "Human review required; no action is sent or automated."
+    },
+    {
+      "id": "R04",
+      "vessel_code": "AM-NS-002",
+      "title": "Repeated passes across an internet cable",
+      "cue": "Fictional history crosses the cable more than once and returns to the corridor. This is a review cue, not proof of intent.",
+      "cable_path_px": [
+        [
+          512,
+          3040
+        ],
+        [
+          575,
+          3033
+        ],
+        [
+          636,
+          3033
+        ]
+      ],
+      "track_path_px": [
+        [
+          605,
+          2970
+        ],
+        [
+          564,
+          3058
+        ],
+        [
+          542,
+          3046
+        ],
+        [
+          580,
+          2985
+        ],
+        [
+          607,
+          3008
+        ],
+        [
+          592,
+          3054
+        ],
+        [
+          560,
+          3050
+        ],
+        [
+          574,
+          3018
+        ]
+      ],
+      "projection_path_px": [],
+      "label": "simulated",
+      "identity_label": "fictional",
+      "imagery_label": "real",
+      "cable_label": "simulated",
+      "behavior_label": "simulated",
+      "image_path": "cable-risk/R04-AM-NS-002.png",
+      "coordinate_system": "Source raster pixels only; no geographic distance, surveyed cable route or operational risk level.",
+      "operator_action": "Human review required; no action is sent or automated."
+    },
+    {
+      "id": "R05",
+      "vessel_code": "AM-NS-003",
+      "title": "AIS unavailable near an internet cable",
+      "cue": "AIS availability is absent in this fictional scenario while the image shows a contact beside the exercise cable. Matching and coverage need review.",
+      "cable_path_px": [
+        [
+          902,
+          3086
+        ],
+        [
+          961,
+          3082
+        ],
+        [
+          1026,
+          3082
+        ]
+      ],
+      "track_path_px": [],
+      "projection_path_px": [],
+      "ais_status_label": "simulated",
+      "label": "simulated",
+      "identity_label": "fictional",
+      "imagery_label": "real",
+      "cable_label": "simulated",
+      "behavior_label": "simulated",
+      "image_path": "cable-risk/R05-AM-NS-003.png",
+      "coordinate_system": "Source raster pixels only; no geographic distance, surveyed cable route or operational risk level.",
+      "operator_action": "Human review required; no action is sent or automated."
+    },
+    {
+      "id": "R06",
+      "vessel_code": "AM-NS-004",
+      "title": "Contact inside an internet-cable corridor",
+      "cue": "The fictional cable corridor intersects the selected contact. Confirm real cable geometry, bathymetry and behavior before assessing risk.",
+      "cable_path_px": [
+        [
+          1643,
+          3356
+        ],
+        [
+          1701,
+          3356
+        ],
+        [
+          1767,
+          3352
+        ]
+      ],
+      "track_path_px": [
+        [
+          1740,
+          3316
+        ],
+        [
+          1726,
+          3331
+        ],
+        [
+          1700,
+          3354
+        ]
+      ],
+      "projection_path_px": [
+        [
+          1700,
+          3354
+        ],
+        [
+          1685,
+          3366
+        ],
+        [
+          1670,
+          3380
+        ]
+      ],
+      "label": "simulated",
+      "identity_label": "fictional",
+      "imagery_label": "real",
+      "cable_label": "simulated",
+      "behavior_label": "simulated",
+      "image_path": "cable-risk/R06-AM-NS-004.png",
+      "coordinate_system": "Source raster pixels only; no geographic distance, surveyed cable route or operational risk level.",
+      "operator_action": "Human review required; no action is sent or automated."
+    }
+  ]
+}

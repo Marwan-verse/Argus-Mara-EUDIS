@@ -1,5 +1,10 @@
 # `demo/`: the contract everyone builds against
 
+Nazar's [satellite image and internet-cable risk pack](imagery/README.md) is a
+separate presentation asset collection under `demo/imagery/`. Real Irish/North Sea
+pixels, fictional names and simulated cable/behavior overlays stay labelled; the
+pack does not change either shared JSON file or assert a real AIS association.
+
 **Read this before you write a line of code.** It is two JSON files. They let all five
 workstreams work at the same time, on day one, without waiting for each other.
 
