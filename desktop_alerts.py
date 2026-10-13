@@ -1,9 +1,11 @@
 """Docked alert queue: severity-sorted rows, a review window and map markers.
 
-The queue lists the fictional exercise alert and the simulated contacts from
-``argus.alert_board``. Each is marked EXERCISE or SIM in its row, in its review
-window and on the map. Acknowledge, escalate and reject record the operator's
-decision in this session only; nothing is transmitted.
+The queue lists the fictional exercise alert and the simulated contacts,
+scored through Brain (``argus.brain_board``: the assembler's detectors, the
+small-vessel rule and the AIS spoofing detector). Each is marked EXERCISE or SIM
+in its row, in its review window and on the map. Acknowledge, escalate and
+reject record the operator's decision in this session only; nothing is
+transmitted.
 """
 from __future__ import annotations
 
@@ -15,10 +17,13 @@ import tkinter as tk
 
 import customtkinter as ctk
 
-from argus.alert_board import build_board, line_path, sort_key, update
+from argus.alert_board import line_path, sort_key
+from argus.brain_board import build_board, update
 from argus.levels import LEVEL_NAMES
 
 LEVELS = ("critical", "high", "medium", "low")
+# List groups: Brain can score a contact None (e.g. a lone GPS glitch); it stays listed, last.
+GROUPS = LEVELS + ("none",)
 CODES = {"critical": "CRIT", "high": "HIGH", "medium": "MED", "low": "LOW", "none": "—"}
 # Level colour and a dark tint of it; colour is used for severity only.
 STYLE = {
@@ -193,9 +198,10 @@ class AlertBoard:
             scrollbar_button_color=ui.LINE, scrollbar_button_hover_color=ui.HOVER)
         self.list.pack(fill="both", expand=True, padx=(4, 4))
         self.headers = {}
-        for level in LEVELS + ("closed",):
+        for level in GROUPS + ("closed",):
             header = tk.Frame(self.list, bg=ui.CARD)
-            title = tk.Label(header, text=LEVEL_NAMES.get(level, "Closed").upper(), bg=ui.CARD, fg=ui.MUTED,
+            title = tk.Label(header, text={"none": "NO CONCERN"}.get(level, LEVEL_NAMES.get(level, "Closed").upper()),
+                             bg=ui.CARD, fg=ui.MUTED,
                              font=(SANS, 8, "bold"))
             title.pack(side="left", padx=(10, 0))
             count = tk.Label(header, text="", bg=ui.CARD, fg=ui.MUTED, font=(MONO, 8))
@@ -437,7 +443,7 @@ class AlertBoard:
 
         mode = self.sort_mode.get()
         if mode == "Severity":
-            for level in LEVELS:
+            for level in GROUPS:
                 group = sorted((item for item in visible if item["assessment"]["level"] == level), key=sort_key)
                 if group:
                     header(level, len(group))
