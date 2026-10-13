@@ -78,8 +78,11 @@ Both require login before constructing the application. Alternatively:
 python run_gui.py --soc https://soc.your-domain.example
 ```
 
-`ARGUS_SOC_URL` makes the regular launcher require login too. Without it, that
-launcher opens the explicitly labelled offline demo using public/fictional files.
+The regular launcher opens sign-in with an explicit offline option and a local
+two-window Docker demo option. `ARGUS_SOC_URL` prefills the shared server address.
+`--soc-login` and `--soc-client` require authentication; `--soc-client` also hides
+local server startup. `python run_gui.py --offline` opens the labelled offline
+demo directly, using public/fictional files.
 Do not use the offline entrypoint for private data. Hiding a local tool cannot
 protect public files already installed on a device.
 

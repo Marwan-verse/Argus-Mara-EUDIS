@@ -1,5 +1,67 @@
 # Validation on 13 October 2026
 
+## Application startup modes
+
+On the checkout synchronized with `origin/main` at `340ec54`, 10 new startup
+checks pass: one-time credential generation, existing-stack startup, Docker
+Desktop startup, early cancellation, failure recovery, verified HTTPS readiness,
+isolated child configuration, offline entry and native sign-in controls. Docker
+commands are mocked in these checks; Tk controls run on a native Windows display.
+The local two-window flow opens one additional sign-in window and never bypasses
+authentication. Repeated clicks cannot launch extra clients.
+
+All 19 existing SOC checks and 16 native replay checks also pass. SOC integration
+uses actual local HTTPS and encrypted client communication. The contract checker,
+`run_gui.py --check` and `git diff --check` pass. Both demo JSON files remain unchanged.
+The required Python packages were installed into the ignored project environment.
+
+At the initial validation, Docker CLI/Desktop was absent from PATH and the standard
+installation paths, so this change had **not** been tested against real
+Docker containers here. The earlier Docker results below describe prior validation,
+not the new automatic launcher. Windows/macOS Desktop fallback startup and a
+public two-device deployment still require host smoke tests.
+
+### Lenovo recheck — 14 October 2026
+
+The 10 startup tests, 19 SOC tests and 16 replay tests pass again. Docker Desktop
+4.95.0, Docker CLI 29.8.2, Compose 5.6.0 and WSL 2.7.13 are now installed on the
+Lenovo. Local Compose configuration validation passes. Windows reports a required
+restart after enabling Virtual Machine Platform and WSL; the engine is not yet
+running. Real-container startup and encrypted chat/ping smoke tests remain pending
+that restart, so the PR must remain draft until those checks are complete.
+
+A broader Windows run exposed an existing AIS window test-order failure. Running
+the SOC tests followed by AIS tests reproduces the same assertion on clean
+`origin/main` (`340ec54`); running AIS tests alone passes. The initial full-suite
+run also exposed missing timezone data and archive/other GUI failures. Timezone
+data was installed into the local environment before the final baseline comparison.
+
+The final full Windows run (live AIS autoconnection disabled, timezone data
+available) ran 219 tests on this branch and 209 on clean main. Both reported
+6 failures and 16 errors with identical failing test names; the 10 added startup
+tests passed. Existing failures include Windows archive durability, GUI gesture/
+history behavior and recorder console encoding. No additional failing cases were
+introduced by this change. GitHub's Ubuntu CI passed for Python 3.11 and 3.12
+on commit `760b49c`; real Docker runtime validation is still pending.
+
+### Lenovo after restart — 14 October 2026
+
+The actual Python local launcher built and started relay/Caddy containers,
+seeded the local accounts and verified `https://localhost:8443/healthz` with the
+copied public CA. Repeat startup passed with existing accounts. The actual Tk
+startup button then opened exactly one additional native sign-in client; both
+windows were verified on the desktop. The relay stays private and HTTPS publishes
+only `127.0.0.1:8443`.
+
+`scripts/smoke_soc_local.py --ca data/soc-local/caddy-root.crt` passed against the
+running containers: certificate verification, both sample account permissions,
+matching peer safety codes, encrypted chat and reverse-direction map ping.
+Real startup exposed a Windows cp1252 decoding error in Docker command output.
+The launcher now decodes UTF-8 explicitly and replaces unexpected bytes; a real
+subprocess regression test covers both cases. All 11 startup tests pass after
+the fix. The restart-related merge blocker above is resolved. macOS/Linux host
+startup and public two-device deployment remain unverified.
+
 ## Guided SOC interface and mixed groups
 
 All 19 SOC checks pass, including a room whose participants have disjoint group
