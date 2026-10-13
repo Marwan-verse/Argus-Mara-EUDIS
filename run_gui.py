@@ -4,7 +4,8 @@ Usage: python run_gui.py
        python run_gui.py --check   # validate local inputs without opening a window
 
 CustomTkinter provides the native dashboard shell. This companion interface reads the same two
-JSON contracts as the browser demo and never starts a server. Global Natural Earth
+JSON contracts as the browser demo. The startup screen offers an isolated local
+Docker SOC server or a single offline window. Global Natural Earth
 geometry is the default; optional NASA imagery loads only the visible map tiles.
 Optional live Met Éireann weather (a point summary plus rain/cloud shading and wind arrows
 sampled on a grid) is off by default and is display context only.
@@ -2769,10 +2770,15 @@ class ArgusApp:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="validate the local demo files without opening a window")
-    parser.add_argument('--soc', default=os.environ.get('ARGUS_SOC_URL', ''), help='SOC HTTPS origin; require sign-in before opening the app')
+    parser.add_argument('--soc', default=os.environ.get('ARGUS_SOC_URL', ''), help='prefill the SOC HTTPS origin on the sign-in screen')
     parser.add_argument('--soc-login', action='store_true', help='open the SOC sign-in screen even if no address is configured')
     parser.add_argument('--soc-dev-http', action='store_true', help='allow HTTP only to localhost for development tests')
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--offline', action='store_true', help='open one offline window without login or Docker')
+    modes.add_argument('--soc-client', action='store_true', help='sign-in only; do not offer local server startup')
     args = parser.parse_args()
+    if args.offline and (args.soc_login or args.soc_client):
+        parser.error('--offline cannot be combined with SOC sign-in flags')
     try:
         scenario, alerts, coastline = load_demo()
     except (OSError, ValueError, KeyError, TypeError) as error:
@@ -2789,7 +2795,7 @@ def main() -> int:
     ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("blue")
     root = ctk.CTk()
-    if args.soc or args.soc_login:
+    if not args.offline:
         from desktop_soc import login_screen
         def logged_in(client):
             if 'map.view' not in client.user['permissions']:
@@ -2798,7 +2804,10 @@ def main() -> int:
                 root.destroy()
                 return
             ArgusApp(root, scenario, alerts, coastline, soc_client=client)
-        login_screen(root, args.soc, logged_in, allow_loopback_http=args.soc_dev_http)
+        login_screen(root, args.soc, logged_in, allow_loopback_http=args.soc_dev_http,
+                     on_offline=None if args.soc_login or args.soc_client else
+                     lambda: ArgusApp(root, scenario, alerts, coastline),
+                     local_launcher=not args.soc_client)
     else:
         ArgusApp(root, scenario, alerts, coastline)
     root.mainloop()

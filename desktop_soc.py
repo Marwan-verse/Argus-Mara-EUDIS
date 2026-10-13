@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 import queue
 import os
 import time
+import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -12,10 +13,11 @@ from argus.collab_client import ClientError, SOCClient
 from argus.collab_crypto import KINDS
 
 
-def login_screen(root, initial_url, on_login, *, allow_loopback_http=False):
+def login_screen(root, initial_url, on_login, *, allow_loopback_http=False,
+                 on_offline=None, local_launcher=False):
     """No protected app is constructed until HTTPS authentication succeeds."""
     root.title("Argus Mara · SOC sign in")
-    root.geometry("580x430")
+    root.geometry("620x620" if local_launcher else "580x430")
     frame = ctk.CTkFrame(root)
     frame.pack(fill="both", expand=True, padx=24, pady=24)
     ctk.CTkLabel(frame, text="SOC sign in", font=ctk.CTkFont(size=22, weight="bold")).pack(pady=(12, 8))
@@ -32,6 +34,15 @@ def login_screen(root, initial_url, on_login, *, allow_loopback_http=False):
     events = queue.Queue()
     busy = False
     closed = False
+    cancelled = threading.Event()
+    ca_file = os.environ.get('ARGUS_SOC_CA_FILE') or None
+    controls = []
+
+    def set_busy(value):
+        nonlocal busy
+        busy = value
+        for control in controls:
+            control.configure(state="disabled" if value else "normal")
 
     def submit():
         nonlocal busy
@@ -39,52 +50,111 @@ def login_screen(root, initial_url, on_login, *, allow_loopback_http=False):
             return
         try:
             client = SOCClient(fields["url"].get().strip(), allow_loopback_http=allow_loopback_http,
-                               ca_file=os.environ.get('ARGUS_SOC_CA_FILE') or None)
-        except ValueError as error:
+                               ca_file=ca_file)
+        except (ValueError, OSError) as error:
             status.configure(text=str(error))
             return
         username, secret = fields["username"].get().strip(), fields["password"].get()
         fields["password"].delete(0, "end")
-        busy = True
-        button.configure(state="disabled")
+        set_busy(True)
         status.configure(text="Signing in securely…")
 
         def job():
             try:
                 client.login(username, secret)
-                events.put((client, None))
+                events.put(("login", client, None))
             except Exception as error:
-                events.put((None, str(error)))
+                events.put(("login", None, str(error)))
         executor.submit(job)
 
+    def launch_local():
+        if busy:
+            return
+        set_busy(True)
+        status.configure(text="Preparing local two-window demo…")
+
+        def job():
+            from argus.soc_launcher import start_local
+            try:
+                result = start_local(lambda text: events.put(("progress", text, None)), cancelled)
+                events.put(("local", result, None))
+            except Exception as error:
+                events.put(("local", None, str(error)))
+        executor.submit(job)
+
+    def offline():
+        nonlocal closed
+        if busy:
+            return
+        closed = True
+        cancelled.set()
+        executor.shutdown(wait=False, cancel_futures=True)
+        frame.destroy()
+        on_offline()
+
     def check():
-        nonlocal busy, closed
+        nonlocal busy, closed, ca_file
         if closed:
             return
         try:
-            client, error = events.get_nowait()
+            kind, result, error = events.get_nowait()
         except queue.Empty:
             root.after(100, check)
             return
-        if error:
-            busy = False
-            button.configure(state="normal")
+        if kind == "progress":
+            status.configure(text=result)
+            root.after(100, check)
+        elif error:
+            set_busy(False)
             status.configure(text=error)
+            root.after(100, check)
+        elif kind == "local":
+            from argus.soc_launcher import open_second_client
+            url, ca_file = result
+            fields["url"].configure(state="normal")
+            fields["url"].delete(0, "end")
+            fields["url"].insert(0, url)
+            try:
+                open_second_client(url, ca_file)
+                status.configure(text="Local server ready. Sign in separately in each window as Marwan / Igor. "
+                                      "Passwords: data/soc-local/demo.env")
+                # Exactly two windows per launch screen, including this one.
+                local_button.pack_forget()
+            except OSError:
+                status.configure(text="Server ready, but the second window could not open. Retry or open another client manually.")
+            set_busy(False)
             root.after(100, check)
         else:
             closed = True
             executor.shutdown(wait=False)
             frame.destroy()
-            on_login(client)
+            on_login(result)
 
     def close():
         nonlocal closed
         closed = True
+        cancelled.set()
         executor.shutdown(wait=False, cancel_futures=True)
+        # Cancel Tcl timers before a root window deletes their commands.
+        # Attached sign-in dialogs share the app interpreter and its timers.
+        if isinstance(root, ctk.CTk):
+            for callback in root.tk.call('after', 'info'):
+                root.tk.call('after', 'cancel', callback)
         root.destroy()
 
     button = ctk.CTkButton(frame, text="Sign in", command=submit)
     button.pack(pady=8)
+    controls.extend([button, *fields.values()])
+    if local_launcher:
+        local_button = ctk.CTkButton(frame, text="Start local server + two sign-in windows", command=launch_local)
+        local_button.pack(fill="x", padx=16, pady=(16, 4))
+        controls.append(local_button)
+        ctk.CTkLabel(frame, text="Two windows on this PC. For separate devices, sign in to your shared HTTPS server.",
+                     wraplength=480).pack(padx=16, pady=4)
+    if on_offline:
+        offline_button = ctk.CTkButton(frame, text="Continue offline · one window · no Docker", command=offline)
+        offline_button.pack(fill="x", padx=16, pady=8)
+        controls.append(offline_button)
     fields["password"].bind("<Return>", lambda _: submit())
     root.protocol("WM_DELETE_WINDOW", close)
     root.after(100, check)

@@ -1,5 +1,41 @@
 # Validation on 13 October 2026
 
+## Application startup modes
+
+On the checkout synchronized with `origin/main` at `340ec54`, 10 new startup
+checks pass: one-time credential generation, existing-stack startup, Docker
+Desktop startup, early cancellation, failure recovery, verified HTTPS readiness,
+isolated child configuration, offline entry and native sign-in controls. Docker
+commands are mocked in these checks; Tk controls run on a native Windows display.
+The local two-window flow opens one additional sign-in window and never bypasses
+authentication. Repeated clicks cannot launch extra clients.
+
+All 19 existing SOC checks and 16 native replay checks also pass. SOC integration
+uses actual local HTTPS and encrypted client communication. The contract checker,
+`run_gui.py --check` and `git diff --check` pass. Both demo JSON files remain unchanged.
+The required Python packages were installed into the ignored project environment.
+
+At the initial validation, Docker CLI/Desktop was absent from PATH and the standard
+installation paths, so this change had **not** been tested against real
+Docker containers here. The earlier Docker results below describe prior validation,
+not the new automatic launcher. Windows/macOS Desktop fallback startup and a
+public two-device deployment still require host smoke tests.
+
+### Lenovo recheck — 14 October 2026
+
+The 10 startup tests, 19 SOC tests and 16 replay tests pass again. Docker Desktop
+4.95.0, Docker CLI 29.8.2, Compose 5.6.0 and WSL 2.7.13 are now installed on the
+Lenovo. Local Compose configuration validation passes. Windows reports a required
+restart after enabling Virtual Machine Platform and WSL; the engine is not yet
+running. Real-container startup and encrypted chat/ping smoke tests remain pending
+that restart, so the PR must remain draft until those checks are complete.
+
+A broader Windows run exposed an existing AIS window test-order failure. Running
+the SOC tests followed by AIS tests reproduces the same assertion on clean
+`origin/main` (`340ec54`); running AIS tests alone passes. The initial full-suite
+run also exposed missing timezone data and archive/other GUI failures. Timezone
+data was installed into the local environment before the final baseline comparison.
+
 ## Guided SOC interface and mixed groups
 
 All 19 SOC checks pass, including a room whose participants have disjoint group
