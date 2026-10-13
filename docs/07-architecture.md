@@ -1,5 +1,17 @@
 # 7. Codebase architecture and team contracts
 
+## Private SOC companion (D52, 13 October)
+
+An explicitly requested private companion adds account authorization and
+two-analyst E2EE rooms, independently of the offline demo and public live AIS.
+`argus/collab_store.py` owns SQLite accounts/RBAC; `argus/collab_server.py` relays
+ciphertext; `argus/collab_crypto.py` and `collab_client.py` run on endpoints.
+`desktop_soc.py` integrates native login, session creation/joining, communication
+and administration. `soc/` provides an isolated Docker deployment behind HTTPS.
+See [SOC security boundaries and handoff](../soc/README.md). Existing map pings
+are shared annotations; no user-created threat alert or remote response is added.
+Both demo JSON contracts remain unchanged. The browser frontend is unchanged.
+
 *Proposed implementation structure, 7 October 2026. This follows decisions D13–D15 and D22. It does not change the seven-beat demo.*
 
 ## Browser frontend (D37, 9 October 2026)

@@ -19,7 +19,7 @@ if not exist ".venv\Scripts\python.exe" (
   pause
   exit /b 1
 )
-".venv\Scripts\python.exe" -c "import customtkinter, PIL" >nul 2>nul
+".venv\Scripts\python.exe" -c "import customtkinter, PIL, cryptography" >nul 2>nul
 if errorlevel 1 (
   echo Installing the desktop UI dependency...
   ".venv\Scripts\python.exe" -m pip install -r requirements.txt

@@ -188,8 +188,10 @@ def response_status(option: dict, earliest_s: float) -> str:
 
 
 class ArgusApp:
-    def __init__(self, root: tk.Tk, scenario: dict, alerts: dict, coastline: dict):
+    def __init__(self, root: tk.Tk, scenario: dict, alerts: dict, coastline: dict, soc_client=None):
         self.root = root
+        self.soc_client = soc_client
+        self.soc_online = bool(soc_client)
         self.scenario = scenario
         self.coastline = coastline
         self.coastline_rings = []
@@ -296,6 +298,19 @@ class ArgusApp:
         self.root.after(150, self._poll_tiles)
         self.root.after(500, self._poll_weather)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
+        from desktop_soc import DesktopSOC
+        self.soc = DesktopSOC(self)
+
+    def allowed(self, permission: str) -> bool:
+        """Offline exercises use public demo files; SOC tools follow server grants."""
+        client = getattr(self, 'soc_client', None)
+        return client is None or (self.soc_online and client.user is not None and permission in client.user['permissions'])
+
+    def require_tool(self, permission: str) -> bool:
+        if self.allowed(permission):
+            return True
+        messagebox.showinfo('Tool unavailable', 'Your group does not have this tool, or the SOC connection needs to be restored.', parent=self.root)
+        return False
 
     def _configure_window(self) -> None:
         self.root.title("Argus Mara — maritime intelligence")
@@ -725,6 +740,10 @@ class ArgusApp:
             self._bottom_visible = False
 
     def open_window(self, key: str, destination: str = "right") -> None:
+        permission = {'evidence': 'evidence.share', 'sar_plan': 'evidence.share',
+                      'decision': 'response.review', 'responses': 'response.review'}.get(key, 'map.view')
+        if not self.require_tool(permission):
+            return
         if key not in self._panel_titles:
             return
         target = self._notebook_for(destination)
@@ -821,6 +840,8 @@ class ArgusApp:
                     approve.configure(state="normal" if can_approve else "disabled")
 
                 def accept() -> None:
+                    if not self.require_tool('response.review'):
+                        return
                     current = self._remaining()
                     selected = next((item for item in available if item["asset"] == self._decision_choice.get()), None)
                     if not self._decision_acknowledged.get() or not current or not selected or \
@@ -1708,6 +1729,8 @@ class ArgusApp:
         self._change_map_center((fix["lat"], fix["lon"]))
 
     def _set_map_tool(self, tool: str) -> None:
+        if not self.require_tool('ping' if tool == 'ping' else 'map.view'):
+            return
         if tool == 'ping' and self.map_tool == 'ping':
             self._clear_map_ping()
             return
@@ -1746,12 +1769,14 @@ class ArgusApp:
         self.map_status_label.configure(text='Ping cleared')
         return 'break'
 
-    def _place_map_ping(self, point: tuple[float, float]) -> None:
+    def _place_map_ping(self, point: tuple[float, float], share: bool = True) -> None:
         self._clear_map_ping()
         self._map_ping = point
         self._ping_started = time.monotonic()
         self.map_status_label.configure(text=f'Ping · {coordinates(*point)} · visible for 15 seconds')
         self._animate_map_ping()
+        if share and hasattr(self, 'soc'):
+            self.soc.share_ping(point)
 
     def _animate_map_ping(self) -> None:
         self._ping_after = None
@@ -1800,6 +1825,8 @@ class ArgusApp:
             self.open_window("notes", self._panel_locations.get("notes", "right"))
 
     def close(self) -> None:
+        if hasattr(self, 'soc'):
+            self.soc.close()
         if hasattr(self, 'alert_board'):
             self.alert_board.close()
         if hasattr(self, 'pinch'):
@@ -2691,11 +2718,15 @@ class ArgusApp:
         return "\n".join(lines)
 
     def review_evidence(self) -> None:
+        if not self.require_tool('evidence.share'):
+            return
         self.playing = False
         self.render()
         self.open_window("evidence", self._panel_locations.get("evidence", "right"))
 
     def review_response(self) -> None:
+        if not self.require_tool('response.review'):
+            return
         remaining = self._remaining()
         if not remaining or self.approved:
             return
@@ -2707,6 +2738,8 @@ class ArgusApp:
         self.open_window("decision", self._panel_locations.get("decision", "right"))
 
     def save_record(self, parent: tk.Misc | None = None) -> None:
+        if not self.require_tool('evidence.share'):
+            return
         if not self._remaining():
             return
         parent = parent or self.root
@@ -2734,6 +2767,9 @@ class ArgusApp:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="validate the local demo files without opening a window")
+    parser.add_argument('--soc', default=os.environ.get('ARGUS_SOC_URL', ''), help='SOC HTTPS origin; require sign-in before opening the app')
+    parser.add_argument('--soc-login', action='store_true', help='open the SOC sign-in screen even if no address is configured')
+    parser.add_argument('--soc-dev-http', action='store_true', help='allow HTTP only to localhost for development tests')
     args = parser.parse_args()
     try:
         scenario, alerts, coastline = load_demo()
@@ -2751,7 +2787,18 @@ def main() -> int:
     ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("blue")
     root = ctk.CTk()
-    ArgusApp(root, scenario, alerts, coastline)
+    if args.soc or args.soc_login:
+        from desktop_soc import login_screen
+        def logged_in(client):
+            if 'map.view' not in client.user['permissions']:
+                messagebox.showerror('Access denied', 'Ask an administrator to grant map.view access.', parent=root)
+                client.logout()
+                root.destroy()
+                return
+            ArgusApp(root, scenario, alerts, coastline, soc_client=client)
+        login_screen(root, args.soc, logged_in, allow_loopback_http=args.soc_dev_http)
+    else:
+        ArgusApp(root, scenario, alerts, coastline)
     root.mainloop()
     return 0
 

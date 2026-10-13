@@ -231,6 +231,8 @@ class ConsoleTools:
             self.set_alert_status(alert['id'], 'Reviewed')
 
     def set_alert_status(self, identifier, value):
+        if hasattr(self.app, 'require_tool') and not self.app.require_tool('alert.review'):
+            return
         current = self.review_values[identifier]
         if value not in ('New', 'Reviewed', 'Acknowledged'):
             return
