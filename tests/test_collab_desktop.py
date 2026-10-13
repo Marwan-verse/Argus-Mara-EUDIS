@@ -1,6 +1,7 @@
 """Native SOC integration: group tools, admin forms and existing ping reuse."""
 import os
 import time
+import tkinter as tk
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -37,7 +38,10 @@ class FakeClient:
 
 class DesktopSOCTests(unittest.TestCase):
     def setUp(self):
-        self.root = ctk.CTk()
+        try:
+            self.root = ctk.CTk()
+        except tk.TclError as error:
+            self.skipTest(f'Native display unavailable: {error}')
         self.root.withdraw()
         self.errors = []
         self.root.report_callback_exception = lambda *error: self.errors.append(error)
