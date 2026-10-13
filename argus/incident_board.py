@@ -14,13 +14,19 @@ instead of one row per alert. No tkinter here, so it is tested without a display
 * ``Replay`` runs the board on the exercise replay clock: forwards in steps,
   and backwards by rebuilding from the start and re-applying the analyst's
   earlier decisions (``argus.incidents`` itself never goes back in time).
+* At every replay step ``Replay`` also asks ``argus.responders`` who can reach
+  each contact at Medium or above. If no physical asset arrives before the
+  earliest line ETA, ``no_response_in_time`` goes into the contact's
+  observations and it is scored once more (observations, then responders, then
+  one assessment; responders never depend on the level, so this never loops).
 """
 
 from __future__ import annotations
 
-from argus import incidents
-from argus.brain_board import rescore_exercise, update
+from argus import incidents, responders
+from argus.brain_board import reassess, rescore_exercise, update
 from argus.levels import LEVEL_NAMES, RANK
+from argus.prediction import position_at
 
 # Below OPEN_LEVEL a contact is watched, not an incident.
 OPEN_RANK = RANK[incidents.OPEN_LEVEL]
@@ -36,6 +42,25 @@ def vessel_key(item: dict) -> str:
     if item.get("exercise"):
         return str(item["alert"]["mmsi"])
     return str(item["id"])
+
+
+def deadline_s(item: dict, now: float):
+    """Replay time of the item's earliest possible line contact: now if in the corridor, None if no line ETA.
+
+    The exercise contact's ETA is measured at its detector finding's time;
+    simulated ETAs count down with the board, so they are measured from now.
+    """
+    obs = item.get("observations") or {}
+    if obs.get("in_corridor"):
+        return now
+    if obs.get("eta_min") is None:
+        return None
+    if item.get("exercise"):
+        times = [finding["t"] + finding["eta_min"] * 60 for finding in item.get("findings", [])
+                 if finding.get("cable_id") and finding.get("t") is not None and finding.get("eta_min") is not None]
+        if times:
+            return min(times)
+    return now + obs["eta_min"] * 60
 
 
 def feed(items: list[dict]) -> list[dict]:
@@ -123,6 +148,8 @@ class Replay:
     def __init__(self, items: list[dict], scenario: dict, start_s: float, step_s: int = STEP_S):
         self.items, self.scenario, self.start_s, self.step_s = items, scenario, int(start_s), step_s
         self.decisions: list[dict] = []
+        self.fleet = responders.load_fleet()
+        self.storm = False
         self._reset()
 
     def _reset(self) -> None:
@@ -130,6 +157,49 @@ class Replay:
         self.now: int | None = None
         self.log: dict[str, list[tuple[int, str]]] = {}
         self.recipients: dict[str, str] = {}
+        self.responses: dict[str, dict] = {}
+        self.assignments: dict[str, dict] = {}  # asset ID -> {"incident", "item", "t"}
+
+    @property
+    def wind_kn(self) -> float:
+        wind = self.fleet["wind"]
+        return wind["storm_kn"] if self.storm else wind["normal_kn"]
+
+    def position(self, item: dict):
+        """Position function of the item: its scenario track (dark gaps predicted), else dead reckoning."""
+        if item.get("exercise"):
+            vessel = next(v for v in self.scenario["vessels"] if v["mmsi"] == item["alert"]["mmsi"])
+            track, first = vessel["track"], vessel["track"][0]
+
+            def at(t):
+                fix = position_at(track, t)
+                return (fix["lat"], fix["lon"]) if fix else (first["lat"], first["lon"])
+            return at
+        return responders.dead_reckoning(item["lat"], item["lon"], item.get("cog_deg"), item.get("sog_kn"),
+                                         self.start_s)
+
+    def respond(self, item: dict, t: int) -> dict:
+        """Responders for one item at replay time t, given the current assignments and wind."""
+        incident = self.tracker.open_incident(item)
+        busy = {asset: given["incident"] for asset, given in self.assignments.items()}
+        dispatched = {asset: given["t"] for asset, given in self.assignments.items()}
+        return responders.assess_fleet(self.fleet, self.position(item), t, deadline_s(item, t), self.wind_kn,
+                                       busy, incident["id"] if incident else None, dispatched)
+
+    def _respond(self, t: int) -> None:
+        """Responders for every present contact at Medium or above; flag and re-score those nobody reaches in time."""
+        self.responses = {}
+        for item in self.items:
+            if t < self.appear_s(item):
+                continue
+            if item["observations"].pop("no_response_in_time", None):
+                reassess(item)
+            if RANK[item["assessment"]["level"]] < OPEN_RANK:
+                continue
+            result = self.responses[item["id"]] = self.respond(item, t)
+            if result["no_response_in_time"]:
+                item["observations"]["no_response_in_time"] = True
+                reassess(item)
 
     def appear_s(self, item: dict) -> float:
         if item.get("exercise"):
@@ -148,6 +218,7 @@ class Replay:
             if item.get("exercise"):
                 rescore_exercise(item, self.scenario, t)
         self.now = t
+        self._respond(t)
         events = self.tracker.step([item for item in self.items if t >= self.appear_s(item)], t)
         by_id = {item["id"]: item for item in self.items}
         for identifier, found in events.items():

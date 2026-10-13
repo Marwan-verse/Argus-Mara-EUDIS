@@ -120,7 +120,8 @@ class ReplayTests(unittest.TestCase):
     def test_forward_play_raises_then_quiets_the_passing_ship(self):
         self.replay.seek(self.start)
         ship = self.by_id["SIM-48"]
-        self.assertEqual(self.replay.tracker.incident(ship)["level"], "medium")
+        # Medium by its indicators, raised to High: no responder reaches it before its line ETA.
+        self.assertEqual(self.replay.tracker.incident(ship)["level"], "high")
         self.replay.seek(self.start + 35 * 60)  # clear of the line
         incident = self.replay.tracker.incident(ship)
         self.assertEqual((incident["level"], incident["suggest_close"]), ("none", False))

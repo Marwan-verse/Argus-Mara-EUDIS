@@ -54,8 +54,9 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertEqual(len(order), 22)  # Medium and above: one incident card each; Low is folded away
         ranks = [RANK[board.by_id[key]['assessment']['level']] for key in order]
         self.assertEqual(ranks, sorted(ranks, reverse=True))
+        # SIM-06, SIM-44 and SIM-48 are raised one level: no responder reaches them before their line ETA.
         self.assertEqual([board.tiles[f'{level}-count'].cget('text') for level in ('critical', 'high', 'medium', 'low')],
-                         ['4', '7', '11', '27'])
+                         ['6', '6', '10', '27'])
         self.assertEqual(board.cards['SIM-01']['stripe'].cget('bg'), STYLE['critical'][0])
         self.assertIn('In corridor', board.cards['SIM-01']['eta'].cget('text'))
         self.assertIn('22 new', app.alert_counts_label.cget('text'))
@@ -65,8 +66,8 @@ class DesktopAlertBoardTests(unittest.TestCase):
         badge = next(item for item in app.map.find_withtag('sim-badge') if app.map.type(item) == 'text')
         self.assertIn('SIMULATED', app.map.itemcget(badge, 'text'))
         board.set_filter('critical')
-        self.assertEqual(len(self.packed_cards()), 4)
-        self.assertEqual(len(self.map_tags('sim-alert:')), 4)
+        self.assertEqual(len(self.packed_cards()), 6)
+        self.assertEqual(len(self.map_tags('sim-alert:')), 6)
         board.set_filter('critical')
         self.assertIsNone(board.level_filter)
         board.set_filter('low')
@@ -218,18 +219,19 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertLess(x, width - board.dialog.covered_width())
 
     def test_countdown_raises_an_incident_and_the_board_can_hide(self):
+        # Four minutes on, CORRIB MIST's ETA is too short for any responder, so it is raised one level.
         app, board = self.app, self.board
-        board.decide('SIM-06', 'Reviewed', 'Reviewed')
+        board.decide('SIM-07', 'Reviewed', 'Reviewed')
         app.position_s += 4 * 60
         board.follow()
-        self.assertEqual(board.by_id['SIM-06']['assessment']['level'], 'critical')
-        self.assertEqual(board.tiles['critical-count'].cget('text'), '5')
-        self.assertIn('GREY HERON review again', app.map_status_label.cget('text'))
-        self.assertEqual(self.packed_cards()[0], 'SIM-06')  # review again sorts first in its level
-        self.assertIn('⚠ Review again', self.flags('SIM-06'))
-        self.assertEqual([text for _stamp, text in board.history['SIM-06']][-2:],
+        self.assertEqual(board.by_id['SIM-07']['assessment']['level'], 'critical')
+        self.assertEqual(board.tiles['critical-count'].cget('text'), '8')
+        self.assertIn('CORRIB MIST review again', app.map_status_label.cget('text'))
+        self.assertEqual(self.packed_cards()[0], 'SIM-07')  # review again sorts first in its level
+        self.assertIn('⚠ Review again', self.flags('SIM-07'))
+        self.assertEqual([text for _stamp, text in board.history['SIM-07']][-2:],
                          ['Level raised to Critical', 'Level rose after review: review again'])
-        self.assertRegex(board.cards['SIM-06']['eta'].cget('text'), r'^ETA \d\d:\d\d$')
+        self.assertRegex(board.cards['SIM-07']['eta'].cget('text'), r'^ETA \d\d:\d\d$')
         width = app.map.winfo_width()
         app.tools.toggle_alerts()
         self.root.update()

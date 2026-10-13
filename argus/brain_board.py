@@ -169,10 +169,18 @@ def _with_notes(assessment: dict, notes: list[str]) -> dict:
 def _finding_summary(finding: dict) -> dict:
     """What the review window shows of a finding: detector, data label, line and reasons."""
     obs = finding.get("obs") or {}
-    return {"detector": finding["detector"], "label": finding.get("label"),
+    return {"detector": finding["detector"], "label": finding.get("label"), "t": finding.get("t"),
             "cable_id": (finding.get("related") or {}).get("cable_id"), "reasons": list(finding["reasons"]),
             "eta_min": obs.get("eta_min"), "distance_nm": obs.get("distance_nm"),
             "in_corridor": obs.get("in_corridor")}
+
+
+def reassess(item: dict) -> None:
+    """Score the item's current observations again, keeping the small-vessel rule and detector notes."""
+    assessment = assess(item["observations"])
+    if item.get("relevance"):
+        assessment = apply_relevance(assessment, item["relevance"])
+    item["assessment"] = _with_notes(assessment, item.get("detector_notes", []))
 
 
 def _rescore(item: dict, result: dict) -> None:
