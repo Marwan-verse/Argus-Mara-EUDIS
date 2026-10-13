@@ -17,6 +17,12 @@ rule-generated alert and fictional Space evidence page run together. The two pub
 historical radar contacts remain a separate review example; measured evaluation numbers
 and external data replacement are pending. See [DECISIONS.md](DECISIONS.md) D29–D30.
 
+**Irish vessel images for the demonstration:** [Nazar's offline image pack](demo/imagery/README.md)
+contains six internet-cable risk demo cards, ten labelled vessel close-ups from
+Ireland and the North Sea, two Irish overviews and contact sheets. The imagery is
+real; names/codes are fictional and cable/behavior overlays are simulated.
+Sources, dates and reuse terms are included with the images.
+
 **Run the native desktop application:** double-click `RUN-GUI-WINDOWS.bat` on Windows.
 It creates an ignored `.venv` and installs the UI packages on first run. In a Git clone,
 `UPDATE-AND-RUN-WINDOWS.bat` (Windows) or `UPDATE-AND-RUN-MAC.command` (macOS) first pulls
