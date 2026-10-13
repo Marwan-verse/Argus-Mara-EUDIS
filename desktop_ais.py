@@ -9,6 +9,7 @@ from tkinter import ttk
 import customtkinter as ctk
 
 from argus.live_client import LivePoller, LiveState, server_url
+from desktop_prediction import AMBER, draw_areas, draw_marker, live_prediction, outlined_text
 from desktop_tracks import ReceivedTracks
 
 DEFAULT_SERVER = "https://shared-live-ais-production.up.railway.app"
@@ -467,13 +468,25 @@ class DesktopAIS:
             x, y = self.app._project(first['lat'], first['lon'])
             self.app.map.create_oval(x-3, y-3, x+3, y+3, outline='#ffd15a', width=1.5, tags=tags)
 
+    def selected_prediction(self, now):
+        """Labelled prediction for the selected contact once its last received fix is stale."""
+        vessel = self.state.vessels.get(self.selected)
+        layer = getattr(self.app, 'map_layers', {}).get('Dark prediction')
+        if vessel is None or (layer is not None and not layer.get()):
+            return None
+        return live_prediction(vessel, now, self.state.feed.get('stale_seconds', 900))
+
     def draw(self):
         if not self.visible.get():
             return
         now = datetime.now(timezone.utc).timestamp()
         width, height = self.app._map_size
         contacts = self.filtered()
-        self.draw_path({v['mmsi'] for v in contacts})
+        visible = {v['mmsi'] for v in contacts}
+        prediction = self.selected_prediction(now) if self.selected in visible else None
+        if prediction:
+            draw_areas(self.app, prediction, tags=('received_ais',))
+        self.draw_path(visible)
         for vessel in contacts:
             if vessel['received_s'] is None:
                 continue
@@ -506,6 +519,13 @@ class DesktopAIS:
                         text=name, font=('Segoe UI', 15, 'bold'), tags=name_tags)
                 self.app.map.create_text(label_x, y, anchor=anchor, fill='#26333c',
                     text=name, font=('Segoe UI', 15, 'bold'), tags=name_tags)
+        if prediction:
+            # The contact itself already marks the last received fix and carries its name.
+            x, y = draw_marker(self.app, prediction, last_point=False, tags=('received_ais',))
+            outlined_text(self.app.map, x, y - 26, f"best guess now · ±{prediction['reachable']['radius_nm']:.1f} nm",
+                          fill=AMBER, size=10, tags=('received_ais',))
+            if hasattr(self.app, '_prediction_banner'):
+                self.app._prediction_banner = prediction
         if not self.positions():
             self.app.map.create_text(width / 2, height / 2, fill="#d9bb47", font=("Consolas", 15),
                 text="CONNECTING TO IRISH AIS" if self.poller else "AIS DISCONNECTED",

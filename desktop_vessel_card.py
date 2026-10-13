@@ -241,7 +241,10 @@ class VesselCard:
         self.labels['draught'].configure(text='Not reported')
         now = datetime.now(timezone.utc).timestamp()
         stale = vessel['received_s'] is None or now - vessel['received_s'] > self.tracker.state.feed.get('stale_seconds', 900)
-        self.received.configure(text=f"Received: {age_description(vessel['received_s'], now)} · {'Stale' if stale else 'Fresh'}\nUTC: {vessel['received_utc'] or 'Unavailable'}")
+        prediction = self.tracker.selected_prediction(now)
+        predicted = (f"\nPosition now predicted, not observed: ±{prediction['reachable']['radius_nm']:.1f} nm"
+                     if prediction else '')
+        self.received.configure(text=f"Received: {age_description(vessel['received_s'], now)} · {'Stale' if stale else 'Fresh'}\nUTC: {vessel['received_utc'] or 'Unavailable'}{predicted}")
         self.source.configure(text=f"AIS source: shared feed · {vessel['label']}\nDestination is declared text; departure port is unknown.")
         self.path_note.configure(text=f"{len(points)} recorded fixes · reception gaps stay open" if points else 'Past track appears as new positions are received.')
         self.fleet_button.configure(text='Remove from fleet' if mmsi in self.tracker.fleet else 'Add to fleet')
