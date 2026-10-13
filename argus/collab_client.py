@@ -91,12 +91,17 @@ class SOCClient:
         return result
 
     def _establish(self, room):
-        if len(room["members"]) == 2:
+        if room.get('locked') and len(room['members']) >= 2:
             self.cipher.establish(room["room_id"], self.user["id"], room["members"])
+
+    def lock(self):
+        self.room = self.request('POST', f"/v1/rooms/{self.room['room_id']}/lock", {})
+        self._establish(self.room)
+        return self.room
 
     def confirm(self):
         if not self.cipher or not self.cipher.room_id:
-            raise ClientError("Wait for the other analyst")
+            raise ClientError('Wait for the host to start the encrypted session')
         self.request("POST", f"/v1/rooms/{self.room['room_id']}/confirm", {})
         self.cipher.confirm()
 
@@ -114,7 +119,8 @@ class SOCClient:
             for item in room["messages"]:
                 packet = item["packet"]
                 if packet["sender"] != self.user["id"]:
-                    result.append({"kind": packet["kind"], "payload": self.cipher.decrypt(packet)})
+                    sender = next(m['username'] for m in room['members'] if m['user_id'] == packet['sender'])
+                    result.append({"kind": packet["kind"], "payload": self.cipher.decrypt(packet), 'sender': sender})
                 self.cursor = item["sequence"]
             return result
         except Exception:
@@ -122,8 +128,8 @@ class SOCClient:
             raise ClientError('Session failed encryption or identity checks; create a new session', 409) from None
 
     def send(self, kind, payload):
-        if not self.room or len(self.room["confirmed"]) != 2:
-            raise ClientError("Both analysts must confirm their safety code")
+        if not self.room or not self.room.get('locked') or len(self.room['confirmed']) != len(self.room['members']):
+            raise ClientError('Every participant must confirm the safety codes')
         packet = self.cipher.encrypt(kind, payload)
         return self.request("POST", f"/v1/rooms/{self.room['room_id']}/messages", packet)
 

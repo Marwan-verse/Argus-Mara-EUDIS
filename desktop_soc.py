@@ -1,6 +1,7 @@
-"""Native two-analyst collaboration and administrator controls."""
+"""Native group collaboration and administrator controls."""
 from concurrent.futures import ThreadPoolExecutor
 import queue
+import os
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -36,7 +37,8 @@ def login_screen(root, initial_url, on_login, *, allow_loopback_http=False):
         if busy:
             return
         try:
-            client = SOCClient(fields["url"].get().strip(), allow_loopback_http=allow_loopback_http)
+            client = SOCClient(fields["url"].get().strip(), allow_loopback_http=allow_loopback_http,
+                               ca_file=os.environ.get('ARGUS_SOC_CA_FILE') or None)
         except ValueError as error:
             status.configure(text=str(error))
             return
@@ -149,12 +151,13 @@ class DesktopSOC:
     def receive(self, messages):
         for message in messages:
             payload, kind = message["payload"], message["kind"]
+            sender = message.get('sender', 'Peer')
             if kind == "ping":
                 self.app._place_map_ping((payload["lat"], payload["lon"]), share=False)
                 self.app.map_status_label.configure(text="Peer ping · analyst annotation · not a sensor alert")
-                text = f"Peer ping: {payload['lat']:.5f}, {payload['lon']:.5f}"
+                text = f"{sender} ping: {payload['lat']:.5f}, {payload['lon']:.5f}"
             else:
-                text = f"Peer [{kind}]: {payload['text']}"
+                text = f"{sender} [{kind}]: {payload['text']}"
             self.history.append(text)
         self.history = self.history[-100:]
         self.render()
@@ -200,10 +203,15 @@ class DesktopSOC:
         ttk.Button(row, text="Join", command=lambda: self.join(self.join_code.get())).pack(side="left")
         self.invite_label = ttk.Label(frame, text="", font=("Consolas", 13), wraplength=660)
         self.invite_label.pack(anchor="w", pady=5)
+        self.start_button = ttk.Button(frame, text='Start encrypted session · lock participants',
+                                       command=lambda: self.task(self.client.lock, self.reset))
+        self.start_button.pack(anchor='w', pady=4)
         self.safety_label = ttk.Label(frame, text="", font=("Consolas", 12), wraplength=660)
         self.safety_label.pack(anchor="w", pady=5)
+        self.safety_codes_text = tk.Text(frame, height=5, wrap='word', state='disabled', font=('Consolas', 11))
+        self.safety_codes_text.pack(fill='x', pady=4)
         ttk.Label(frame, text="Compare the entire safety code with your colleague by voice or in person before confirming.", wraplength=660).pack(anchor="w")
-        self.confirm_button = ttk.Button(frame, text="Codes match · confirm", command=lambda: self.task(self.client.confirm, lambda _: self.status("Confirmed · waiting for your colleague")))
+        self.confirm_button = ttk.Button(frame, text='All peer codes match · confirm', command=lambda: self.task(self.client.confirm, lambda _: self.status('Confirmed · waiting for all participants')))
         self.confirm_button.pack(anchor="w", pady=6)
         self.chat = tk.Text(frame, wrap="word", height=12, state="disabled")
         self.chat.pack(fill="both", expand=True, pady=8)
@@ -243,10 +251,22 @@ class DesktopSOC:
         if not self.window or not self.window.winfo_exists():
             return
         room, cipher = self.client.room, self.client.cipher
-        ready = bool(room and cipher and cipher.verified and len(room["confirmed"]) == 2)
-        self.invite_label.configure(text=f"Invite (10 min, single use): {self.client.code}" if self.client.code and room and len(room["members"]) == 1 else "")
-        peer = next((m["username"] for m in (room or {}).get("members", []) if m["user_id"] != self.client.user["id"]), "waiting")
-        self.safety_label.configure(text=f"Peer: {peer}\nSafety: {cipher.safety_code}\n{'E2EE verified on both devices' if ready else 'Verification required'}" if cipher and cipher.room_id else "Waiting for a second analyst")
+        ready = bool(room and room.get('locked') and cipher and cipher.verified and len(room['confirmed']) == len(room['members']))
+        self.invite_label.configure(text=f"Invite (10 min): {self.client.code}" if self.client.code and room and not room.get('locked') else '')
+        members = (room or {}).get('members', [])
+        participants = ', '.join(m['username'] for m in members)
+        participant_summary = participants[:170] + ('…' if len(participants) > 170 else '')
+        self.start_button.configure(state='normal' if room and not room.get('locked') and len(members) >= 2 and room.get('host_id') == self.client.user['id'] else 'disabled')
+        codes = ''
+        if cipher and cipher.room_id:
+            codes = '\n'.join(f"{m['username']}: {cipher.safety_codes[m['user_id']]}" for m in members if m['user_id'] != self.client.user['id'])
+            self.safety_label.configure(text=f"Participants ({len(members)}): {participant_summary}\n{'All participants verified · E2EE ready' if ready else 'Compare each pair code below, then confirm'}")
+        else:
+            self.safety_label.configure(text=f'Lobby: {participant_summary or "no session"}\nHost starts after everyone has joined (2–16 participants).')
+        self.safety_codes_text.configure(state='normal')
+        self.safety_codes_text.delete('1.0', 'end')
+        self.safety_codes_text.insert('1.0', codes)
+        self.safety_codes_text.configure(state='disabled')
         self.confirm_button.configure(state="normal" if cipher and cipher.room_id and not cipher.verified else "disabled")
         self.send_button.configure(state="normal" if ready else "disabled")
         self.chat.configure(state="normal")
@@ -273,7 +293,7 @@ class DesktopSOC:
         self.send_message(self.kind.get(), {"text": self.message.get("1.0", "end").strip()})
 
     def share_ping(self, point):
-        if self.client and self.client.cipher and self.client.cipher.verified and self.client.room and len(self.client.room["confirmed"]) == 2:
+        if self.client and self.client.cipher and self.client.cipher.verified and self.client.room and self.client.room.get('locked') and len(self.client.room['confirmed']) == len(self.client.room['members']):
             self.send_message("ping", {"lat": point[0], "lon": point[1]})
 
     def share_contact(self):

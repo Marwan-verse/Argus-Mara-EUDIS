@@ -1,7 +1,7 @@
 # ARGUS MARA: our EUDIS Defence Hackathon project
 
 **Private SOC collaboration:** the native app supports authenticated two-device
-sessions, encrypted chat/contact exchange and sharing of its existing map Ping.
+sessions for 2–16 participants, encrypted chat/contact exchange and sharing of its existing map Ping.
 Start `RUN-SOC-WINDOWS.bat` or `sh RUN-SOC-MAC-LINUX.command` to require login.
 See [SOC deployment, groups and encryption](soc/README.md). The regular offline
 demo remains available without private credentials or a server.

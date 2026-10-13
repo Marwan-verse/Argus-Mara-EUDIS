@@ -15,8 +15,8 @@ class FakeClient:
         self.user = {"id": "own", "username": "analyst", "admin": admin,
                      "groups": ["user"], "permissions": ["map.view", "chat", "ping", "contact.share"]}
         self.url = "https://soc.example.invalid"
-        self.room = {"members": [{"user_id": "own", "username": "analyst"}, {"user_id": "peer", "username": "colleague"}], "confirmed": ["own", "peer"]}
-        self.cipher = SimpleNamespace(verified=True, room_id="room", safety_code="ABCD " * 8)
+        self.room = {"members": [{"user_id": "own", "username": "analyst"}, {"user_id": "peer", "username": "colleague"}], "confirmed": ["own", "peer"], 'locked': True, 'host_id': 'own'}
+        self.cipher = SimpleNamespace(verified=True, room_id="room", safety_code="ABCD " * 8, safety_codes={'peer': 'ABCD ' * 8})
         self.code = None
         self.calls = []
 

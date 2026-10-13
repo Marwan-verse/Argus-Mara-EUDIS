@@ -11,7 +11,7 @@ If a credential may have been exposed, revoke or rotate it first and notify the 
 ## Data and safety boundaries
 
 The optional private SOC companion has separate accounts, server-side tool
-permissions and endpoint-encrypted two-person rooms. Its security/deployment
+permissions and endpoint-encrypted rooms for 2–16 participants. Its security/deployment
 contract and current limitations are in [soc/README.md](soc/README.md). Require
 the SOC entrypoint for connected use, compare safety codes outside the relay,
 and never expose the relay's private HTTP port. The local offline demo contains

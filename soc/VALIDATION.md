@@ -1,5 +1,24 @@
 # Validation on 13 October 2026
 
+## Group extension and local demo
+
+Protocol v2 supports 2–16 participants in a frozen roster, with a separate
+encrypted copy and safety code for each peer pair. All 15 SOC checks pass,
+including three clients over real HTTPS, recipient-copy substitution rejection,
+lobby capacity, host-only roster locking, every-member confirmation, and local
+demo origin restrictions. Production and local Compose configurations parse
+successfully with Docker Compose.
+
+Docker Desktop 4.95.0 and WSL 2.7.13 were installed on this Windows host. WSL and
+Virtual Machine Platform features were enabled; Windows requested a restart.
+The Docker engine/containers have not yet started successfully before that restart.
+`scripts/start_soc_local.ps1 -OpenClients` completes the deployment afterward:
+build, seed the requested accounts, verify HTTPS/E2EE, and open two clients.
+Requested sample credentials are stored only in ignored `data/soc-local/demo.env`;
+the account/role bootstrap was also verified against a private local SQLite store.
+
+## Initial implementation validation
+
 Checked on Windows with Python 3.12 in the project's ignored `.venv`.
 
 - All 13 SOC tests passed, including two independent clients over real HTTPS
@@ -15,7 +34,7 @@ Checked on Windows with Python 3.12 in the project's ignored `.venv`.
   and intermediate run each reported 6 failures and 16 errors. Their individual
   GUI failures varied; the AIS GUI check passed when rerun alone. These unrelated
   Windows issues are not repaired by this communication change.
-- Docker is not installed on the development host. The Compose/Caddy deployment
+- At initial validation Docker was not installed on the development host. The Compose/Caddy deployment
   was prepared and inspected, but the container image, public certificate issuance
   and real-host deployment have **not** been run. Test them on the deployment host.
 - Misha has not reviewed or integrated protocol v1 yet. The exact protocol and

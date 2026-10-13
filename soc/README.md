@@ -1,8 +1,12 @@
 # Private SOC communication
 
-Two native Argus Mara applications connect to one private Python HTTPS relay.
+Up to 16 native Argus Mara applications share a room through one private Python HTTPS relay.
 The public AIS collector is a separate service and receives no SOC credentials,
 room codes, private keys or chat messages. The offline demonstration stays available.
+
+For a step-by-step Windows demonstration with sample accounts, see
+[the local demo guide](LOCAL-DEMO.md). Production and local demo use separate
+Compose configurations, databases and certificate volumes.
 
 ## Deploy on one Linux host
 
@@ -15,6 +19,8 @@ export SOC_DOMAIN=soc.your-domain.example
 docker compose -f soc/compose.yml build
 docker compose -f soc/compose.yml run --rm relay python -m argus.collab_server --bootstrap-admin admin
 docker compose -f soc/compose.yml up -d
+docker compose -f soc/compose.yml ps
+curl --fail https://soc.your-domain.example/healthz
 ```
 
 Bootstrap prompts for a password twice without echoing it. There is no default
@@ -31,10 +37,30 @@ The relay trusts the HTTPS proxy header only from the configured private subnet
 with your host's networks, change both Compose IPAM and `ARGUS_SOC_PROXY_NETWORK`.
 Run one relay process/replica. Restarting closes rooms and requires fresh invitations
 and keys; accounts persist. This configuration is for a small team, not a public service.
-Client certificates are verified, redirects are refused, remote HTTP is rejected.
+Desktop clients verify the server's certificate, refuse redirects and reject
+remote HTTP; mutual TLS is not used.
 Credentials never belong in URLs. The relay serves no repository files.
 
-## Open two devices
+For teammates: distribute the same `igorRR` checkout or approved release and the
+HTTPS hostname. Each person installs Python with Tkinter and opens their OS's
+SOC launcher. The administrator supplies their account through a private channel.
+Client machines do not need Docker or SSH. Do not distribute the database or CA
+private key. Keep TCP 80/443 reachable for Caddy; keep the relay port private.
+
+Operate from the same project directory and preserve the same Compose project
+name. `docker compose -f soc/compose.yml stop` stops without deleting account or
+certificate volumes; `start` restarts it. For an upgrade, pull the approved branch
+and run `up -d --build`. This closes in-memory rooms. Before a backup, stop the
+relay and copy the complete accounts volume using your host's Docker volume
+backup procedure; restore into that same named volume before starting the relay.
+Never use `down -v` unless intentionally deleting accounts and certificates.
+
+If the public certificate fails, check DNS A/AAAA records and inbound ports 80/443.
+If the process is unhealthy, inspect `logs --tail 50 relay https`. Do not remove
+TLS verification to work around certificate errors. After a server restart,
+users create a new room; password hashes and memberships remain in the volume.
+
+## Connect participants
 
 Windows: `RUN-SOC-WINDOWS.bat`. macOS/Linux: `sh RUN-SOC-MAC-LINUX.command`.
 Both require login before constructing the application. Alternatively:
@@ -51,11 +77,14 @@ protect public files already installed on a device.
 1. Sign in as administrator; open **SOC session → Administration**. Create two
    distinct accounts with unique passwords (14–128 characters).
 2. Give them a common group. Create a session on device one and privately share
-   its random 12-character invitation (ten-minute expiry, single use).
-3. Sign in on device two and join by code. A room accepts two distinct analysts,
-   binds their particular logins, and never authorizes access using the code alone.
-4. Compare the **entire safety code** by voice or in person. Both analysts press
-   **Codes match · confirm**. If codes differ, leave and investigate.
+   its random 12-character invitation (ten-minute expiry). It admits up to 16
+   distinct authenticated participants in the same group while the lobby is open.
+3. Once everyone joins, the host presses **Start encrypted session · lock
+   participants**. The code stops working and the roster becomes immutable.
+4. Each participant compares the **entire safety code for each peer** by voice or
+   in person. Codes differ between pairs; each pair's two endpoints must match.
+   Press **All peer codes match · confirm** only after every comparison. Everyone
+   must confirm before sending. If codes differ, leave and investigate.
 5. Send text, share the selected AIS contact, or use the existing map Ping.
    Received pings last 15 seconds; they are analyst annotations, not sensor alerts.
 
@@ -90,29 +119,33 @@ evidence into chat. Tool permissions are not a classification/DLP system. Local
 tool restrictions are convenience controls, not protection against a modified
 client reading installed public files. Operational approvals remain simulated.
 
-## Encryption handoff for Misha
+## Encryption handoff for Misha (protocol v2)
 
-`argus/collab_crypto.py` isolates protocol v1. The relay neither imports it nor
+`argus/collab_crypto.py` isolates protocol v2. The relay neither imports it nor
 depends on `cryptography`. Account authentication uses HTTPS and Argon2id:
 
-- Fresh X25519 keys per room; private keys stay in endpoint memory. Canonical
-  transcript binds public keys, account IDs, usernames and random room ID.
+- Fresh X25519 keys per room; private keys stay in endpoint memory. Only a locked
+  roster can establish encryption. Its canonical transcript binds every public
+  key, account ID, username and random room ID.
 - HKDF-SHA256 uses the transcript hash as salt and the v1 protocol label to derive
-  two AES-256-GCM keys, two nonce prefixes and verification material. Sorted
-  account IDs choose send/receive directions.
+  a separate pair of AES-256-GCM keys, nonce prefixes and verification material
+  for each pair of participants. The v2 label also binds the sorted pair IDs.
+  Broadcast sends a separately encrypted copy to every other member; no group
+  decryption key is uploaded to the relay.
 - The 128-bit safety code binds the shared secret and transcript. Compare it
   **outside the relay** to detect substituted keys. Confirming without comparing
   does not authenticate the peer against a malicious relay.
-- AES-GCM authenticates version, room, sender, kind and counter. Nonces combine
+- AES-GCM authenticates version, room, sender, recipient, kind and counter. Nonces combine
   the directional four-byte prefix and eight-byte increasing counter. Fresh
   keys and separate directions prevent nonce reuse.
 - Clients reject tampering, wrong sender/session, replays and transcript changes.
-  New participants require new rooms/keys and a fresh safety comparison.
+  New participants require new rooms/keys and fresh safety comparisons. Each
+  sender has a monotonically increasing counter, tracked separately by recipients.
 
 Text payloads have at most 4000 characters/6000 encoded bytes; pings contain
 validated `lat` and `lon`. The relay sees identities, keys, kinds, timing, sizes
 and counters, and can drop/reorder traffic or deny service. Ciphertext is retained
-in memory only (256 messages per room, eight-hour expiry). Missed history requires
+in memory only (256 messages and 256 KiB per room, eight-hour expiry). Missed history requires
 a new room. Endpoint displays hold the latest 100 messages in memory.
 
 Python does not guarantee erasure of every memory copy. There is no Double Ratchet,
@@ -127,7 +160,7 @@ python -m unittest discover -s tests -p 'test_collab*.py' -v
 python scripts/check_contracts.py
 ```
 
-Tests cover two real HTTPS clients with a generated local test certificate,
+Tests cover three real HTTPS clients with a generated local test certificate,
 encrypted chat/ping delivery, certificate rejection, invitations, group isolation,
 revocation, replay/tamper rejection and queue limits. Real-host TLS deployment
 still requires its own smoke test.

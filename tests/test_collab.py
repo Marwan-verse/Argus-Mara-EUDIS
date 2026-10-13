@@ -35,6 +35,26 @@ def ciphers():
 
 
 class CryptoTests(unittest.TestCase):
+    def test_three_people_pairwise_keys_and_recipient_tampering(self):
+        clients = {identifier: RoomCipher() for identifier in ('a', 'b', 'c')}
+        members = [{'user_id': key, 'username': key, 'public_key': cipher.public_key} for key, cipher in clients.items()]
+        for key, cipher in clients.items():
+            cipher.establish('group', key, members)
+            cipher.confirm()
+        for first, second in (('a', 'b'), ('a', 'c'), ('b', 'c')):
+            self.assertEqual(clients[first].safety_codes[second], clients[second].safety_codes[first])
+        packet = clients['a'].encrypt('chat', {'text': 'Everyone gets a separate encrypted copy'})
+        self.assertNotEqual(packet['ciphertexts']['b'], packet['ciphertexts']['c'])
+        damaged = deepcopy(packet)
+        damaged['ciphertexts']['b'] = damaged['ciphertexts']['c']
+        with self.assertRaises(InvalidTag):
+            clients['b'].decrypt(damaged)
+        for recipient in ('b', 'c'):
+            self.assertEqual(clients[recipient].decrypt(packet)['text'], 'Everyone gets a separate encrypted copy')
+        reply = clients['b'].encrypt('ping', {'lat': 53, 'lon': -6})
+        for recipient in ('a', 'c'):
+            self.assertEqual(clients[recipient].decrypt(reply)['lat'], 53)
+
     def test_verification_direction_nonce_replay_and_tamper(self):
         a, b, members = ciphers()
         self.assertEqual(a.safety_code, b.safety_code)
@@ -43,7 +63,7 @@ class CryptoTests(unittest.TestCase):
         a.confirm()
         b.confirm()
         first = a.encrypt("chat", {"text": "private synthetic information"})
-        self.assertNotIn("private", first["ciphertext"])
+        self.assertNotIn('private', json.dumps(first['ciphertexts']))
         corrupt = dict(first, kind="evidence")
         with self.assertRaises(InvalidTag):
             b.decrypt(corrupt)
@@ -51,7 +71,7 @@ class CryptoTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             b.decrypt(first)
         second = a.encrypt("ping", {"lat": 53.2, "lon": -6.3})
-        self.assertNotEqual(first["ciphertext"], second["ciphertext"])
+        self.assertNotEqual(first['ciphertexts'], second['ciphertexts'])
         self.assertEqual(b.decrypt(second)["lat"], 53.2)
         back = b.encrypt("chat", {"text": "reply"})
         self.assertEqual(a.decrypt(back)["text"], "reply")
@@ -72,6 +92,11 @@ class CryptoTests(unittest.TestCase):
         with patch.dict("os.environ", {"ARGUS_SOC_ORIGIN": "http://example.com", "ARGUS_SOC_DEV_HTTP": "1"}):
             with self.assertRaises(ValueError):
                 Config.from_env()
+        with patch.dict('os.environ', {'ARGUS_SOC_ORIGIN': 'https://example.com', 'ARGUS_SOC_LOCAL_DEMO': '1'}):
+            with self.assertRaises(ValueError):
+                Config.from_env()
+        with patch.dict('os.environ', {'ARGUS_SOC_ORIGIN': 'https://localhost:8443', 'ARGUS_SOC_LOCAL_DEMO': '1'}):
+            self.assertTrue(Config.from_env().local_demo)
 
 
 class ServerTests(unittest.IsolatedAsyncioTestCase):
@@ -113,6 +138,8 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         status, created = await self.api("POST", "/v1/rooms", self.alice, {"group": group, "public_key": a.public_key})
         self.assertEqual(status, 200)
         status, joined = await self.api("POST", "/v1/join", self.bob, {"code": created["code"], "public_key": b.public_key})
+        self.assertEqual(status, 200)
+        status, joined = await self.api('POST', f"/v1/rooms/{created['room_id']}/lock", self.alice, {})
         self.assertEqual(status, 200)
         a.establish(created["room_id"], self.alice["id"], joined["members"])
         b.establish(created["room_id"], self.bob["id"], joined["members"])
@@ -161,6 +188,41 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.api("GET", f"/v1/rooms/{room_id}", self.bob))[0], 404)
         self.relay.rooms[intel["room_id"]].invitation_expires = 0
         self.assertEqual((await self.api("POST", "/v1/join", self.bob, {"code": intel["code"], "public_key": RoomCipher().public_key}))[0], 404)
+
+    async def test_multiuser_lobby_capacity_host_lock_and_all_confirmations(self):
+        self.relay.config.max_members = 3
+        ciphers_by_user = {u['id']: RoomCipher() for u in (self.alice, self.bob, self.eve)}
+        status, created = await self.api('POST', '/v1/rooms', self.alice, {'group': 'user', 'public_key': ciphers_by_user[self.alice['id']].public_key})
+        self.assertEqual(status, 200)
+        for user in (self.bob, self.eve):
+            status, lobby = await self.api('POST', '/v1/join', user, {'code': created['code'], 'public_key': ciphers_by_user[user['id']].public_key})
+            self.assertEqual(status, 200)
+        path = f"/v1/rooms/{created['room_id']}"
+        self.assertEqual((await self.api('POST', path + '/lock', self.bob, {}))[0], 403)
+        self.assertEqual((await self.api('POST', path + '/confirm', self.bob, {}))[0], 409)
+        extra = self.relay.store.create_user('extra', self.relay.store.hasher.hash(SECRET), ['user'])
+        self.tokens[extra['id']] = self.relay.store.issue_token(extra['id'], 3600)[0]
+        self.assertEqual((await self.api('POST', '/v1/join', extra, {'code': created['code'], 'public_key': RoomCipher().public_key}))[0], 404)
+        status, frozen = await self.api('POST', path + '/lock', self.alice, {})
+        self.assertEqual(status, 200)
+        self.assertTrue(frozen['locked'])
+        for user in (self.alice, self.bob, self.eve):
+            cipher = ciphers_by_user[user['id']]
+            cipher.establish(created['room_id'], user['id'], frozen['members'])
+            cipher.confirm()
+        for user in (self.alice, self.bob):
+            await self.api('POST', path + '/confirm', user, {})
+        cipher = ciphers_by_user[self.alice['id']]
+        packet = cipher.encrypt('chat', {'text': 'three analysts'})
+        self.assertEqual((await self.api('POST', path + '/messages', self.alice, packet))[0], 409)
+        await self.api('POST', path + '/confirm', self.eve, {})
+        damaged = deepcopy(packet)
+        damaged['ciphertexts'].pop(self.eve['id'])
+        self.assertEqual((await self.api('POST', path + '/messages', self.alice, damaged))[0], 400)
+        self.assertEqual((await self.api('POST', path + '/messages', self.alice, packet))[0], 200)
+        for user in (self.bob, self.eve):
+            state = (await self.api('GET', path, user))[1]
+            self.assertEqual(ciphers_by_user[user['id']].decrypt(state['messages'][0]['packet'])['text'], 'three analysts')
 
     async def test_confirm_permissions_replay_and_no_plaintext_relay(self):
         a, b, created, joined = await self.room()
@@ -230,7 +292,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         status, state = await self.api("GET", f"/v1/rooms/{created['room_id']}?after=1", self.bob)
         self.assertEqual(status, 200)
         self.assertEqual(len(state["messages"]), 2)
-        self.assertEqual((await self.api("POST", path, self.alice, {"extra": "x" * 20000}))[0], 413)
+        self.assertEqual((await self.api("POST", path, self.alice, {"extra": "x" * 140000}))[0], 413)
 
     async def test_actual_https_two_clients(self):
         await self.server.close()
@@ -253,21 +315,31 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.server = TestServer(self.app, scheme="https")
         await self.server.start_server(ssl=context)
         url = str(self.server.make_url("")).rstrip("/")
-        a, b = SOCClient(url, ca_file=cert_path), SOCClient(url, ca_file=cert_path)
+        a, b, c = [SOCClient(url, ca_file=cert_path) for _ in range(3)]
         await asyncio.to_thread(a.login, "alice", SECRET)
         await asyncio.to_thread(b.login, "bob", SECRET)
+        await asyncio.to_thread(c.login, 'eve', SECRET)
         room = await asyncio.to_thread(a.create, "user")
         await asyncio.to_thread(b.join, room["code"])
+        await asyncio.to_thread(c.join, room['code'])
+        await asyncio.to_thread(a.lock)
+        await asyncio.to_thread(b.poll)
+        await asyncio.to_thread(c.poll)
         await asyncio.to_thread(a.poll)
-        self.assertEqual(a.cipher.safety_code, b.cipher.safety_code)
+        for first, second in ((a, b), (a, c), (b, c)):
+            self.assertEqual(first.cipher.safety_codes[second.user['id']], second.cipher.safety_codes[first.user['id']])
         await asyncio.to_thread(a.confirm)
         await asyncio.to_thread(b.confirm)
+        await asyncio.to_thread(c.confirm)
         await asyncio.to_thread(a.poll)
         await asyncio.to_thread(b.poll)
+        await asyncio.to_thread(c.poll)
         await asyncio.to_thread(a.send, "chat", {"text": "Encrypted synthetic SOC handoff"})
         self.assertEqual((await asyncio.to_thread(b.poll))[0]["payload"]["text"], "Encrypted synthetic SOC handoff")
+        self.assertEqual((await asyncio.to_thread(c.poll))[0]['payload']['text'], 'Encrypted synthetic SOC handoff')
         await asyncio.to_thread(b.send, "ping", {"lat": 53.35, "lon": -6.25})
         self.assertEqual((await asyncio.to_thread(a.poll))[0]["payload"], {"lat": 53.35, "lon": -6.25})
+        self.assertEqual((await asyncio.to_thread(c.poll))[0]['payload'], {'lat': 53.35, 'lon': -6.25})
         bad = SOCClient(url)
         with self.assertRaises(ClientError):
             await asyncio.to_thread(bad.login, "bob", SECRET)
