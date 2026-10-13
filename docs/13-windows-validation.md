@@ -22,6 +22,10 @@ after PR #12. The results below record validation before integration.
   cursor, and the AIS window test could connect to an external live provider.
   The tests now use a fixture clock, controlled pointer hit-testing and disabled
   external autoconnection. Runtime freshness and gesture behavior are unchanged.
+  CI additionally exposed smaller-display assumptions: map-click checks now zoom
+  to the target contact to avoid overlapping callouts, and panel-resize checks
+  verify the requested increase plus reserved map space rather than a fixed
+  width that responsive layout correctly caps on narrower displays.
 - **CI:** validate Python 3.11 and 3.12 on both Ubuntu and Windows runners.
 
 ## Verification
