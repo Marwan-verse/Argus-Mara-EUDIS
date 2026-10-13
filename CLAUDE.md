@@ -37,7 +37,7 @@ Decisions are recorded in `DECISIONS.md`. Read it first, and add new decisions t
 - Docs are in English (the team language). The team lead prefers chat explanations **in Russian, in simple words**.
 - **Commits:**
   - Commit as the person running the session, with the git identity already set on their computer or cloud environment. Never set `git config user.name` or `user.email` to another person's identity.
-  - Check the identity git will use with `git var GIT_AUTHOR_IDENT` against the confirmed person running the session. A repository-local setting may override their correct global identity, including settings left behind by the old captain-only convention. Correct a known mismatch in this clone only; if the person's identity is unknown, missing or a tool default such as `Claude <noreply@anthropic.com>`, ask for their name and GitHub no-reply email.
+  - Check the identity git will use with `git var GIT_AUTHOR_IDENT`. If it is missing or a tool default such as `Claude <noreply@anthropic.com>`, ask the person running the session for their name and GitHub no-reply email.
   - Do not add `Co-Authored-By` or `Claude-Session` trailers.
 - The team is versatile. Plan by workstream (Data, Brain, Space, Interface, Story), not by skill.
 - For v1, use Python 3 for Data/Brain/Space and browser JavaScript, HTML and CSS for Interface. Keep the JSON boundary and run `python scripts/check_contracts.py` after changing either file.
