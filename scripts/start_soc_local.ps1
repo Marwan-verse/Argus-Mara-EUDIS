@@ -25,8 +25,17 @@ if ($LASTEXITCODE -ne 0) { throw 'Account seeding failed.' }
 $taskCaPath = Join-Path $taskPrivate 'caddy-root.crt'
 $taskCopied = $false
 for ($taskAttempt = 0; $taskAttempt -lt 20; $taskAttempt++) {
-    & $taskDockerPath @taskCompose cp 'https:/data/caddy/pki/authorities/local/root.crt' $taskCaPath 2>$null
-    if ($LASTEXITCODE -eq 0) { $taskCopied = $true; break }
+    # Windows PowerShell 5 treats native progress on stderr as an error when
+    # redirected under Stop, even when docker cp successfully exits with zero.
+    $taskCopyPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $taskDockerPath @taskCompose cp 'https:/data/caddy/pki/authorities/local/root.crt' $taskCaPath 2>$null
+        $taskCopyExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $taskCopyPreference
+    }
+    if ($taskCopyExit -eq 0) { $taskCopied = $true; break }
     Start-Sleep -Seconds 1
 }
 if (-not $taskCopied) { throw 'Caddy did not create its local CA. Inspect the https container logs.' }
