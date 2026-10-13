@@ -39,6 +39,7 @@ from argus.countdown import step
 from argus.map_view import coordinates, find_ports, geographic_extent, route_name, search_text
 from argus.prediction import dark_countdown, last_gap, position_at, reappearance_check, v_max_kn
 from desktop_ais import DesktopAIS
+import desktop_prediction
 
 
 ROOT = Path(__file__).resolve().parent
@@ -1695,7 +1696,9 @@ class ArgusApp:
         fix = fix_at(self.vessel["track"], self.position_s)
         dark = None if fix else self._dark_state()
         if dark:
-            fix = dark["position"]  # Centre on the labelled prediction, not an invented fix.
+            # Frame the labelled prediction area, never an invented fix.
+            self._fit_points(desktop_prediction.extent_points(dark["position"]["prediction"]))
+            return
         if not fix:
             messagebox.showinfo("No AIS fix", "The vessel has no AIS position at this replay time.", parent=self.root)
             return
@@ -2400,9 +2403,14 @@ class ArgusApp:
         if self.map_layers["World ports"].get():
             map_labels.extend(self._draw_world_ports(width, height))
         self._draw_wind_arrows(width, height)
+        self._prediction_banner = None
         if hasattr(self, "ais_tracker"):
             self.ais_tracker.draw()
 
+        show_prediction = exercise and self.map_layers["Dark prediction"].get()
+        dark = self._dark_state() if show_prediction else None
+        if dark:
+            desktop_prediction.draw_areas(self, dark["position"]["prediction"])
         if exercise and self.map_layers["Anchor reach"].get():
             for cable in self.scenario["cables"]:
                 self.map.create_line(*self._points(cable["anchor_reachable"]), fill="#e4b45f", width=11, dash=(3, 4))
@@ -2410,6 +2418,8 @@ class ArgusApp:
             for cable in self.scenario["cables"]:
                 self.map.create_line(*self._points(cable["path"]), fill="white", width=7)
                 self.map.create_line(*self._points(cable["path"]), fill=TEAL, width=3)
+        if dark and dark["countdown"]:
+            desktop_prediction.draw_worst_case(self, dark["position"]["prediction"], dark["countdown"])
         if exercise and self.map_layers["Response assets"].get():
             for asset in self.scenario["assets"]:
                 if asset.get("lat") is None or asset.get("lon") is None:
@@ -2437,8 +2447,6 @@ class ArgusApp:
                 crossing = step(at_alert["lat"], at_alert["lon"], at_alert["cog_deg"], at_alert["sog_kn"] * self.alert["eta_expected_s"] / 3600)
                 self.map.create_line(*self._points([(at_alert["lat"], at_alert["lon"]), crossing]), fill=AMBER, width=2, dash=(5, 5))
         fix = fix_at(self.vessel["track"], self.position_s) if exercise and self.map_layers["AIS track"].get() else None
-        show_prediction = exercise and self.map_layers["Dark prediction"].get()
-        dark = self._dark_state() if show_prediction else None
         if show_prediction:
             self._draw_reappearance(map_labels)
         if fix:
@@ -2447,9 +2455,11 @@ class ArgusApp:
             self.map.create_oval(x - 9, y - 9, x + 9, y + 9, fill=PURPLE, outline=SEA, width=2)
             map_labels.append((0, "vessel", f"{self.vessel['name']}\n{fix['sog_kn']:.1f} kn · {fix['cog_deg']:.0f}°", x, y))
         elif dark:
-            self._draw_dark_prediction(dark, map_labels)
-            self.map.create_text(width / 2, 42, text="AIS RECEPTION GAP · predicted area, not an observation",
-                                 fill=AMBER, font=("Segoe UI Semibold", 10))
+            prediction = dark["position"]["prediction"]
+            x, y = desktop_prediction.draw_marker(self, prediction)
+            map_labels.append((0, "vessel", f"{self.vessel['name']} · best guess\n"
+                                            f"±{dark['position']['uncertainty_nm']:.1f} nm", x, y))
+            self._prediction_banner = prediction
         elif not fix_at(self.vessel["track"], self.position_s) and self.position_s < self.vessel["track"][-1]["t"]:
             self.map.create_text(width / 2, 42, text="AIS RECEPTION GAP · marker withdrawn", fill=AMBER, font=("Segoe UI Semibold", 10))
         for index, (lat, lon) in enumerate(self.map_note_points, 1):
@@ -2485,6 +2495,8 @@ class ArgusApp:
             self.map.create_rectangle(width - pixels - 24, height - 56, width - 8, height - 27, fill=CARD, outline=LINE)
             self.map.create_line(width - pixels - 16, height - 35, width - 16, height - 35, width=2, fill=INK)
             self.map.create_text(width - 16, height - 48, text=f"{km:g} km · z{self.map_zoom}", anchor="e", fill=INK, font=("Segoe UI", 8))
+        if self._prediction_banner:
+            desktop_prediction.draw_banner(self, self._prediction_banner)
         self._draw_map_ping()
 
     def _dark_state(self) -> dict | None:
@@ -2506,24 +2518,6 @@ class ArgusApp:
         before, after = gap
         return {"before": before, "after": after,
                 **reappearance_check(before, after, v_max_kn(track, before["t"]))}
-
-    def _draw_dark_prediction(self, dark: dict, map_labels: list) -> None:
-        prediction = dark["position"]["prediction"]
-        reach = prediction["reachable"]
-        cx, cy = self._project(reach["lat"], reach["lon"])
-        _, north_y = self._project(reach["lat"] + reach["radius_nm"] / 60, reach["lon"])
-        radius = abs(cy - north_y)
-        self.map.create_oval(cx - radius, cy - radius, cx + radius, cy + radius,
-                             outline=AMBER, width=2, dash=(6, 4))
-        if prediction["cone"]:
-            self.map.create_polygon(*self._points(prediction["cone"]["polygon"]), fill=AMBER,
-                                    stipple="gray25", outline=AMBER, width=1)
-        x, y = self._project(prediction["lat"], prediction["lon"])
-        self.map.create_line(cx, cy, x, y, fill=AMBER, width=1, dash=(3, 3))
-        self.map.create_oval(x - 10, y - 10, x + 10, y + 10, outline=AMBER, width=2, dash=(3, 2))
-        map_labels.append((0, "vessel", f"{self.vessel['name']} · PREDICTED\n"
-                                        f"±{dark['position']['uncertainty_nm']:.1f} nm · dark "
-                                        f"{math.ceil(prediction['elapsed_s'] / 60)} min", x, y))
 
     def _draw_reappearance(self, map_labels: list) -> None:
         check = self._reappearance()
