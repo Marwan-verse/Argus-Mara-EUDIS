@@ -113,6 +113,11 @@ class DesktopAlertBoardTests(unittest.TestCase):
         board.dialog.close()
 
         app.fit_ireland()
+        # A country-wide view on a small runner display can overlap callouts.
+        # Inspect the actual marker after centering/zooming to this contact.
+        contact = board.by_id['SIM-02']
+        app._change_map_center((contact['lat'], contact['lon']))
+        app._zoom_by(3)
         self.root.update()
         marker = next(item for item in app.map.find_withtag('sim-alert:SIM-02')
                       if app.map.type(item) in ('oval', 'polygon'))

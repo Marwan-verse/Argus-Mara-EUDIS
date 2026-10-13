@@ -52,8 +52,15 @@ class GestureTests(unittest.TestCase):
         self.root.update()
         pinch = PinchZoom(app) if not hasattr(app, 'pinch') else app.pinch
         width, height = app.map.winfo_width(), app.map.winfo_height()
-        app.map.event_generate('<Motion>', warp=True, x=width // 2, y=height // 2)
-        self.root.update()
+        # Hidden Windows windows cannot own the real pointer. Keep hit testing
+        # deterministic without moving the user's cursor or depending on focus.
+        pointer_patch = patch.object(self.root, 'winfo_pointerxy', return_value=(
+            app.map.winfo_rootx() + width // 2, app.map.winfo_rooty() + height // 2))
+        containing_patch = patch.object(self.root, 'winfo_containing', return_value=app.map)
+        pointer_patch.start()
+        containing = containing_patch.start()
+        self.addCleanup(pointer_patch.stop)
+        self.addCleanup(containing_patch.stop)
         zoom = app.map_zoom
         pinch.apply(0.1)
         self.assertEqual(app.map_zoom, zoom)
@@ -61,8 +68,7 @@ class GestureTests(unittest.TestCase):
         self.assertEqual(app.map_zoom, zoom + 1)
         pinch.apply(-0.5)
         self.assertEqual(app.map_zoom, zoom - 1)
-        app.alerts_panel.event_generate('<Motion>', warp=True, x=40, y=200)
-        self.root.update()
+        containing.return_value = app.alerts_panel
         pinch.apply(0.6)
         self.assertEqual(app.map_zoom, zoom - 1)
 
