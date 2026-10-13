@@ -35,6 +35,17 @@ def ciphers():
 
 
 class CryptoTests(unittest.TestCase):
+    def test_shorter_safety_encoding_retains_128_bits(self):
+        from argus.collab_crypto import safety_display
+        alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+        material = bytes(range(16))
+        encoded = safety_display(material).replace(' ', '')
+        self.assertEqual(len(encoded), 26)
+        decoded = 0
+        for char in encoded:
+            decoded = (decoded << 5) | alphabet.index(char)
+        self.assertEqual(decoded.to_bytes(16, 'big'), material)
+
     def test_three_people_pairwise_keys_and_recipient_tampering(self):
         clients = {identifier: RoomCipher() for identifier in ('a', 'b', 'c')}
         members = [{'user_id': key, 'username': key, 'public_key': cipher.public_key} for key, cipher in clients.items()]
@@ -188,6 +199,32 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.api("GET", f"/v1/rooms/{room_id}", self.bob))[0], 404)
         self.relay.rooms[intel["room_id"]].invitation_expires = 0
         self.assertEqual((await self.api("POST", "/v1/join", self.bob, {"code": intel["code"], "public_key": RoomCipher().public_key}))[0], 404)
+
+    async def test_disjoint_groups_can_share_team_room_with_common_tools(self):
+        with self.relay.store.db:
+            self.relay.store.db.execute('DELETE FROM memberships WHERE user_id=? AND group_name=?', (self.alice['id'], 'user'))
+        a, b = RoomCipher(), RoomCipher()
+        status, created = await self.api('POST', '/v1/rooms', self.alice, {'group': None, 'public_key': a.public_key})
+        self.assertEqual(status, 200)
+        self.assertEqual(len(created['code']), 8)
+        self.assertIsNone(created['group'])
+        status, joined = await self.api('POST', '/v1/join', self.bob, {'code': created['code'], 'public_key': b.public_key})
+        self.assertEqual(status, 200)
+        self.assertNotIn('evidence.share', joined['permissions'])
+        self.assertIn('chat', joined['permissions'])
+        path = '/v1/rooms/' + created['room_id']
+        locked = (await self.api('POST', path + '/lock', self.alice, {}))[1]
+        for user, cipher in ((self.alice, a), (self.bob, b)):
+            cipher.establish(created['room_id'], user['id'], locked['members'])
+            cipher.confirm()
+            await self.api('POST', path + '/confirm', user, {})
+        self.assertEqual((await self.api('POST', path + '/messages', self.alice, a.encrypt('chat', {'text': 'mixed groups'})))[0], 200)
+        self.assertEqual((await self.api('POST', path + '/messages', self.alice, a.encrypt('evidence', {'text': 'restricted'})))[0], 403)
+        state = (await self.api('GET', path, self.bob))[1]
+        self.assertEqual(b.decrypt(state['messages'][0]['packet'])['text'], 'mixed groups')
+        # Changing either participant's group must terminate mixed-group rooms.
+        self.assertEqual((await self.api('PUT', '/v1/admin/groups/intelligence', self.alice, {'permissions': ['map.view', 'chat']}))[0], 200)
+        self.assertNotIn(created['room_id'], self.relay.rooms)
 
     async def test_multiuser_lobby_capacity_host_lock_and_all_confirmations(self):
         self.relay.config.max_members = 3

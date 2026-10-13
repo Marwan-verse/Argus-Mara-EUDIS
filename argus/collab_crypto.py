@@ -16,6 +16,18 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 KINDS = {"chat": "chat", "ping": "ping", "contact": "contact.share", "evidence": "evidence.share"}
 
 
+def safety_display(material):
+    """A shorter readable encoding of all 128 verification bits, not truncation."""
+    alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+    value = int.from_bytes(material[:16], 'big')
+    characters = []
+    for _ in range(26):
+        characters.append(alphabet[value & 31])
+        value >>= 5
+    result = ''.join(reversed(characters))
+    return ' '.join(result[i:i+5] for i in range(0, 26, 5))
+
+
 def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
                       allow_nan=False).encode("ascii")
@@ -91,8 +103,7 @@ class RoomCipher:
                         info=b'Argus Mara SOC E2EE v2' + canonical(pair)).derive(shared)
             first = own_id == pair[0]
             channels[peer['user_id']] = (keys[:32], keys[32:64], keys[64:68], keys[68:72]) if first else (keys[32:64], keys[:32], keys[68:72], keys[64:68])
-            safety = hashlib.sha256(keys[72:] + digest).hexdigest()[:32].upper()
-            safety_codes[peer['user_id']] = ' '.join(safety[i:i+4] for i in range(0, 32, 4))
+            safety_codes[peer['user_id']] = safety_display(hashlib.sha256(keys[72:] + digest).digest())
         self.channels, self.safety_codes = channels, safety_codes
         self.safety_code = next(iter(safety_codes.values()))  # Two-person UI compatibility.
         self.room_id, self.own_id, self._digest = room_id, own_id, digest

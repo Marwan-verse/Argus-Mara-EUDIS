@@ -75,7 +75,7 @@ class SOCClient:
         self.user = self.request("GET", "/v1/me")
         return self.user
 
-    def create(self, group):
+    def create(self, group=None):
         self.leave()
         cipher = RoomCipher()
         result = self.request("POST", "/v1/rooms", {"group": group, "public_key": cipher.public_key})
@@ -109,7 +109,12 @@ class SOCClient:
         self.refresh_user()  # Rights are not trusted from a stale login response.
         if not self.room:
             return []
-        room = self.request("GET", f"/v1/rooms/{self.room['room_id']}?after={self.cursor}")
+        try:
+            room = self.request("GET", f"/v1/rooms/{self.room['room_id']}?after={self.cursor}")
+        except ClientError as error:
+            if error.status in (404, 409):
+                self.room = self.cipher = self.code = None
+            raise
         try:
             self._establish(room)
             self.room = room
@@ -130,6 +135,9 @@ class SOCClient:
     def send(self, kind, payload):
         if not self.room or not self.room.get('locked') or len(self.room['confirmed']) != len(self.room['members']):
             raise ClientError('Every participant must confirm the safety codes')
+        from argus.collab_crypto import KINDS
+        if KINDS.get(kind) not in self.room.get('permissions', self.user['permissions']):
+            raise ClientError('This tool is not available to everyone in this session', 403)
         packet = self.cipher.encrypt(kind, payload)
         return self.request("POST", f"/v1/rooms/{self.room['room_id']}/messages", packet)
 
