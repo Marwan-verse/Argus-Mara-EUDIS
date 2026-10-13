@@ -146,6 +146,16 @@ recorder schema, including the private `raw` column. Atomic commits and journal
 digests make restart recovery idempotent. An interrupted final write preserves
 its damaged tail privately and recovers the intact acknowledged prefix.
 
+POSIX hosts sync both writable files and parent directory entries. On Windows,
+the archive flushes writable file handles and publishes completed chunks with
+`MoveFileExW` using replacement/write-through flags; the Windows CRT cannot
+`fsync` directory handles. Recovery is tested for process interruption and
+partial writes. This does not promise that every acknowledged filename survives
+sudden power loss on every filesystem/controller; keep independent backups.
+File flush and rename failures still stop collection and retain source journals.
+See Python's [file fsync behavior](https://docs.python.org/3/library/os.html#os.fsync)
+and Microsoft's [MoveFileExW flags](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexw).
+
 The public cache holds at most 5,000 contacts. SSE history holds at most 300
 batches and approximately 4 MiB of encoded history (one bounded batch is retained
 even if larger); archive batches are limited to 4,096 rows / approximately 8 MiB

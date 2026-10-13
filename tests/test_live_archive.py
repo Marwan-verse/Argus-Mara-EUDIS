@@ -1,6 +1,7 @@
 """Simulated fixtures only: durability, restart and archive-capacity boundaries."""
 from datetime import datetime, timedelta, timezone
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -23,12 +24,39 @@ def row(**overrides):
 
 
 class LiveArchiveTests(unittest.TestCase):
+    def test_file_flush_failure_stops_before_acknowledging_or_publishing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            archive = LiveArchive(directory)
+            archive.recover()
+            with patch('argus.live_archive.os.fsync', side_effect=OSError('SIMULATED FLUSH FAILURE')):
+                with self.assertRaises(ArchiveError):
+                    archive.append(row())
+            self.assertTrue(archive.stats()['stopped'])
+            self.assertEqual(archive.stats()['pending_rows'], 0)
+            self.assertEqual(list(Path(directory).glob('chunks/*.parquet')), [])
+            self.assertEqual(len(list(Path(directory).glob('pending/*.jsonl'))), 1)
+
+    def test_failed_atomic_publication_retains_journal_for_recovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            archive = LiveArchive(directory)
+            archive.append(row())
+            journal = next(Path(directory).glob('pending/*.jsonl'))
+            contents = journal.read_bytes()
+            with patch('argus.live_archive._replace_file', side_effect=OSError('SIMULATED RENAME FAILURE')):
+                with self.assertRaises(ArchiveError):
+                    archive.flush()
+            self.assertEqual(journal.read_bytes(), contents)
+            self.assertEqual(list(Path(directory).glob('chunks/*.parquet')), [])
+            restored = LiveArchive(directory)
+            restored.recover()
+            self.assertEqual(len(list(restored.recent_rows())), 1)
+
     def test_append_is_fsynced_and_unflushed_record_survives_restart(self):
         with tempfile.TemporaryDirectory() as directory:
             archive = LiveArchive(directory)
             with patch("argus.live_archive.os.fsync", wraps=__import__("os").fsync) as synced:
                 archive.append(row())
-            self.assertGreaterEqual(synced.call_count, 2)
+            self.assertGreaterEqual(synced.call_count, 1 if os.name == 'nt' else 2)
             self.assertEqual(len(list(Path(directory).glob("pending/*.jsonl"))), 1)
             restored = LiveArchive(directory)
             restored.recover()

@@ -75,4 +75,4 @@ page = ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         + data + "</script><script>" + bundle + "</script></body></html>")
 out = Path("map.html")
 out.write_text(page, encoding="utf-8")
-print(f"{len(ships)} ships → {out.resolve()} (open it in a browser)")
+print(f"{len(ships)} ships -> {out.resolve()} (open it in a browser)")

@@ -5,6 +5,9 @@ commits recorder-schema Parquet atomically, then retires its matching journal.
 Chunk IDs and a journal digest make crash recovery idempotent. Nothing is deleted
 to meet the capacity limit: a full disk/archive stops ingestion. This protects
 accepted local records, not packets never delivered by the upstream AIS provider.
+POSIX also syncs directory entries. Windows flushes writable file handles and
+publishes chunks with a write-through rename; directory fsync is unavailable.
+Recovery covers process interruption, not every filesystem/power-loss failure.
 
 Use one serial writer (for example serial ``await asyncio.to_thread(...)`` calls).
 Raw messages stay private on the archive volume and must never be returned by an
@@ -33,11 +36,36 @@ class ArchiveError(RuntimeError):
 
 
 def _sync_directory(path):
+    # Windows CRT cannot open/fsync directories. File contents are still flushed
+    # before acknowledgement, and Windows chunk publication uses MoveFileExW.
+    if os.name == "nt":
+        return
     descriptor = os.open(path, os.O_RDONLY)
     try:
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
+
+
+def _sync_file(path):
+    # Windows _commit requires write access even when the contents are unchanged.
+    with path.open("r+b") as stream:
+        os.fsync(stream.fileno())
+
+
+def _replace_file(source, destination):
+    if os.name != "nt":
+        os.replace(source, destination)
+        return
+    import ctypes
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    move = kernel.MoveFileExW
+    move.argtypes = (wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD)
+    move.restype = wintypes.BOOL
+    # Same-volume atomic publication; do not permit a copy/delete fallback.
+    if not move(str(source.absolute()), str(destination.absolute()), 0x1 | 0x8):
+        raise ctypes.WinError(ctypes.get_last_error())
 
 
 class LiveArchive:
@@ -171,8 +199,7 @@ class LiveArchive:
                         backup = path.with_suffix(".torn." + uuid.uuid4().hex)
                     self._capacity(path.stat().st_size)
                     shutil.copyfile(path, backup)
-                    with backup.open("rb") as saved:
-                        os.fsync(saved.fileno())
+                    _sync_file(backup)
                     _sync_directory(self.pending)
                     with path.open("r+b") as repaired:
                         repaired.truncate(valid_bytes)
@@ -207,9 +234,8 @@ class LiveArchive:
             pq.write_table(table, temporary, compression="zstd")
             temporary_bytes = temporary.stat().st_size
             self._capacity(temporary_bytes)
-            with temporary.open("rb") as stream:
-                os.fsync(stream.fileno())
-            os.replace(temporary, destination)
+            _sync_file(temporary)
+            _replace_file(temporary, destination)
             _sync_directory(self.chunks)
             self._bytes += temporary_bytes
         journal_bytes = journal.stat().st_size

@@ -63,8 +63,9 @@ class RecorderPipelineTests(unittest.TestCase):
                 fixture(5002, mmsi=999000002, lat=91.),  # AIS unavailable position.
             ], schema=SCHEMA), second)
             os.utime(first, (first.stat().st_mtime - 1, first.stat().st_mtime - 1))
+            environment = {**os.environ, 'PYTHONIOENCODING': 'cp1252'}
             result = subprocess.run([sys.executable, str(ROOT / "recorder/map.py"), str(folder.parent)],
-                                    cwd=root, capture_output=True, text=True)
+                                    cwd=root, capture_output=True, text=True, env=environment)
             self.assertEqual(result.returncode, 0, result.stderr)
             html = (root / "map.html").read_text()
         data = json.loads(re.search(r'<script type="application/json" id="recorded-data">(.*?)</script>', html, re.S)[1])
