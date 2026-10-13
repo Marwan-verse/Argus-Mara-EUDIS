@@ -1,5 +1,24 @@
 # Validation on 13 October 2026
 
+## Docker deployment after the Windows restart
+
+The local stack was actually built and started on this PC with Docker Engine
+29.8.2 using `soc/compose.local.yml`. Both the relay and Caddy HTTPS containers
+are running. The sample Marwan/Igor accounts were seeded in the Docker account
+volume. Caddy's public local CA certificate was copied to the client workspace.
+
+The real-container smoke check passed: verified HTTPS, correct account/group
+permissions, matching peer safety codes, encrypted chat delivery and map ping
+delivery in the opposite direction. The startup script opened two native SOC
+sign-in windows. The English walkthrough is `IMPLEMENTATION-AND-TESTING.md`.
+
+Actual startup exposed Windows PowerShell 5 treating redirected Docker copy
+progress on stderr as a terminating error. The copy step now temporarily allows
+native progress and checks Docker's exit code. The complete startup was rerun
+successfully. Missing pip in the existing local virtual environment was restored.
+This verifies the localhost Docker deployment; public DNS/certificate issuance
+and a production deployment remain untested.
+
 ## Group extension and local demo
 
 Protocol v2 supports 2–16 participants in a frozen roster, with a separate
@@ -11,7 +30,7 @@ successfully with Docker Compose.
 
 Docker Desktop 4.95.0 and WSL 2.7.13 were installed on this Windows host. WSL and
 Virtual Machine Platform features were enabled; Windows requested a restart.
-The Docker engine/containers have not yet started successfully before that restart.
+Before that restart, the Docker engine/containers had not started successfully.
 `scripts/start_soc_local.ps1 -OpenClients` completes the deployment afterward:
 build, seed the requested accounts, verify HTTPS/E2EE, and open two clients.
 Requested sample credentials are stored only in ignored `data/soc-local/demo.env`;

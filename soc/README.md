@@ -7,6 +7,8 @@ room codes, private keys or chat messages. The offline demonstration stays avail
 For a step-by-step Windows demonstration with sample accounts, see
 [the local demo guide](LOCAL-DEMO.md). Production and local demo use separate
 Compose configurations, databases and certificate volumes.
+For an English implementation summary and the full two-user walkthrough, see
+[IMPLEMENTATION-AND-TESTING.md](IMPLEMENTATION-AND-TESTING.md).
 
 ## Deploy on one Linux host
 
@@ -89,7 +91,7 @@ protect public files already installed on a device.
    Received pings last 15 seconds; they are analyst annotations, not sensor alerts.
 
 HTTPS polling delivers changes about every 1.5 seconds. Leave closes the room
-for both users. Logout and account revocation close rooms. There are no silent
+for all participants. Logout and account revocation close rooms. There are no silent
 send retries, automatic URL opening, executable attachments or remote actions.
 
 ## Groups and tools
@@ -127,7 +129,7 @@ depends on `cryptography`. Account authentication uses HTTPS and Argon2id:
 - Fresh X25519 keys per room; private keys stay in endpoint memory. Only a locked
   roster can establish encryption. Its canonical transcript binds every public
   key, account ID, username and random room ID.
-- HKDF-SHA256 uses the transcript hash as salt and the v1 protocol label to derive
+- HKDF-SHA256 uses the transcript hash as salt and the v2 protocol label to derive
   a separate pair of AES-256-GCM keys, nonce prefixes and verification material
   for each pair of participants. The v2 label also binds the sorted pair IDs.
   Broadcast sends a separately encrypted copy to every other member; no group
