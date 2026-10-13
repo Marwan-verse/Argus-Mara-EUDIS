@@ -6,6 +6,14 @@ its detector, vessel, time and reasons, and its ``obs`` dict holds the
 detectors, merges their observations, applies the small-vessel relevance rule
 and scores the result with ``argus.levels.assess``.
 
+Two rules for detector authors:
+
+* ``eta_min``, ``distance_nm``, ``asset_class`` and ``in_corridor`` count only
+  when the finding names ``related.cable_id``. They are then taken together
+  from the single most urgent cable, never mixed across cables.
+* Put a radar-measured length in ``obs["radar_length_m"]``. The small-vessel
+  filter uses it to see that a vessel declared small is really large.
+
 The output is a separate review file. ``demo/alerts.json`` is not touched, and a
 level is a rule outcome, not a probability of hostile intent.
 """
@@ -24,8 +32,9 @@ from argus.levels import CRITICAL_ASSETS, LEVEL_NAMES, RANK, RULES_VERSION, asse
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "data/brain/assessments.json"
 
-# Observation keys that describe one line; merged only from cable-related findings.
-CABLE_KEYS = ("eta_min", "distance_nm", "asset_class")
+# Observation keys that describe one line. They come only from findings with a
+# related.cable_id, and all of them from the same, most urgent cable.
+CABLE_KEYS = ("in_corridor", "eta_min", "distance_nm", "asset_class")
 
 # Small-vessel relevance. These thresholds are assumptions, not regulation:
 # small craft rarely carry anchors or gear heavy enough to damage a buried line.
@@ -51,6 +60,10 @@ def legacy_cable_v1(vessel: dict, context: dict) -> list[dict]:
     radar = next((d for d in detections if radar_t is not None and d.get("t") == radar_t), None)
     if radar and radar.get("length_m"):
         obs["radar_length_m"] = radar["length_m"]
+    # exercise_item always says "telecom"; score the alerted cable's own kind instead.
+    # Assumption: a kind argus.levels does not name (not telecom or a CRITICAL_ASSETS key) counts as telecom.
+    kind = next((c.get("kind") for c in cables if c["id"] == alert["segment_id"]), None)
+    obs["asset_class"] = kind if kind == "telecom" or kind in CRITICAL_ASSETS else "telecom"
     return [{
         "detector": "legacy_cable_v1", "mmsi": vessel["mmsi"], "t": alert["t"],
         "position": [item["lat"], item["lon"]], "strength": alert["score"], "reasons": alert["reasons"],
@@ -68,35 +81,66 @@ def _asset_weight(asset_class: str) -> int:
     return 2 if asset_class in CRITICAL_ASSETS else 1
 
 
+def _urgency(line: dict) -> tuple:
+    """Sort key: inside the corridor first, then the soonest ETA, the nearest distance, the most critical line."""
+    eta, distance = line.get("eta_min"), line.get("distance_nm")
+    return (not line.get("in_corridor"), float("inf") if eta is None else eta,
+            float("inf") if distance is None else distance, -_asset_weight(line.get("asset_class")))
+
+
+def threatened_cable(findings: list[dict]) -> tuple[str | None, dict]:
+    """Pick the one line under threat; return its cable ID and its ``CABLE_KEYS`` values.
+
+    Findings naming the same ``related.cable_id`` are combined first (in the
+    corridor if any says so, soonest ETA, nearest distance, most critical
+    class). The most urgent cable then wins; ties keep the first one found.
+    """
+    lines: dict[str, dict] = {}
+    for finding in findings:
+        cable_id = (finding.get("related") or {}).get("cable_id")
+        if not cable_id:
+            continue
+        line = lines.setdefault(cable_id, {})
+        for key in CABLE_KEYS:
+            value = (finding.get("obs") or {}).get(key)
+            if value is None:
+                continue
+            if key == "in_corridor":
+                line[key] = bool(line.get(key)) or value
+            elif key == "asset_class":
+                if key not in line or _asset_weight(value) > _asset_weight(line[key]):
+                    line[key] = value
+            elif key not in line or value < line[key]:
+                line[key] = value
+    if not lines:
+        return None, {}
+    cable_id = min(lines, key=lambda identifier: _urgency(lines[identifier]))
+    return cable_id, lines[cable_id]
+
+
 def merge_observations(findings: list[dict]) -> dict:
     """Combine findings' ``obs`` into one observation set for ``argus.levels.assess``.
 
     Numbers take the maximum and flags are true if any finding sets them.
-    ``eta_min``, ``distance_nm`` and ``asset_class`` come only from findings with
-    a ``related.cable_id``: the soonest ETA, the nearest distance and the most
-    critical line. Other values keep the first finding's value.
+    ``eta_min``, ``distance_nm``, ``asset_class`` and ``in_corridor`` count only
+    when the finding names ``related.cable_id``, and all four come together from
+    the most urgent cable (see ``threatened_cable``). A radar-measured length
+    belongs in ``radar_length_m``; the small-vessel filter reads it. Other
+    values keep the first finding's value.
     """
     obs: dict = {}
     for finding in findings:
-        on_cable = bool((finding.get("related") or {}).get("cable_id"))
         for key, value in (finding.get("obs") or {}).items():
-            if value is None:
+            if value is None or key in CABLE_KEYS:
                 continue
-            if key in CABLE_KEYS:
-                if not on_cable:
-                    continue
-                if key == "asset_class":
-                    if key not in obs or _asset_weight(value) > _asset_weight(obs[key]):
-                        obs[key] = value
-                elif key not in obs or value < obs[key]:
-                    obs[key] = value
-            elif isinstance(value, bool):
+            if isinstance(value, bool):
                 obs[key] = bool(obs.get(key)) or value
             elif isinstance(value, (int, float)):
                 if key not in obs or value > obs[key]:
                     obs[key] = value
             elif key not in obs:
                 obs[key] = value
+    obs.update(threatened_cable(findings)[1])
     return obs
 
 
@@ -108,7 +152,15 @@ def _as_int(value):
 
 
 def _cap_exception(ship_type, length_m: float, obs: dict) -> str | None:
-    """Evidence that makes a small vessel relevant after all."""
+    """Evidence that makes a small vessel relevant after all.
+
+    Recorded facts come first: the small-vessel cap is an assumption and must
+    not override a reported line fault or ignored instruction from argus.levels.
+    """
+    if obs.get("fault_confirmed"):
+        return "a line fault is reported at this position and time"
+    if obs.get("ignored_instruction"):
+        return "the vessel did not comply with a recorded instruction near the line"
     radar_length = obs.get("radar_length_m")
     if radar_length and radar_length >= length_m * LENGTH_EVIDENCE_RATIO:
         return (f"radar measured {radar_length:.0f} m against a declared {length_m:g} m, "
@@ -126,7 +178,8 @@ def relevance(vessel: dict, observations: dict | None = None) -> dict:
 
     Small: AIS class B under 30 m, or ship type 30/36/37/50-59 under 50 m.
     Unknown or zero length is never treated as small. Small vessels are kept,
-    not dropped, and the cap is lifted by identity or bottom-gear evidence.
+    not dropped, and the cap is lifted by a reported line fault, an ignored
+    instruction, identity evidence or bottom-gear evidence.
     """
     obs = observations or {}
     length = vessel.get("ais_length_m")
@@ -158,14 +211,14 @@ def apply_relevance(assessment: dict, rel: dict) -> dict:
 
 
 def assess_vessel(vessel: dict, context: dict, detectors: list | None = None) -> dict:
-    """Run the detectors on one vessel and return its findings, observations, relevance and level."""
+    """Run the detectors on one vessel and return its findings, threatened cable, observations, relevance and level."""
     findings: list[dict] = []
     for detector in DETECTORS if detectors is None else detectors:
         findings.extend(detector(vessel, context))
     observations = merge_observations(findings)
     rel = relevance(vessel, observations)
-    return {"findings": findings, "observations": observations, "relevance": rel,
-            "assessment": apply_relevance(assess(observations), rel)}
+    return {"findings": findings, "cable_id": threatened_cable(findings)[0], "observations": observations,
+            "relevance": rel, "assessment": apply_relevance(assess(observations), rel)}
 
 
 def context_from_scenario(scenario: dict, now: int | None = None) -> dict:

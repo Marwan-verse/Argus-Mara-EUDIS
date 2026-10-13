@@ -1,5 +1,6 @@
 """Findings merge into one levels assessment; small vessels are capped unless evidence says otherwise."""
 
+import copy
 import json
 import subprocess
 import sys
@@ -61,9 +62,44 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(obs["speed_drop_pct"], 30)
         self.assertIs(obs["spoof_signs"], True)
         self.assertEqual(obs["eta_min"], 40)
-        self.assertEqual(obs["distance_nm"], 2)
+        self.assertEqual(obs["distance_nm"], 6)  # same cable as the soonest ETA
         self.assertEqual(obs["asset_class"], "gas")
         self.assertIs(merge_observations([finding("a", {"no_ais": False})])["no_ais"], False)
+
+    def test_cable_keys_come_from_one_cable(self):
+        findings = [
+            finding("cable_risk", {"speed_drop_pct": 24, "course_change_deg": 30}),
+            finding("cable_risk", {"eta_min": 20, "asset_class": "telecom"}, {"cable_id": "telecom-1"}),
+            finding("cable_risk", {"eta_min": 300, "asset_class": "gas"}, {"cable_id": "gas-1"}),
+        ]
+        result = assess_vessel(vessel(80, "A", 180), {}, [fixed(*findings)])
+        self.assertEqual(result["observations"]["eta_min"], 20)
+        self.assertEqual(result["observations"]["asset_class"], "telecom")
+        self.assertEqual(result["assessment"]["basis"], "B4 I0 P4 A1 C0 = 9")
+        self.assertEqual(result["cable_id"], "telecom-1")
+
+    def test_corridor_is_more_urgent_than_a_sooner_eta(self):
+        result = assess_vessel(vessel(80, "A", 180), {}, [fixed(
+            finding("a", {"eta_min": 10, "distance_nm": 1, "asset_class": "telecom"}, {"cable_id": "telecom-1"}),
+            finding("b", {"in_corridor": True, "distance_nm": 0.4, "asset_class": "power"}, {"cable_id": "power-1"}),
+        )])
+        self.assertEqual(result["cable_id"], "power-1")
+        self.assertEqual(result["observations"]["asset_class"], "power")
+        self.assertNotIn("eta_min", result["observations"])
+        tie = assess_vessel(vessel(80, "A", 180), {}, [fixed(
+            finding("a", {"eta_min": 30, "asset_class": "telecom"}, {"cable_id": "telecom-1"}),
+            finding("b", {"eta_min": 30, "asset_class": "gas"}, {"cable_id": "gas-1"}),
+        )])
+        self.assertEqual(tie["cable_id"], "gas-1")
+
+    def test_findings_about_one_cable_combine(self):
+        obs = merge_observations([
+            finding("a", {"eta_min": 61, "asset_class": "telecom"}, {"cable_id": "telecom-1"}),
+            finding("b", {"in_corridor": True}, {"cable_id": "telecom-1"}),
+            finding("c", {"in_corridor": True}),  # no cable named: ignored
+        ])
+        self.assertEqual(obs, {"in_corridor": True, "eta_min": 61, "asset_class": "telecom"})
+        self.assertNotIn("in_corridor", merge_observations([finding("c", {"in_corridor": True})]))
 
 
 class RelevanceTests(unittest.TestCase):
@@ -98,6 +134,15 @@ class RelevanceTests(unittest.TestCase):
         shorter = finding("space_identity", {"radar_length_m": 8, "length_mismatch_pct": 33})
         self.assertEqual(assess_vessel(vessel(37, "B", 12), {}, [fixed(DRAG, shorter)])["assessment"]["level"],
                          "low")
+
+    def test_confirmed_facts_lift_the_cap(self):
+        for flag, text in (("fault_confirmed", "line fault"), ("ignored_instruction", "did not comply")):
+            fact = finding("operator", {flag: True, "in_corridor": True}, CABLE)
+            result = assess_vessel(vessel(37, "B", 12), {}, [fixed(fact)])
+            self.assertEqual(result["assessment"]["level"], "critical", flag)
+            self.assertIsNone(result["relevance"]["cap"])
+            self.assertIn(text, result["assessment"]["notes"][-1])
+            self.assertNotIn("Capped at Low", " ".join(result["assessment"]["notes"]))
 
     def test_spoofing_lifts_the_cap(self):
         jump = finding("spoof_check", {"spoof_signs": True})
@@ -134,6 +179,21 @@ class DemoTests(unittest.TestCase):
         self.assertEqual(legacy["t"], alert["t"])
         self.assertEqual(legacy["related"], {"cable_id": alert["segment_id"]})
         self.assertEqual(legacy["obs"]["radar_length_m"], 228)
+
+    def test_legacy_detector_uses_the_cable_kind(self):
+        def legacy_obs(kind):
+            scenario = copy.deepcopy(self.scenario)
+            scenario["cables"][0]["kind"] = kind
+            result = assess_vessel(scenario["vessels"][0], context_from_scenario(scenario))
+            return result["findings"][0]["obs"], result
+
+        obs, result = legacy_obs("gas")
+        self.assertEqual(obs["asset_class"], "gas")
+        self.assertEqual(result["assessment"]["groups"]["A"], 2)
+        self.assertEqual(result["cable_id"], "cable-irish-sea-1")
+        self.assertEqual(legacy_obs("power")[0]["asset_class"], "power")
+        self.assertEqual(legacy_obs("mystery")[0]["asset_class"], "telecom")
+        self.assertEqual(legacy_obs("telecom")[0]["asset_class"], "telecom")
 
     def test_now_before_the_alert_fix_gives_no_finding(self):
         result = assess_vessel(self.scenario["vessels"][0], context_from_scenario(self.scenario, now=5340))
