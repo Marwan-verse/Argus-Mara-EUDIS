@@ -36,6 +36,9 @@ class Config:
     max_rooms: int = 128
     history_size: int = 256
     proxy_network: str | None = None
+    max_members: int = 16
+    history_bytes: int = 256 * 1024
+    local_demo: bool = False
 
     @classmethod
     def from_env(cls):
@@ -48,7 +51,10 @@ class Config:
         network = os.environ.get('ARGUS_SOC_PROXY_NETWORK') or None
         if network:
             ipaddress.ip_network(network)
-        return cls(Path(os.environ.get("ARGUS_SOC_DB", "data/soc/accounts.sqlite3")), origin, dev, proxy_network=network)
+        local_demo = os.environ.get('ARGUS_SOC_LOCAL_DEMO', '0') == '1'
+        if local_demo and parsed.hostname not in {'localhost', '127.0.0.1', '::1'}:
+            raise ValueError('Demo accounts are restricted to a localhost origin')
+        return cls(Path(os.environ.get("ARGUS_SOC_DB", "data/soc/accounts.sqlite3")), origin, dev, proxy_network=network, local_demo=local_demo)
 
 
 @dataclass
@@ -63,6 +69,8 @@ class Room:
     counters: dict = field(default_factory=dict)
     sequence: int = 0
     messages: deque = field(default_factory=deque)
+    locked: bool = False
+    history_bytes: int = 0
 
 
 class Relay:
@@ -124,9 +132,10 @@ class Relay:
 
     def snapshot(self, room, after=0):
         return {"room_id": room.id, "group": room.group, "sequence": room.sequence,
+                'locked': room.locked, 'host_id': next(iter(room.members)), 'max_members': self.config.max_members,
                 "members": [{k: v for k, v in m.items() if k != "token_hash"} for m in room.members.values()],
                 "confirmed": sorted(room.confirmed),
-                "messages": [{"sequence": seq, "packet": packet} for seq, packet in room.messages if seq > after]}
+                "messages": [{"sequence": seq, "packet": packet} for seq, packet, _ in room.messages if seq > after]}
 
 
 def json_response(value):
@@ -166,8 +175,8 @@ async def security(request, handler):
     if origin and origin != config.origin:
         raise web.HTTPForbidden(text="Origin denied")
     if request.path != "/healthz":
-        relay.limit(("global",), 1200)
-        relay.limit(("peer", request.remote), 600)
+        relay.limit(("global",), 6000)
+        relay.limit(("peer", request.remote), 6000)
         if request.path != "/v1/login":
             token = request.headers.get("Authorization", "")
             if not token.startswith("Bearer ") or not 20 <= len(token[7:]) <= 128:
@@ -280,7 +289,7 @@ async def join_room(request):
     relay.purge()
     room = next((r for r in relay.rooms.values() if secrets.compare_digest(r.code_hash, Store.token_hash(code))), None)
     user = request["user"]
-    if not room or len(room.members) != 1 or room.invitation_expires <= time.time() or room.group not in user["groups"] or user["id"] in room.members:
+    if not room or room.locked or len(room.members) >= relay.config.max_members or room.invitation_expires <= time.time() or room.group not in user["groups"] or user["id"] in room.members:
         raise web.HTTPNotFound(text="Invitation unavailable")
     # Host must still have a valid token and membership, not merely an old room.
     host = next(iter(room.members.values()))
@@ -291,7 +300,18 @@ async def join_room(request):
         raise web.HTTPNotFound(text="Invitation unavailable")
     relay.close_user_rooms(user_id=user["id"])
     room.members[user["id"]] = member(request, key)
-    room.code_hash = ""  # Single use. Never authorize with a room code.
+    return json_response(relay.snapshot(room))
+
+
+async def lock_room(request):
+    relay = request.app[SERVICE]
+    room = relay.authorized_room(request)
+    if request['user']['id'] != next(iter(room.members)):
+        raise web.HTTPForbidden(text='Only the host can start the session')
+    if len(room.members) < 2:
+        raise web.HTTPConflict(text='At least two participants are required')
+    room.locked = True
+    room.code_hash = ''
     return json_response(relay.snapshot(room))
 
 
@@ -311,8 +331,8 @@ async def room_state(request):
 
 async def confirm(request):
     room = request.app[SERVICE].authorized_room(request)
-    if len(room.members) != 2:
-        raise web.HTTPConflict(text="Wait for the other analyst")
+    if not room.locked or len(room.members) < 2:
+        raise web.HTTPConflict(text='The host must first start the encrypted session')
     room.confirmed.add(request["user"]["id"])
     return json_response({"ok": True})
 
@@ -328,7 +348,7 @@ async def send(request):
     relay = request.app[SERVICE]
     room = relay.authorized_room(request)
     data = await body(request)
-    if set(data) != {"v", "room_id", "sender", "counter", "kind", "ciphertext"}:
+    if set(data) != {"v", "room_id", "sender", "counter", "kind", "ciphertexts"}:
         raise ValueError("Invalid envelope")
     user = request["user"]
     kind = data["kind"]
@@ -338,8 +358,8 @@ async def send(request):
     group_perms = json.loads(relay.store.db.execute("SELECT permissions FROM groups WHERE name=?", (room.group,)).fetchone()[0])
     if KINDS[kind] not in group_perms:
         raise web.HTTPForbidden(text="Tool unavailable in this group session")
-    if len(room.confirmed) != 2:
-        raise web.HTTPConflict(text="Both analysts must confirm their safety code")
+    if not room.locked or len(room.confirmed) != len(room.members):
+        raise web.HTTPConflict(text='Every participant must confirm the safety codes')
     # Revalidate both parties before sending, including the receiver's expiry.
     for m in room.members.values():
         peer = relay.store.user(m["user_id"])
@@ -348,20 +368,29 @@ async def send(request):
             del relay.rooms[room.id]
             raise web.HTTPNotFound(text="Session unavailable")
     counter = data["counter"]
-    if (data["v"] != 1 or data["room_id"] != room.id or data["sender"] != user["id"] or
+    if (data["v"] != 2 or data["room_id"] != room.id or data["sender"] != user["id"] or
             type(counter) is not int or not room.counters.get(user["id"], 0) < counter < 2**64):
         raise ValueError("Invalid sender or replayed message")
-    ciphertext = data["ciphertext"]
-    try:
-        raw = base64.b64decode(ciphertext, validate=True) if isinstance(ciphertext, str) and len(ciphertext) <= 8200 else b""
-    except ValueError:
-        raw = b""
-    if not 16 <= len(raw) <= 6016:
-        raise ValueError("Invalid ciphertext")
+    ciphertexts = data['ciphertexts']
+    if not isinstance(ciphertexts, dict) or set(ciphertexts) != set(room.members) - {user['id']}:
+        raise ValueError('Invalid recipient roster')
+    for ciphertext in ciphertexts.values():
+        try:
+            raw = base64.b64decode(ciphertext, validate=True) if isinstance(ciphertext, str) and len(ciphertext) <= 8200 else b''
+        except ValueError:
+            raw = b''
+        if not 16 <= len(raw) <= 6016:
+            raise ValueError('Invalid ciphertext')
     relay.limit(("send", user["id"]), 60)
     room.counters[user["id"]] = counter
     room.sequence += 1
-    room.messages.append((room.sequence, data))
+    size = len(json.dumps(data))
+    if len(room.messages) == room.messages.maxlen:
+        room.history_bytes -= room.messages.popleft()[2]
+    room.messages.append((room.sequence, data, size))
+    room.history_bytes += size
+    while room.messages and room.history_bytes > relay.config.history_bytes:
+        room.history_bytes -= room.messages.popleft()[2]
     return json_response({"sequence": room.sequence})
 
 
@@ -404,7 +433,7 @@ async def admin_group(request):
 
 
 def create_app(config):
-    app = web.Application(client_max_size=16384, middlewares=[security])
+    app = web.Application(client_max_size=128 * 1024, middlewares=[security])
     app[SERVICE] = Relay(config)
     async def health(request):
         return json_response({"ready": True})
@@ -416,6 +445,7 @@ def create_app(config):
     app.router.add_post("/v1/join", join_room)
     app.router.add_get("/v1/rooms/{room_id}", room_state)
     app.router.add_post("/v1/rooms/{room_id}/confirm", confirm)
+    app.router.add_post('/v1/rooms/{room_id}/lock', lock_room)
     app.router.add_post("/v1/rooms/{room_id}/messages", send)
     app.router.add_delete("/v1/rooms/{room_id}", leave)
     app.router.add_get("/v1/admin", admin_state)
@@ -447,8 +477,28 @@ def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bootstrap-admin", metavar="USERNAME", help="create first administrator locally; prompt for password")
+    parser.add_argument('--seed-demo', action='store_true', help='create local-only sample users from private environment variables')
     args = parser.parse_args()
     config = Config.from_env()
+    if args.seed_demo:
+        if not config.local_demo:
+            parser.error('Demo seeding requires ARGUS_SOC_LOCAL_DEMO=1 and a localhost origin')
+        store = Store(config.database)
+        try:
+            for username, env_key, groups in (('Marwan', 'ARGUS_DEMO_MARWAN_PASSWORD', ['intelligence', 'user']),
+                                               ('Igor', 'ARGUS_DEMO_IGOR_PASSWORD', ['user'])):
+                secret = os.environ.get(env_key, '')
+                if not 4 <= len(secret) <= 128:
+                    parser.error('Set both demo passwords in the private local environment')
+                if not store.credential(username.lower()):
+                    store.create_user(username, store.hasher.hash(secret), groups)
+            admin_secret = os.environ.get('ARGUS_DEMO_ADMIN_PASSWORD', '')
+            if admin_secret and not store.credential('admin'):
+                store.create_user('admin', store.hasher.hash(password(admin_secret)), ['intelligence', 'user'], admin=True)
+            print('Local sample accounts ready; production password policy is unchanged.')
+        finally:
+            store.close()
+        return
     if args.bootstrap_admin:
         store = Store(config.database)
         try:

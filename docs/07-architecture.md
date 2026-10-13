@@ -3,7 +3,7 @@
 ## Private SOC companion (D52, 13 October)
 
 An explicitly requested private companion adds account authorization and
-two-analyst E2EE rooms, independently of the offline demo and public live AIS.
+E2EE rooms for 2–16 participants (D53), independently of the offline demo and public live AIS.
 `argus/collab_store.py` owns SQLite accounts/RBAC; `argus/collab_server.py` relays
 ciphertext; `argus/collab_crypto.py` and `collab_client.py` run on endpoints.
 `desktop_soc.py` integrates native login, session creation/joining, communication
