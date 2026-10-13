@@ -1,5 +1,6 @@
 """Local startup boundaries, process isolation and native mode selection."""
 import os
+import sys
 from pathlib import Path
 import tempfile
 import threading
@@ -15,6 +16,15 @@ from desktop_soc import login_screen
 
 
 class LocalStartupTests(unittest.TestCase):
+    def test_command_output_handles_utf8_and_unexpected_bytes_on_windows(self):
+        result = launcher.run_command([
+            sys.executable, '-c',
+            'import os; os.write(1, bytes([0xe2, 0x86, 0x92])); os.write(2, bytes([0x81]))',
+        ])
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, '\u2192')
+        self.assertEqual(result.stderr, '\ufffd')
+
     def test_credentials_created_once_and_never_replaced(self):
         with tempfile.TemporaryDirectory() as directory:
             target = launcher.prepare_credentials(Path(directory))

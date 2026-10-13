@@ -44,6 +44,24 @@ history behavior and recorder console encoding. No additional failing cases were
 introduced by this change. GitHub's Ubuntu CI passed for Python 3.11 and 3.12
 on commit `760b49c`; real Docker runtime validation is still pending.
 
+### Lenovo after restart — 14 October 2026
+
+The actual Python local launcher built and started relay/Caddy containers,
+seeded the local accounts and verified `https://localhost:8443/healthz` with the
+copied public CA. Repeat startup passed with existing accounts. The actual Tk
+startup button then opened exactly one additional native sign-in client; both
+windows were verified on the desktop. The relay stays private and HTTPS publishes
+only `127.0.0.1:8443`.
+
+`scripts/smoke_soc_local.py --ca data/soc-local/caddy-root.crt` passed against the
+running containers: certificate verification, both sample account permissions,
+matching peer safety codes, encrypted chat and reverse-direction map ping.
+Real startup exposed a Windows cp1252 decoding error in Docker command output.
+The launcher now decodes UTF-8 explicitly and replaces unexpected bytes; a real
+subprocess regression test covers both cases. All 11 startup tests pass after
+the fix. The restart-related merge blocker above is resolved. macOS/Linux host
+startup and public two-device deployment remain unverified.
+
 ## Guided SOC interface and mixed groups
 
 All 19 SOC checks pass, including a room whose participants have disjoint group

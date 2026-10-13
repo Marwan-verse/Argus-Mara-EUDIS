@@ -33,6 +33,7 @@ def docker_path():
 def run_command(command, *, timeout=30):
     try:
         return subprocess.run(command, cwd=ROOT, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace",
                               timeout=timeout,
                               creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
     except subprocess.TimeoutExpired:
