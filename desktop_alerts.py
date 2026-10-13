@@ -1,11 +1,13 @@
-"""Docked alert queue: severity-sorted rows, a review window and map markers.
+"""Docked incident queue: one card per vessel, a review window and map markers.
 
-The queue lists the fictional exercise alert and the simulated contacts,
-scored through Brain (``argus.brain_board``: the assembler's detectors, the
-small-vessel rule and the AIS spoofing detector). Each is marked EXERCISE or SIM
-in its row, in its review window and on the map. Acknowledge, escalate and
-reject record the operator's decision in this session only; nothing is
-transmitted.
+The queue scores the fictional exercise alert and the simulated contacts through
+Brain (``argus.brain_board``: the assembler's detectors, the small-vessel rule
+and the AIS spoofing detector) and folds the scores into ``argus.incidents``
+(``argus.incident_board``). A contact at Medium or above is one updatable
+incident card; Low and None contacts are watched, not incidents. Each is marked
+EXERCISE or SIM in its card, in its review window and on the map. Acknowledge,
+escalate and reject go through ``argus.incidents.set_status`` and stay in this
+session; nothing is transmitted.
 """
 from __future__ import annotations
 
@@ -14,16 +16,17 @@ import math
 import sys
 import time
 import tkinter as tk
+import tkinter.font as tkfont
 
 import customtkinter as ctk
 
 from argus.alert_board import line_path, sort_key
 from argus.brain_board import build_board, update
-from argus.levels import LEVEL_NAMES
+from argus.incident_board import OPEN_RANK, Tracker
+from argus.incidents import QUIET_CLOSE_S, REASONS, STATUSES
+from argus.levels import LEVEL_NAMES, RANK
 
 LEVELS = ("critical", "high", "medium", "low")
-# List groups: Brain can score a contact None (e.g. a lone GPS glitch); it stays listed, last.
-GROUPS = LEVELS + ("none",)
 CODES = {"critical": "CRIT", "high": "HIGH", "medium": "MED", "low": "LOW", "none": "—"}
 # Level colour and a dark tint of it; colour is used for severity only.
 STYLE = {
@@ -35,11 +38,15 @@ MONO = "Menlo" if sys.platform == "darwin" else "Consolas"
 SECONDARY = "#c3ced6"
 ROW_HOVER, ROW_SELECTED = "#18242f", "#203243"
 RECIPIENTS = ("Duty officer", "Line operator", "Irish Coast Guard (MRCC)", "Naval Service operations")
-REASONS = ("False alarm", "Known benign activity", "Authorised operation", "Duplicate alert")
 SORTS = ("Severity", "Time to asset", "Newest")
-STATUSES = ("New", "Reviewed", "Acknowledged", "Escalated", "Rejected")
 STATUS_DETAIL = {"New": "Awaiting review", "Reviewed": "No decision", "Acknowledged": "Monitoring"}
 MARKER_SIZE = {"critical": 1.7, "high": 1.5, "medium": 1.25, "low": 1.0}
+# List groups after the open incidents by level: quiet incidents, watched contacts, closed incidents.
+GROUP_TITLES = {"critical": "CRITICAL", "high": "HIGH", "medium": "MEDIUM", "quiet": "QUIET · BELOW MEDIUM",
+                "watching": "WATCHING · LOW, NO INCIDENT", "closed": "CLOSED"}
+EVENT_TEXT = {"opened": "Incident {id} opened at {level}", "raised": "Level raised to {level}",
+              "review_again": "Level rose after review: review again",
+              "quiet": f"Quiet {QUIET_CLOSE_S // 60} min below Medium: close?"}
 
 
 def utc_now() -> str:
@@ -77,6 +84,35 @@ def proximity_text(item: dict) -> str:
     return ""
 
 
+def badges(item: dict, incident: dict | None) -> list[tuple[str, str]]:
+    """Short flags for a card as (text, kind); kind "warn" is drawn in amber, "note" muted."""
+    found = []
+    if incident and incident.get("needs_review_again"):
+        found.append(("⚠ Review again", "warn"))
+    if incident and incident.get("suggest_close"):
+        found.append((f"Quiet {QUIET_CLOSE_S // 60} min · close?", "note"))
+    if "ais_spoofing" in item.get("detectors", ()):
+        found.append(("AIS spoofing?", "warn"))
+    relevance = item.get("relevance") or {}
+    if relevance.get("small"):
+        found.append(("Small craft · cap lifted" if relevance.get("exception") else "Small craft · capped Low", "note"))
+    return found
+
+
+def clip(text: str, font: tkfont.Font, width: int) -> str:
+    """The text cut with an ellipsis to fit ``width`` pixels on one line."""
+    if font.measure(text) <= width:
+        return text
+    low, high = 0, len(text)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if font.measure(text[:middle].rstrip() + "…") <= width:
+            low = middle
+        else:
+            high = middle - 1
+    return text[:low].rstrip() + "…"
+
+
 def nearest_point(lat: float, lon: float, path) -> tuple[float, float] | None:
     """Closest point on a short polyline, in a local flat approximation."""
     best, best_distance = None, float("inf")
@@ -105,7 +141,7 @@ def recolour(widget, background: str) -> None:
 
 
 class AlertBoard:
-    """The docked queue, its live countdowns, the review window and the map layer."""
+    """The docked incident queue, its live countdowns, the review window and the map layer."""
 
     def __init__(self, app, panel):
         import run_gui as ui
@@ -113,15 +149,24 @@ class AlertBoard:
         self.items = build_board(app.scenario, app.alerts)
         self.by_id = {item["id"]: item for item in self.items}
         self.started = time.monotonic()
-        self.decisions: dict[str, dict] = {}
+        self.tracker = Tracker()
+        self.tracker.step(self.items, 0)
+        self.recipients: dict[str, str] = {}
         self.history: dict[str, list[tuple[str, str]]] = {}
+        self.exercise_seen = "New"
         self.selected: str | None = None
         self.hovered: str | None = None
         self.level_filter: str | None = None
         self.show_closed = False
+        self.show_watching = False
         self.sort_mode = tk.StringVar(app.root, value="Severity")
         self.cards: dict[str, dict] = {}
         self.wrap = 230
+        self.reason_font = tkfont.Font(root=app.root, family=SANS, size=10)
+        self.meta_font = tkfont.Font(root=app.root, family=SANS, size=9)
+        self.name_font = tkfont.Font(root=app.root, family=SANS, size=11, weight="bold")
+        self.timer_font = tkfont.Font(root=app.root, family=MONO, size=9, weight="bold")
+        self.tag_font = tkfont.Font(root=app.root, family=SANS, size=7, weight="bold")
         self.halos: list[tuple[int, float, float]] = []
         self.pulse = False
         self.flashing: dict[str, str] = {}
@@ -137,17 +182,17 @@ class AlertBoard:
         ui, app, panel = self.ui, self.app, self.panel
         head = tk.Frame(panel, bg=ui.CARD)
         head.pack(fill="x", padx=(16, 12), pady=(14, 0))
-        tk.Label(head, text="Alerts", bg=ui.CARD, fg=ui.INK, font=(SANS, 15, "bold")).pack(side="left")
+        tk.Label(head, text="Incidents", bg=ui.CARD, fg=ui.INK, font=(SANS, 15, "bold")).pack(side="left")
         tk.Label(head, text="SIMULATED", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 7, "bold"), padx=5,
                  highlightthickness=1, highlightbackground=ui.LINE).pack(side="left", padx=(10, 0), pady=(3, 0))
         close = ctk.CTkButton(head, text="", image=app.tools.icons.get("close"), command=app.tools.toggle_alerts,
                               width=30, height=30, fg_color="transparent", hover_color=ui.HOVER)
         close.pack(side="right")
-        app.tools.style_button(close, "Hide alerts")
+        app.tools.style_button(close, "Hide incidents")
         restart = ctk.CTkButton(head, text="", image=app.tools.icons.get("refresh"), command=self.restart,
                                 width=30, height=30, fg_color="transparent", hover_color=ui.HOVER)
         restart.pack(side="right", padx=2)
-        app.tools.style_button(restart, "Restart the simulation: countdowns and decisions reset")
+        app.tools.style_button(restart, "Restart the simulation: countdowns, incidents and decisions reset")
 
         row = tk.Frame(panel, bg=ui.CARD)
         row.pack(fill="x", padx=(16, 12), pady=(2, 0))
@@ -161,7 +206,7 @@ class AlertBoard:
             button_hover_color=ui.HOVER, text_color=ui.MUTED, font=ctk.CTkFont(SANS, 11),
             dropdown_font=ctk.CTkFont(SANS, 12), anchor="e")
         sort.pack(side="right")
-        app.tools.attach_tooltip(sort, "Sort the queue")
+        app.tools.attach_tooltip(sort, "Sort the incidents")
 
         strip = tk.Frame(panel, bg=ui.CARD)
         strip.pack(fill="x", padx=12, pady=(10, 0))
@@ -174,7 +219,8 @@ class AlertBoard:
             cell.grid(row=0, column=index * 2, sticky="nsew")
             line = tk.Frame(cell, bg=ui.CARD)
             line.pack(pady=(4, 0))
-            code = tk.Label(line, text=CODES[level], bg=ui.CARD, fg=ui.MUTED, font=(MONO, 9), cursor="hand2")
+            code = tk.Label(line, text="WATCH" if level == "low" else CODES[level], bg=ui.CARD, fg=ui.MUTED,
+                            font=(MONO, 9), cursor="hand2")
             code.pack(side="left")
             count = tk.Label(line, text="0", bg=ui.CARD, fg=STYLE[level][0], font=(MONO, 12, "bold"), cursor="hand2")
             count.pack(side="left", padx=(5, 0))
@@ -182,7 +228,8 @@ class AlertBoard:
             underline.pack(fill="x", padx=12, pady=(5, 0))
             for widget in (cell, line, code, count, underline):
                 widget.bind("<Button-1>", lambda _event, value=level: self.set_filter(value))
-            app.tools.attach_tooltip(cell, f"Show {LEVEL_NAMES[level].lower()} alerts only")
+            app.tools.attach_tooltip(cell, "Show watched contacts: Low, not incidents" if level == "low"
+                                     else f"Show {LEVEL_NAMES[level].lower()} incidents only")
             self.tiles[level] = (code, underline)
             self.tiles[level + "-count"] = count
         tk.Frame(panel, bg=ui.LINE, height=1).pack(fill="x", padx=12)
@@ -198,152 +245,134 @@ class AlertBoard:
             scrollbar_button_color=ui.LINE, scrollbar_button_hover_color=ui.HOVER)
         self.list.pack(fill="both", expand=True, padx=(4, 4))
         self.headers = {}
-        for level in GROUPS + ("closed",):
+        for group, text in GROUP_TITLES.items():
             header = tk.Frame(self.list, bg=ui.CARD)
-            title = tk.Label(header, text={"none": "NO CONCERN"}.get(level, LEVEL_NAMES.get(level, "Closed").upper()),
-                             bg=ui.CARD, fg=ui.MUTED,
-                             font=(SANS, 8, "bold"))
+            title = tk.Label(header, text=text, bg=ui.CARD, fg=ui.MUTED, font=(SANS, 8, "bold"))
             title.pack(side="left", padx=(10, 0))
             count = tk.Label(header, text="", bg=ui.CARD, fg=ui.MUTED, font=(MONO, 8))
             count.pack(side="left", padx=(6, 0))
             tk.Frame(header, bg=ui.LINE, height=1).pack(side="bottom", fill="x", before=title)
-            if level == "closed":
+            if group in ("closed", "watching"):
+                toggle = self.toggle_closed if group == "closed" else self.toggle_watching
                 for widget in (header, title, count):
                     widget.configure(cursor="hand2")
-                    widget.bind("<Button-1>", lambda _event: self.toggle_closed())
-            self.headers[level] = (header, count)
+                    widget.bind("<Button-1>", lambda _event, command=toggle: command())
+            self.headers[group] = (header, count)
         self.empty = tk.Label(self.list, text="", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 10),
                               justify="left", wraplength=self.wrap)
         for item in self.items:
             self._card(item)
 
     def _card(self, item):
-        """One queue row: level code and score in a gutter, then name, situation and state."""
+        """One card: a level stripe, then name and timer, one line of why, asset and status, flags."""
         ui = self.ui
         frame = tk.Frame(self.list, bg=ui.CARD, cursor="hand2")
         rule = tk.Frame(frame, bg=ui.LINE, height=1)
         rule.keep_colour = True
         rule.pack(side="bottom", fill="x")
-        gutter = tk.Frame(frame, bg=ui.CARD, width=50)
-        gutter.pack(side="left", fill="y")
-        gutter.pack_propagate(False)
-        code = tk.Label(gutter, bg=ui.CARD, font=(MONO, 9, "bold"), anchor="w")
-        code.pack(fill="x", padx=(10, 0), pady=(10, 0))
-        score = tk.Label(gutter, bg=ui.CARD, fg=ui.MUTED, font=(MONO, 9), anchor="w")
-        score.pack(fill="x", padx=(10, 0))
+        stripe = tk.Frame(frame, bg=ui.CARD, width=4)
+        stripe.keep_colour = True
+        stripe.pack(side="left", fill="y", padx=(6, 0), pady=8)
         body = tk.Frame(frame, bg=ui.CARD)
-        body.pack(side="left", fill="both", expand=True, padx=(0, 10), pady=(9, 10))
+        body.pack(side="left", fill="both", expand=True, padx=(10, 10), pady=(8, 9))
         top = tk.Frame(body, bg=ui.CARD)
         top.pack(fill="x")
-        name = tk.Label(top, text=item["name"], bg=ui.CARD, fg=ui.INK, font=(SANS, 11, "bold"), anchor="w")
+        name = tk.Label(top, text=item["name"], bg=ui.CARD, fg=ui.INK, font=self.name_font, anchor="w")
         name.pack(side="left")
         tag = tk.Label(top, text="EXERCISE" if item.get("exercise") else "SIM", bg=ui.CARD, fg=ui.MUTED,
                        font=(SANS, 7, "bold"))
         tag.pack(side="right")
-        age = tk.Label(top, bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9))
-        age.pack(side="right", padx=(0, 8))
-        title = tk.Label(body, text=item["title"], bg=ui.CARD, fg=SECONDARY, font=(SANS, 10),
-                         anchor="w", justify="left", wraplength=self.wrap)
-        title.pack(fill="x", pady=(2, 0))
+        eta = tk.Label(top, bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9))
+        eta.pack(side="right", padx=(0, 8))
+        reason = tk.Label(body, text="", bg=ui.CARD, fg=SECONDARY, font=self.reason_font, anchor="w")
+        reason.pack(fill="x", pady=(2, 0))
         bottom = tk.Frame(body, bg=ui.CARD)
-        bottom.pack(fill="x", pady=(5, 0))
-        eta = tk.Label(bottom, bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9))
-        eta.pack(side="left")
-        status = tk.Label(bottom, bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9))
-        status.pack(side="right")
-        card = {"item": item, "frame": frame, "code": code, "score": score, "name": name, "age": age, "eta": eta,
-                "status": status, "wrapped": [title], "texts": {}, "background": ui.CARD}
-        if item.get("exercise"):
-            self._exercise_controls(card, body)
-        for widget in (frame, gutter, code, score, body, top, name, tag, age, title, bottom, eta, status):
+        bottom.pack(fill="x", pady=(3, 0))
+        status = tk.Label(bottom, bg=ui.CARD, fg=ui.MUTED, font=self.meta_font, anchor="w")
+        status.pack(side="left")
+        age = tk.Label(bottom, bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9))
+        age.pack(side="right")
+        flags = tk.Frame(body, bg=ui.CARD)
+        flag_labels = []
+        for _ in range(3):
+            label = tk.Label(flags, bg=ui.CARD, font=(SANS, 8, "bold"), padx=5, pady=1)
+            label.keep_colour = True
+            flag_labels.append(label)
+        card = {"item": item, "frame": frame, "stripe": stripe, "name": name, "age": age, "eta": eta,
+                "reason": reason, "status": status, "flags": flags, "flag_labels": flag_labels,
+                "texts": {}, "background": ui.CARD}
+        for widget in (frame, stripe, body, top, name, tag, age, reason, bottom, eta, status, flags, *flag_labels):
             widget.bind("<Button-1>", lambda _event, key=item["id"]: self.open(key))
             widget.bind("<Enter>", lambda _event, key=item["id"]: self.hover(key, True), add="+")
             widget.bind("<Leave>", lambda _event, key=item["id"]: self.hover(key, False), add="+")
         self.cards[item["id"]] = card
         self.paint(item["id"])
 
-    def _exercise_controls(self, card, body):
-        """The exercise alert keeps its replay countdown, triggers and review status controls."""
-        ui, app, tools = self.ui, self.app, self.app.tools
-        alert = card["item"]["alert"]
-        row = tk.Frame(body, bg=ui.CARD)
-        row.pack(fill="x", pady=(8, 0))
-        tk.Label(row, text="Exercise countdown to cable", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9)).pack(side="left")
-        clock = tk.Label(row, text="--:--:--", bg=ui.CARD, fg=ui.AMBER, font=(MONO, 14, "bold"))
-        clock.pack(side="right")
-        app.alert_cards.append((alert, clock))
-        details = ctk.CTkFrame(body, fg_color="transparent")
-        ctk.CTkLabel(details, text="Trigger\n" + "\n\n".join(alert["reasons"]), text_color=ui.MUTED,
-                     wraplength=self.wrap - 10, justify="left", font=ctk.CTkFont(SANS, 12)).pack(anchor="w", pady=8)
-        ctk.CTkOptionMenu(details, variable=tools.alert_statuses[alert["id"]],
-            values=["New", "Reviewed", "Acknowledged"], fg_color=ui.CONTROL, button_color=ui.CONTROL,
-            text_color=ui.INK, font=ctk.CTkFont(SANS, 12),
-            command=lambda value, key=alert["id"]: tools.set_alert_status(key, value)).pack(fill="x", pady=6)
-        tools.alert_messages[alert["id"]] = ctk.CTkLabel(details, text="", text_color=ui.MUTED,
-            wraplength=self.wrap - 10, font=ctk.CTkFont(SANS, 11))
-        tools.alert_messages[alert["id"]].pack(anchor="w")
-        actions = ctk.CTkFrame(body, fg_color="transparent")
-        actions.pack(fill="x", pady=(8, 0))
-        replay = ctk.CTkButton(actions, text="Open replay", command=lambda: tools.review_alert(alert),
-            fg_color=ui.PURPLE, hover_color="#af9450", text_color=ui.BG, width=100, height=28,
-            corner_radius=6, font=ctk.CTkFont(SANS, 12, "bold"))
-        replay.pack(side="left")
-        tools.style_button(replay, "Open the fictional exercise replay with its countdown and response options")
-        more = ctk.CTkButton(actions, text="Details", command=lambda: tools.toggle_alert_details(alert["id"]),
-            fg_color=ui.CARD, hover_color=ui.HOVER, border_width=1, border_color=ui.LINE, text_color=ui.INK,
-            width=84, height=28, corner_radius=6, font=ctk.CTkFont(SANS, 12))
-        more.pack(side="right")
-        tools.style_button(more, "Show triggers and review status")
-        tools.alert_details[alert["id"]] = (details, actions, more)
-
     # ----- state ----------------------------------------------------------------------
-    def status(self, identifier: str) -> str:
-        decision = self.decisions.get(identifier)
-        if decision:
-            return decision["status"]
-        return self.app.tools.review_values.get(identifier, "New")
+    def incident(self, identifier: str) -> dict | None:
+        return self.tracker.incident(self.by_id[identifier])
 
-    def status_text(self, identifier: str) -> str:
-        return self.status(identifier)
+    def status(self, identifier: str) -> str:
+        """Incident status, "Rejected" once closed, or "Watching" for a Low contact without an incident."""
+        return self.tracker.status(self.by_id[identifier]) or "Watching"
+
+    def group(self, identifier: str) -> str:
+        """critical/high/medium for an open incident, else quiet, watching or closed."""
+        item = self.by_id[identifier]
+        incident = self.tracker.open_incident(item)
+        if incident is not None:
+            return incident["level"] if RANK[incident["level"]] >= OPEN_RANK else "quiet"
+        return "closed" if self.tracker.incident(item) is not None else "watching"
 
     def elapsed_min(self) -> float:
         return (time.monotonic() - self.started) / 60
 
     def counts(self) -> dict[str, int]:
         states = [self.status(item["id"]) for item in self.items]
-        return {state: states.count(state) for state in STATUSES}
+        return {state: states.count(state) for state in (*STATUSES, "Watching")}
 
     def log(self, identifier: str, text: str) -> None:
         self.history.setdefault(identifier, []).append((utc_now(), text))
 
-    def decide(self, identifier: str, status: str, text: str, **details) -> None:
+    def decide(self, identifier: str, status: str, text: str, reason: str | None = None,
+               to: str | None = None) -> None:
+        """Record an analyst decision on the vessel's open incident through ``argus.incidents``."""
         if hasattr(self.app, 'require_tool') and not self.app.require_tool('alert.review'):
             return
-        if status == "Acknowledged" and identifier in self.app.tools.review_values:
-            self.decisions.pop(identifier, None)
-            self.app.tools.set_alert_status(identifier, "Acknowledged")
-        else:
-            self.decisions[identifier] = {"status": status, "utc": utc_now(), **details}
+        item = self.by_id[identifier]
+        if self.tracker.open_incident(item) is None:
+            return
+        self.tracker.decide(item, status, reason)
+        if to:
+            self.recipients[identifier] = to
+        self.sync_exercise(item, status)
         self.log(identifier, text)
         self.changed(identifier)
 
     def mark_reviewed(self, identifier: str) -> None:
         if self.status(identifier) != "New":
             return
-        if identifier in self.app.tools.review_values:
-            self.app.tools.set_alert_status(identifier, "Reviewed")
-        else:
-            self.decisions[identifier] = {"status": "Reviewed", "utc": utc_now()}
+        item = self.by_id[identifier]
+        self.tracker.decide(item, "Reviewed")
+        self.sync_exercise(item, "Reviewed")
         self.log(identifier, "Opened for review")
         self.changed(identifier, redraw=False)
 
-    def reopen(self, identifier: str) -> None:
-        if identifier in self.app.tools.review_values:
-            self.decisions.pop(identifier, None)
-        else:
-            self.decisions[identifier] = {"status": "Reviewed", "utc": utc_now()}
-        self.log(identifier, "Decision withdrawn; reopened")
-        self.changed(identifier)
+    def withdraw(self, identifier: str) -> None:
+        """Take back an escalation; the incident stays open as Reviewed."""
+        self.recipients.pop(identifier, None)
+        self.decide(identifier, "Reviewed", "Escalation withdrawn; reviewing again")
+
+    def sync_exercise(self, item: dict, status: str) -> None:
+        """Mirror the exercise incident's review status to the exercise replay's status menu."""
+        if not item.get("exercise") or status not in ("New", "Reviewed", "Acknowledged"):
+            return
+        tools, alert_id = self.app.tools, item["alert"]["id"]
+        if status == "Acknowledged" and tools.review_values.get(alert_id) == "New":
+            self.exercise_seen = "Reviewed"
+            tools.set_alert_status(alert_id, "Reviewed")
+        self.exercise_seen = status
+        tools.set_alert_status(alert_id, status)
 
     def changed(self, identifier: str, redraw: bool = True) -> None:
         self.paint(identifier)
@@ -354,18 +383,26 @@ class AlertBoard:
             self.dialog.refresh()
 
     def refresh_statuses(self) -> None:
-        """Called when the exercise status menu changes outside the queue."""
-        for identifier in self.app.tools.review_values:
-            if identifier in self.cards:
-                self.paint(identifier)
+        """Called when the exercise replay's status menu changes outside the queue."""
+        for item in self.items:
+            if not item.get("exercise"):
+                continue
+            value = self.app.tools.review_values.get(item["alert"]["id"])
+            if value != self.exercise_seen and value in ("New", "Reviewed", "Acknowledged"):
+                self.exercise_seen = value
+                if self.tracker.open_incident(item) is not None and self.status(item["id"]) != value:
+                    self.tracker.decide(item, value)
+                    self.log(item["id"], f"{value} in the exercise replay")
+            self.paint(item["id"])
+            if self.dialog.item and self.dialog.item["id"] == item["id"]:
+                self.dialog.refresh()
         self.update_counts()
-        if self.dialog.item and self.dialog.item["id"] in self.app.tools.review_values:
-            self.dialog.refresh()
 
     # ----- list -----------------------------------------------------------------------
     def paint(self, identifier: str) -> None:
         card = self.cards[identifier]
         item, ui = card["item"], self.ui
+        incident = self.incident(identifier)
         level = item["assessment"]["level"]
         status = self.status(identifier)
         closed = status == "Rejected"
@@ -376,14 +413,46 @@ class AlertBoard:
             card["frame"].configure(bg=background)
             recolour(card["frame"], background)
             card["background"] = background
-        card["code"].configure(text=CODES[level], fg=ui.MUTED if closed else STYLE[level][0])
-        card["score"].configure(text=str(item["assessment"]["score"]))
+        card["stripe"].configure(bg=ui.LINE if closed else STYLE[level][0])
         card["name"].configure(fg=ui.MUTED if closed else ui.INK)
-        card["status"].configure(text=self.status_text(identifier),
-                                 fg=ui.INK if status in ("New", "Escalated") else ui.MUTED,
-                                 font=(SANS, 9, "bold" if status == "Escalated" else "normal"))
+        width = self.wrap + 24
+        card["reason"].configure(text=clip(item["title"], self.reason_font, width))
+        # Status first, then the peak, then the asset: clipping only ever shortens the asset name.
+        if status == "Escalated" and identifier in self.recipients:
+            parts = [f"Escalated · {self.recipients[identifier]}"]
+        elif closed and incident and incident.get("status_reason"):
+            parts = [f"Rejected · {incident['status_reason']}"]
+        else:
+            parts = [status]
+        if incident and not closed and RANK[incident["peak_level"]] > RANK[incident["level"]]:
+            parts.append(f"peak {LEVEL_NAMES[incident['peak_level']]}")
+        parts.append(item["line_name"])
+        card["status"].configure(text=clip(" · ".join(parts), self.meta_font, width - 50),
+                                 fg=ui.INK if status in ("New", "Escalated") else ui.MUTED)
+        flags = badges(item, incident if not closed else None)
+        for index, label in enumerate(card["flag_labels"]):
+            if index < len(flags):
+                text, kind = flags[index]
+                colour = STYLE["medium"] if kind == "warn" else (ui.MUTED, ui.CONTROL)
+                label.configure(text=text, fg=colour[0], bg=colour[1])
+                label.pack(side="left", padx=(0, 4))
+            else:
+                label.pack_forget()
+        if flags and not closed:
+            card["flags"].pack(fill="x", pady=(5, 0))
+        else:
+            card["flags"].pack_forget()
         card["texts"].pop("eta", None)
         self.update_live(identifier)
+
+    def timer_text(self, item: dict) -> tuple[str, bool]:
+        """The card's timer and whether it is a live countdown."""
+        if item.get("exercise"):
+            remaining = self.app._remaining()
+            if remaining:
+                return f"ETA {self.ui.clock(remaining[0])}", True
+            return "before alert", False
+        return proximity_text(item), countdown(item) is not None
 
     def update_live(self, identifier: str | None = None) -> None:
         elapsed = self.elapsed_min()
@@ -391,12 +460,9 @@ class AlertBoard:
             card = self.cards[key]
             item = card["item"]
             texts = card["texts"]
-            if item.get("exercise"):
-                age, eta, ticking = "replay", "", False
-            else:
-                age = age_text(item.get("raised_min_ago", 0) + elapsed)
-                eta = proximity_text(item)
-                ticking = countdown(item) is not None and self.status(key) != "Rejected"
+            age = "replay" if item.get("exercise") else age_text(item.get("raised_min_ago", 0) + elapsed)
+            eta, ticking = self.timer_text(item)
+            ticking = ticking and self.status(key) != "Rejected"
             if texts.get("age") != age:
                 card["age"].configure(text=age)
                 texts["age"] = age
@@ -404,6 +470,10 @@ class AlertBoard:
                 colour = STYLE[item["assessment"]["level"]][0] if ticking else self.ui.MUTED
                 card["eta"].configure(text=eta, fg=colour, font=(MONO, 9, "bold") if ticking else (SANS, 9))
                 texts["eta"] = (eta, ticking)
+                # The name gives way to the timer and the SIM/EXERCISE tag on a narrow panel.
+                room = (self.wrap + 30 - (self.timer_font if ticking else self.meta_font).measure(eta) - 16
+                        - self.tag_font.measure("EXERCISE" if item.get("exercise") else "SIM"))
+                card["name"].configure(text=clip(item["name"], self.name_font, max(60, room)))
 
     def hover(self, identifier: str, inside: bool) -> None:
         frame = self.cards[identifier]["frame"]
@@ -418,15 +488,27 @@ class AlertBoard:
             if key in self.cards:
                 self.paint(key)
 
+    def matches_filter(self, identifier: str) -> bool:
+        group = self.group(identifier)
+        if self.level_filter is None:
+            return True
+        if self.level_filter == "low":
+            return group == "watching"
+        return group == self.level_filter
+
     def visible_items(self) -> list[dict]:
-        return [item for item in self.items if self.status(item["id"]) != "Rejected"
-                and (self.level_filter is None or item["assessment"]["level"] == self.level_filter)]
+        """Contacts drawn on the map: everything not closed that passes the level filter."""
+        return [item for item in self.items if self.group(item["id"]) != "closed" and self.matches_filter(item["id"])]
+
+    def _order(self, identifier: str) -> tuple:
+        incident = self.incident(identifier)
+        return (not (incident and incident.get("needs_review_again")), sort_key(self.by_id[identifier]))
 
     def relayout(self, top: bool = False) -> None:
         ui = self.ui
         for widget in self.list.winfo_children():
             widget.pack_forget()
-        visible = self.visible_items()
+        groups = {item["id"]: self.group(item["id"]) for item in self.items}
         first = True
 
         def header(key, count):
@@ -441,37 +523,53 @@ class AlertBoard:
             self.cards[item["id"]]["frame"].pack(fill="x")
             first = False
 
+        def members(group):
+            return sorted((item for item in self.items if groups[item["id"]] == group
+                           and self.matches_filter(item["id"])), key=lambda item: self._order(item["id"]))
+
         mode = self.sort_mode.get()
+        shown = 0
         if mode == "Severity":
-            for level in GROUPS:
-                group = sorted((item for item in visible if item["assessment"]["level"] == level), key=sort_key)
-                if group:
-                    header(level, len(group))
-                    for item in group:
+            for group in ("critical", "high", "medium", "quiet"):
+                found = members(group)
+                if found:
+                    header(group, len(found))
+                    for item in found:
                         card(item)
+                    shown += len(found)
         else:
             def time_key(item):
                 observations = item["observations"]
                 eta = 0.0 if observations.get("in_corridor") else observations.get("eta_min")
                 return (eta if eta is not None else 1e9, sort_key(item))
             key = time_key if mode == "Time to asset" else (lambda item: (item.get("raised_min_ago", 0), sort_key(item)))
-            for item in sorted(visible, key=key):
+            found = sorted((item for group in ("critical", "high", "medium", "quiet") for item in members(group)), key=key)
+            for item in found:
                 card(item)
-        if not visible:
-            self.empty.configure(text="No open alerts at this level." if self.level_filter else "No open alerts.",
+            shown = len(found)
+        if not shown and self.level_filter != "low":
+            self.empty.configure(text="No open incidents at this level." if self.level_filter else "No open incidents.",
                                  wraplength=self.wrap)
             self.empty.pack(fill="x", padx=10, pady=16)
-        closed = sorted((item for item in self.items if self.status(item["id"]) == "Rejected"
-                         and (self.level_filter is None or item["assessment"]["level"] == self.level_filter)), key=sort_key)
+        watching = members("watching")
+        if watching:
+            expanded = self.show_watching or self.level_filter == "low"
+            header("watching", f"{len(watching)} · {'hide' if expanded else 'show'}")
+            if expanded:
+                for item in watching:
+                    card(item)
+        closed = members("closed")
         if closed:
             header("closed", f"{len(closed)} · {'hide' if self.show_closed else 'show'}")
             if self.show_closed:
                 for item in closed:
                     card(item)
         counts = {level: 0 for level in LEVELS}
-        for item in self.items:
-            if self.status(item["id"]) != "Rejected" and item["assessment"]["level"] in counts:
-                counts[item["assessment"]["level"]] += 1
+        for group in groups.values():
+            if group in counts:
+                counts[group] += 1
+            elif group == "watching":
+                counts["low"] += 1
         for level in LEVELS:
             code, underline = self.tiles[level]
             active = self.level_filter == level
@@ -501,9 +599,11 @@ class AlertBoard:
 
     def update_counts(self) -> None:
         counts = self.counts()
-        open_count = len(self.items) - counts["Rejected"]
-        if self.level_filter:
-            shown = len(self.visible_items())
+        open_count = sum(counts[state] for state in STATUSES if state != "Rejected")
+        if self.level_filter == "low":
+            self.summary.configure(text=f"{counts['Watching']} watching ·")
+        elif self.level_filter:
+            shown = sum(1 for item in self.items if self.group(item["id"]) == self.level_filter)
             self.summary.configure(text=f"{shown} {LEVEL_NAMES[self.level_filter].lower()} ·")
         else:
             self.summary.configure(text=f"{open_count} open · {counts['Escalated']} escalated")
@@ -520,14 +620,20 @@ class AlertBoard:
         self.show_closed = not self.show_closed
         self.relayout()
 
+    def toggle_watching(self) -> None:
+        if self.level_filter == "low":
+            self.set_filter(None)
+            return
+        self.show_watching = not self.show_watching
+        self.relayout()
+
     def set_width(self, pixels: int) -> None:
         wrap = max(150, pixels - 92)
         if pixels <= 0 or wrap == self.wrap:
             return
         self.wrap = wrap
-        for card in self.cards.values():
-            for label in card["wrapped"]:
-                label.configure(wraplength=wrap)
+        for identifier in self.cards:
+            self.paint(identifier)
         self.empty.configure(wraplength=wrap)
         self.app.alert_counts_label.configure(wraplength=wrap + 50)
 
@@ -544,10 +650,12 @@ class AlertBoard:
             canvas.yview_moveto(max(0.0, (top - 40) / total))
 
     def flash(self, identifier: str, count: int = 6) -> None:
-        """Briefly tint a row whose level has just risen."""
+        """Briefly tint a card whose incident has just opened or risen."""
         card = self.cards[identifier]
+        previous = self.flashing.pop(identifier, None)
+        if previous and count == 6:
+            self.app.root.after_cancel(previous)
         if count <= 0:
-            self.flashing.pop(identifier, None)
             card["background"] = None
             self.paint(identifier)
             return
@@ -575,9 +683,7 @@ class AlertBoard:
             self.reveal(item)
         else:
             self.app._draw_map()
-        kind = "fictional exercise" if item.get("exercise") else "simulated contact"
-        self.app.map_status_label.configure(
-            text=f"{item['name']} · {kind} · {item['assessment']['level_name']} {item['assessment']['score']}")
+        self.app.map_status_label.configure(text=self.describe(identifier))
 
     def deselect(self) -> None:
         previous, self.selected = self.selected, None
@@ -628,38 +734,54 @@ class AlertBoard:
             self.cards[item["id"]]["item"] = item
             self.cards[item["id"]]["texts"].clear()
         self.started = time.monotonic()
-        self.decisions.clear()
+        self.tracker = Tracker()
+        self.tracker.step(self.items, 0)
+        self.recipients.clear()
         self.history.clear()
         tools = self.app.tools
         for identifier in tools.review_values:
             tools.review_values[identifier] = "New"
             tools.alert_statuses[identifier].set("New")
+        self.exercise_seen = "New"
         self.selected = None
         self.dialog.close()
         for identifier in self.cards:
             self.paint(identifier)
         self.relayout(top=True)
         self.app._draw_map()
-        self.app.map_status_label.configure(text="Simulation restarted · countdowns and decisions reset")
+        self.app.map_status_label.configure(text="Simulation restarted · countdowns, incidents and decisions reset")
+
+    def advance(self, elapsed_s: float) -> dict[str, list[str]]:
+        """Score the board at ``elapsed_s`` and fold it into the incidents; log, repaint and flash what changed."""
+        changed = update(self.items, elapsed_s)
+        events = self.tracker.step(self.items, int(elapsed_s))
+        for identifier, found in events.items():
+            incident = self.incident(identifier)
+            for event in found:
+                self.log(identifier, EVENT_TEXT[event].format(id=incident["id"], level=LEVEL_NAMES[incident["level"]]))
+        touched = set(changed) | set(events)
+        if not touched:
+            return events
+        for identifier in touched:
+            self.paint(identifier)
+        self.relayout()
+        for identifier, found in events.items():
+            if {"opened", "raised", "review_again"} & set(found):
+                self.flash(identifier)
+        news = [f"{self.by_id[i]['name']} " + ("incident opened" if "opened" in found else
+                "review again" if "review_again" in found else "quiet: close?" if "quiet" in found
+                else f"now {LEVEL_NAMES[self.incident(i)['level']]}") for i, found in events.items()]
+        self.app._draw_map()
+        if news:
+            self.app.map_status_label.configure(text=" · ".join(news))
+        if self.dialog.item and self.dialog.item["id"] in touched:
+            self.dialog.refresh()
+        return events
 
     def tick(self) -> None:
         self.timer = None
         try:
-            changed = update(self.items, time.monotonic() - self.started)
-            for identifier in changed:
-                item = self.by_id[identifier]
-                self.paint(identifier)
-                self.log(identifier, f"Level raised to {item['assessment']['level_name']} ({proximity_text(item)})")
-            if changed:
-                self.relayout()
-                for identifier in changed:
-                    self.flash(identifier)
-                names = ", ".join(f"{self.by_id[i]['name']} now {self.by_id[i]['assessment']['level_name']}"
-                                  for i in changed)
-                self.app._draw_map()
-                self.app.map_status_label.configure(text=f"Level raised · {names}")
-                if self.dialog.item and self.dialog.item["id"] in changed:
-                    self.dialog.refresh()
+            self.advance(time.monotonic() - self.started)
             self.update_live()
             self.dialog.update_live()
             self.pulse_halos()
@@ -781,7 +903,10 @@ class AlertBoard:
     def describe(self, identifier: str) -> str:
         item = self.by_id[identifier]
         kind = "Fictional exercise" if item.get("exercise") else "Simulated contact"
-        return f"{kind} · {item['name']} · {item['assessment']['level_name']} {item['assessment']['score']} · {item['title']}"
+        incident = self.tracker.open_incident(item)
+        where = f"{incident['id']} {self.status(identifier)}" if incident else self.status(identifier)
+        return (f"{kind} · {item['name']} · {item['assessment']['level_name']} {item['assessment']['score']} · "
+                f"{where} · {item['title']}")
 
 
 class ReviewDialog:
@@ -820,6 +945,9 @@ class ReviewDialog:
         self.title = tk.Label(self.frame, text="", bg=ui.CARD, fg=ui.INK, font=(SANS, 12), anchor="w",
                               justify="left", wraplength=self.WIDTH - 50)
         self.title.pack(fill="x", padx=20, pady=(8, 0))
+        self.flags = tk.Label(self.frame, text="", bg=ui.CARD, fg=STYLE["medium"][0], font=(SANS, 10, "bold"),
+                              anchor="w", justify="left", wraplength=self.WIDTH - 50)
+        self.flags.pack(fill="x", padx=20, pady=(4, 0))
         self.scale = tk.Canvas(self.frame, height=44, bg=ui.CARD, highlightthickness=0)
         self.scale.pack(fill="x", padx=20, pady=(12, 0))
         self.scale.bind("<Configure>", lambda _event: self.draw_scale())
@@ -883,8 +1011,13 @@ class ReviewDialog:
         item = board.by_id.get(item["id"], item)
         self.item = item
         assessment = item["assessment"]
-        self.level.configure(text=assessment["level_name"].upper(), fg=STYLE[assessment["level"]][0])
-        self.score.configure(text=f"Score {assessment['score']}")
+        incident = board.incident(item["id"])
+        status = board.status(item["id"])
+        level = assessment["level_name"].upper()
+        if incident and RANK[incident["peak_level"]] > RANK[assessment["level"]]:
+            level += f"  ·  PEAK {LEVEL_NAMES[incident['peak_level']].upper()}"
+        self.level.configure(text=level, fg=STYLE[assessment["level"]][0])
+        self.score.configure(text=f"Score {assessment['score']}" + (f"  ·  {incident['id']}" if incident else ""))
         self.tag.configure(text="EXERCISE" if item.get("exercise") else "SIMULATED")
         self.name.configure(text=item["name"])
         meta = [item["vessel_type"]]
@@ -897,15 +1030,20 @@ class ReviewDialog:
                         else f"raised {minutes // 60} h {minutes % 60:02d} min ago")
         self.meta.configure(text="  ·  ".join(meta))
         self.title.configure(text=item["title"])
+        flags = badges(item, incident if status != "Rejected" else None)
+        self.flags.configure(text="   ".join(text for text, _kind in flags))
+        if flags:
+            self.flags.pack(fill="x", padx=20, pady=(4, 0), after=self.title)
+        else:
+            self.flags.pack_forget()
         self.draw_scale()
         self.facts["asset"][0].configure(text=item["line_name"])
         self.facts["asset"][1].configure(text="Fictional cable" if item.get("exercise") else "Illustrative route")
         self.update_live(force=True)
-        status = board.status(item["id"])
-        decision = board.decisions.get(item["id"], {})
-        detail = {"Escalated": f"To {decision.get('to', '')}", "Rejected": decision.get("reason", "")}.get(
-            status, STATUS_DETAIL.get(status, ""))
-        self.facts["status"][0].configure(text=status, fg=ui.INK)
+        detail = {"Escalated": f"To {board.recipients.get(item['id'], '')}",
+                  "Rejected": (incident or {}).get("status_reason") or "",
+                  "Watching": "Low: an observation, not an incident"}.get(status, STATUS_DETAIL.get(status, ""))
+        self.facts["status"][0].configure(text="Closed · rejected" if status == "Rejected" else status, fg=ui.INK)
         self.facts["status"][1].configure(text=detail)
         self.fill_body()
         self.fill_actions()
@@ -918,7 +1056,11 @@ class ReviewDialog:
         observations = item["observations"]
         colour, font = self.ui.INK, (SANS, 11, "bold")
         if item.get("exercise"):
-            value, detail = "See replay", "Exercise countdown"
+            remaining = self.board.app._remaining()
+            value, detail = (self.board.ui.clock(remaining[0]), "Exercise replay countdown") if remaining else (
+                "Before alert", "Exercise replay")
+            if remaining:
+                colour, font = STYLE[item["assessment"]["level"]][0], (MONO, 12, "bold")
         elif countdown(item) is not None:
             value, detail = countdown(item), "Constant speed and course"
             colour, font = STYLE[item["assessment"]["level"]][0], (MONO, 12, "bold")
@@ -999,6 +1141,8 @@ class ReviewDialog:
                      wraplength=wrap - 40).pack(side="left", fill="x", expand=True, padx=(10, 0))
         source = ("Fictional exercise alert from the demo files." if item.get("exercise") else
                   "Simulated contact. Vessel, track and observations are fictional; the route is illustrative.")
+        source += (" Brain opens and updates the incident; only a human sets its status." if
+                   board.incident(item["id"]) else " Low: watched, not an incident; it opens one if it reaches Medium.")
         tk.Label(self.body, text=source + " Decisions are logged locally and not transmitted.", bg=ui.CARD,
                  fg=ui.MUTED, font=(SANS, 9), anchor="w", justify="left", wraplength=wrap + 40).pack(
             fill="x", padx=(6, 0), pady=(18, 6))
@@ -1022,10 +1166,11 @@ class ReviewDialog:
             button("Open replay", self.open_replay, tip="Open the exercise replay with its countdown")
         else:
             button("Show on map", lambda: board.reveal(self.item, fit=True), tip="Fit the map to the track and the asset")
-        if self.mode:
+        if self.mode or status in ("Watching", "Rejected"):
+            # Low contacts are observations and a rejected incident is closed: nothing to decide.
             return
-        if status in ("Escalated", "Rejected"):
-            button("Reopen", lambda: board.reopen(self.item["id"]), tip="Withdraw the decision and review again")
+        if status == "Escalated":
+            button("Withdraw", lambda: board.withdraw(self.item["id"]), tip="Take back the escalation; keep reviewing")
         if status != "Rejected":
             button("Escalate", lambda: self.open_form("escalate"), side="right", primary=True,
                    tip="Escalate to a duty officer, the asset operator, MRCC or the Naval Service")
@@ -1090,9 +1235,9 @@ class ReviewDialog:
         identifier = self.item["id"]
         self.mode, escalate = None, self.mode == "escalate"
         if escalate:
-            self.board.decide(identifier, "Escalated", f"Escalated to {choice}{suffix}", to=choice, note=note)
+            self.board.decide(identifier, "Escalated", f"Escalated to {choice}{suffix}", to=choice)
         else:
-            self.board.decide(identifier, "Rejected", f"Rejected: {choice.lower()}{suffix}", reason=choice, note=note)
+            self.board.decide(identifier, "Rejected", f"Rejected: {choice.lower()}{suffix}", reason=choice)
         self.board.app.map_status_label.configure(
             text=f"{self.item['name']} {'escalated to ' + choice if escalate else 'rejected: ' + choice.lower()} · "
                  "logged locally, not transmitted")
