@@ -1,7 +1,7 @@
 # Windows regression fixes — 14 October 2026
 
-These fixes are prepared on `codex/windows-regression-fixes`, based on main after
-PR #12. They have not been merged into main.
+These fixes were developed on `codex/windows-regression-fixes`, based on main
+after PR #12. The results below record validation before integration.
 
 ## Causes and changes
 
@@ -37,8 +37,8 @@ PR #12. They have not been merged into main.
 
 All AIS fixtures are simulated; no genuine upstream API key is used. Neither
 demo JSON contract nor the human approval workflow changed. The expanded CI
-matrix will run when this branch is submitted as a PR; it is not claimed as
-verified remotely yet.
+matrix validates both platforms on future pull requests; remote results are
+recorded in the pull request checks separately from these local measurements.
 
 Windows has no CRT directory-fsync equivalent. File flushing and process-crash
 recovery do not establish universal sudden-power-loss guarantees for directory
