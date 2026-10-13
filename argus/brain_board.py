@@ -6,7 +6,10 @@ vessel runs the registered detectors on the scenario, and each simulated item's
 hand-written observations enter as findings. The small-vessel relevance rule
 then caps or explains the level. Five extra simulated items show the rules:
 small craft that are capped or not (SIM-40 to SIM-43) and a ship approaching
-two lines at once, scored for the more urgent one (SIM-44).
+two lines at once, scored for the more urgent one (SIM-44). Three more carry
+fictional timed AIS tracks that the real ``ais_spoofing`` detector reads: one
+identity in two places (SIM-45), a small craft with an inland fix (SIM-46) and
+a single GPS glitch that must not count as spoofing (SIM-47).
 
 AIS ship types, classes and radar lengths below are assumptions for fictional
 contacts. Nothing here reads live AIS or sends anything.
@@ -17,6 +20,8 @@ from __future__ import annotations
 from argus import alert_board
 from argus.alert_board import LINES, _item, sort_key
 from argus.assemble import apply_relevance, assess_vessel, context_from_scenario
+from argus.countdown import step
+from argus.detectors import ais_spoofing
 
 # Assumed AIS ship type codes for the board's display types.
 SHIP_TYPES = {
@@ -53,6 +58,66 @@ EXTRA_ITEMS = [
 ]
 
 
+def _straight(lat, lon, course, speed_kn, count, interval_s=60):
+    """A fictional straight track: ``count`` fixes ``interval_s`` apart, declaring its true speed."""
+    fixes = []
+    for index in range(count):
+        here = step(lat, lon, course, speed_kn * index * interval_s / 3600)
+        fixes.append({"t": index * interval_s, "lat": round(here[0], 5), "lon": round(here[1], 5),
+                      "sog_kn": speed_kn, "cog_deg": course})
+    return fixes
+
+
+def _moved(fix: dict, course: float, distance_nm: float) -> None:
+    fix["lat"], fix["lon"] = (round(value, 5) for value in step(fix["lat"], fix["lon"], course, distance_nm))
+
+
+def _two_places_track():
+    """From fix 31 on, every other fix is reported 12 nm north of the ship, as by a second transmitter."""
+    track = _straight(53.40, -5.62, 95, 11.0, 41)
+    for fix in track[31::2]:
+        _moved(fix, 0, 12)
+    return track
+
+
+def _small_craft_track():
+    """Moves at 9 kn but declares 2 kn for six fixes; one later fix lies inland on the Isle of Man."""
+    track = _straight(53.50, -5.40, 80, 9.0, 30)
+    for fix in track[10:16]:
+        fix["sog_kn"] = 2.0
+    track[25].update(lat=54.23, lon=-4.53)
+    return track
+
+
+def _glitch_track():
+    """One fix 2.5 nm off a steady track and straight back: a single outlier, not a spoofing sign."""
+    track = _straight(51.98, -6.30, 250, 12.0, 30)
+    _moved(track[20], 340, 2.5)
+    return track
+
+
+# Simulated items scored on a fictional timed AIS track: (alert_board._item row, AIS class, track builder).
+# The row's position is replaced by the track's last fix.
+TRACK_ITEMS = [
+    (("SIM-45", "AMBER SKERRY", "Bulk carrier", 185, "dublin-holyhead", 0, 0, 95, 11.0, 6, "line",
+      "Same MMSI reported in two places 12 nm apart while heading for the Dublin–Holyhead cable",
+      "Identity in doubt: request a satellite radar look to see which position is real, then hail on VHF 16.",
+      {"slowdown_near_corridor": True, "eta_min": 40}), "A", _two_places_track),
+    (("SIM-46", "TALLOW FINCH", "Pleasure craft", 12, "north-dublin", 0, 0, 80, 9.0, 9, "line",
+      "Declared 12 m pleasure craft: speed does not match its positions, and one fix lies inland on the Isle of Man",
+      "Declared data in doubt despite the small size: request identification before the craft reaches the line.",
+      {"slowdown_near_corridor": True, "eta_min": 50}), "B", _small_craft_track),
+    (("SIM-47", "BEARA DAWN", "General cargo", 140, "greenlink", 0, 0, 250, 12.0, 15, "line",
+      "One AIS fix 2.5 nm off a steady track, then straight back",
+      "Likely a GPS glitch: monitor only.",
+      {"eta_min": 70}), "A", _glitch_track),
+]
+
+# Board-only detectors whose reasons are already the item's title; other detectors' reasons become notes.
+QUIET_DETECTORS = frozenset({"alert_board_simulated", "legacy_cable_v1"})
+DETECTOR_NOTE_REASONS = 4
+
+
 def _vessel(item: dict, ais_class: str) -> dict:
     return {"mmsi": item["id"], "name": item["name"], "ship_type": SHIP_TYPES.get(item["vessel_type"]),
             "ais_class": ais_class, "ais_length_m": item.get("length_m") or None, "destination": None,
@@ -75,19 +140,34 @@ def _board_findings(item: dict, other_lines=()):
     return detect
 
 
+def _detector_notes(findings: list[dict]) -> list[str]:
+    """Track detectors' reasons (summary first), shown under the indicators so a reviewer sees the numbers."""
+    return [f"{finding['detector']}: {reason}" for finding in findings if finding["detector"] not in QUIET_DETECTORS
+            for reason in finding["reasons"][:DETECTOR_NOTE_REASONS]]
+
+
+def _with_notes(assessment: dict, notes: list[str]) -> dict:
+    return {**assessment, "notes": assessment["notes"] + notes} if notes else assessment
+
+
 def _rescore(item: dict, result: dict) -> None:
-    item.update(observations=result["observations"], assessment=result["assessment"],
-                relevance=result["relevance"], cable_id=result["cable_id"],
+    notes = _detector_notes(result["findings"])
+    item.update(observations=result["observations"], assessment=_with_notes(result["assessment"], notes),
+                relevance=result["relevance"], cable_id=result["cable_id"], detector_notes=notes,
                 detectors=[f["detector"] for f in result["findings"]])
 
 
 def build_board(scenario: dict | None = None, alerts: list | None = None) -> list[dict]:
-    """Same items as ``alert_board.build_board`` plus five extras, scored through ``argus.assemble``."""
+    """Same items as ``alert_board.build_board`` plus eight extras, scored through ``argus.assemble``."""
     items = alert_board.build_board(scenario, alerts)
-    other_lines = {}
+    other_lines, tracks = {}, {}
     for row, ais_class, others in EXTRA_ITEMS:
         items.append({**_item(*row), "ais_class": ais_class})
         other_lines[row[0]] = others
+    for row, ais_class, make_track in TRACK_ITEMS:
+        track = tracks[row[0]] = make_track()
+        items.append({**_item(*row), "ais_class": ais_class, "lat": track[-1]["lat"], "lon": track[-1]["lon"],
+                      "track": [(fix["lat"], fix["lon"]) for fix in track[:-1]]})
     context = context_from_scenario(scenario) if scenario else {}
     for item in items:
         if item.get("exercise"):
@@ -95,7 +175,8 @@ def build_board(scenario: dict | None = None, alerts: list | None = None) -> lis
             _rescore(item, assess_vessel(vessel, context))
         else:
             detector = _board_findings(item, other_lines.get(item["id"], ()))
-            _rescore(item, assess_vessel(_vessel(item, item.get("ais_class", "A")), {}, [detector]))
+            vessel = {**_vessel(item, item.get("ais_class", "A")), "track": tracks.get(item["id"], [])}
+            _rescore(item, assess_vessel(vessel, {}, [detector, ais_spoofing.detect]))
     return sorted(items, key=sort_key)
 
 
@@ -105,5 +186,6 @@ def update(items: list[dict], elapsed_s: float) -> list[str]:
     alert_board.update(items, elapsed_s)
     for item in items:
         if item.get("relevance") and item.get("eta_start_min") is not None:
-            item["assessment"] = apply_relevance(item["assessment"], item["relevance"])
+            item["assessment"] = _with_notes(apply_relevance(item["assessment"], item["relevance"]),
+                                             item.get("detector_notes", []))
     return [item["id"] for item in items if item["assessment"]["level"] != before[item["id"]]]
