@@ -17,8 +17,16 @@ rule-generated alert and fictional Space evidence page run together. The two pub
 historical radar contacts remain a separate review example; measured evaluation numbers
 and external data replacement are pending. See [DECISIONS.md](DECISIONS.md) D29–D30.
 
+**Irish vessel images for the demonstration:** [Nazar's offline image pack](demo/imagery/README.md)
+contains six internet-cable risk demo cards, ten labelled vessel close-ups from
+Ireland and the North Sea, two Irish overviews and contact sheets. The imagery is
+real; names/codes are fictional and cable/behavior overlays are simulated.
+Sources, dates and reuse terms are included with the images.
+
 **Run the native desktop application:** double-click `RUN-GUI-WINDOWS.bat` on Windows.
-It creates an ignored `.venv` and installs the UI packages on first run. Alternatively,
+It creates an ignored `.venv` and installs the UI packages on first run. In a Git clone,
+`UPDATE-AND-RUN-WINDOWS.bat` (Windows) or `UPDATE-AND-RUN-MAC.command` (macOS) first pulls
+the latest commits of the checked-out branch, then starts the app. Alternatively,
 create a virtual environment, run `python -m pip install -r requirements.txt`, then
 `python run_gui.py`. The app needs Python 3.10+ with Tkinter (Tcl/Tk) enabled; on
 Windows, include **Tcl/Tk and IDLE** in the Python installer. Use
@@ -220,6 +228,7 @@ the answer is "after the hackathon". ([plan §4.6](docs/04-work-plan.md))
 | [docs/08-research-and-next-ideas.md](docs/08-research-and-next-ideas.md) | Checked primary sources, caveats and suggested next improvements |
 | [docs/09-team-skills.md](docs/09-team-skills.md) | How teammates download the repository skills |
 | [docs/10-space-dataset-plan.md](docs/10-space-dataset-plan.md) | Space dataset comparison, implementation sequence and handoffs to Data, Brain and Interface |
+| [docs/12-argus-mara-alert-levels.md](docs/12-argus-mara-alert-levels.md) | How alert levels are scored and how the docked alert panel works |
 | [docs/demo-runbook.md](docs/demo-runbook.md) | Four-minute click and talk script, offline acceptance and fallback steps |
 | [docs/one-pager.md](docs/one-pager.md) | Current demonstrated capability and explicit validation limits |
 | [docs/ui-skills-survey.md](docs/ui-skills-survey.md) | UI skills and tools ranked for this static offline console |
@@ -281,10 +290,12 @@ contracts stay usable without a live connection.
 
 ### Irish ports and left alerts panel
 
-The **Alerts** panel is permanently visible on the left of the chart. It separates
-live AIS status (no live detector is running) from labelled fictional exercise
-alerts. **Review exercise alert** opens the existing countdown and explicit
-operator approval. No live threat assessment or operational action is created.
+The **Alerts** panel is docked between the left icon rail and the map. It lists
+labelled simulated contacts and the fictional exercise alert, sorted Critical to
+Low, and opens a review window to acknowledge, escalate or reject each one. See
+[Argus Mara alert levels](docs/12-argus-mara-alert-levels.md) for the scoring rules
+and the panel. Live AIS is not scored; no live threat assessment or operational
+action is created.
 
 Irish ports are displayed by default. The offline layer adds all 142 commercial,
 fishing and ferry records from the Marine Irish Digital Atlas layers served by
@@ -314,11 +325,11 @@ reference layer is bundled for offline use.
   UTC and fix age. **Follow selected ship** recentres on received fixes only.
   Panning, opening an exercise, fitting a view or choosing a search result stops
   following. No movement is predicted.
-- **Alert review:** fictional alert cards show the trigger and source, with
-  **New**, **Reviewed** and **Acknowledged** states and summary counts.
-  Review must precede acknowledgement. These states last for the session and
-  never approve an operational response; the existing explicit simulated response
-  approval remains separate.
+- **Alert review:** every alert card has **New**, **Reviewed**, **Acknowledged**,
+  **Escalated** and **Rejected** states with summary counts. Opening a card
+  reviews it, and review must precede acknowledgement. These states last for the
+  session and never approve an operational response; the existing explicit
+  simulated response approval remains separate.
 - **Legend:** the bottom **Ships**, **Stale**, **Ports** and **Cables** switches
   directly control the map. **SAR demo** controls the simulated radar layer while
   the fictional exercise is open. Stale toggles the same freshness filter as the
@@ -343,12 +354,13 @@ and provenance; the shared scenario and alert JSON files are unchanged.
 
 The desktop uses Segoe UI for controls and prose, with monospace UTC, counts and
 countdowns. Original locally rendered outline icons share an 18 px size and
-consistent stroke. Gold marks controls and selected boats, cyan marks reference selections, amber marks alerts,
-and quieter neutral colours describe ordinary layers.
+consistent stroke. Gold marks controls and selected boats, cyan marks reference selections, alert
+levels use red, orange, amber and blue, and quieter neutral colours describe
+ordinary layers.
 
-Alert cards initially show their vessel, source badge, state and large countdown.
-**Details** expands the trigger explanation and review-state selector; **Review**
-opens the same fictional exercise. Observation age and operator approval remain
+The exercise alert card keeps its countdown. **Details** expands the trigger
+explanation and review-state selector; **Open replay** opens the same fictional
+exercise. Observation age and operator approval remain
 explicit. The header separates connection status, received/fresh counts and UTC.
 
 Stale ship fixes use smaller muted dots; selected boats retain a gold ring.
@@ -394,3 +406,21 @@ again while armed to cancel, or press **Escape** on the map to clear it. A new
 ping replaces the previous one. **Reduce panel motion** also stops the ping's
 pulsing rings. Pings are local operator annotations; they are not sent to a
 ship or another team member and do not create an alert.
+
+### Docked alert board (simulated)
+
+The left **Alerts** panel is the main working list. It shows 40 labelled items:
+the fictional exercise alert, 15 hand-written scenarios and 24 frequent minor alerts,
+sorted Critical → High → Medium → Low. Click a level counter to filter, or change the
+sort to time to the asset or newest. Click a row or a map marker to open its review
+window: the score scale, the indicators behind the level, the time to the asset, the
+recommended action and the log. **Acknowledge**, **Escalate** (duty officer, line
+operator, Irish Coast Guard (MRCC) or Naval Service operations) and **Reject** (with a
+reason) are recorded for the session only; nothing is sent. Countdowns run live, so
+GREY HERON rises from High to Critical after about 3.5 minutes; ↻ restarts the
+simulation. Map markers use the level colours, carry **SIM** labels and sit under a
+**SIMULATED** corner badge; **Sim alerts** in the legend hides them. On a trackpad,
+two fingers scroll the queue, and on macOS a pinch zooms the map. Pinching needs the
+optional PyObjC package in `requirements-mac.txt`; `UPDATE-AND-RUN-MAC.command`
+installs it on its next run. Full rules:
+[Argus Mara alert levels](docs/12-argus-mara-alert-levels.md).

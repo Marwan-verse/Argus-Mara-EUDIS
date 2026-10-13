@@ -173,7 +173,10 @@ class DesktopAISWindowTests(unittest.TestCase):
             root.update()
             self.assertFalse(app.panel_visible)
             self.assertFalse(app.exercise_visible.get())
-            self.assertGreater(app.map.winfo_width(), root.winfo_width() * .9)
+            # The alert board is docked beside the icon rail; the map fills the remaining width.
+            self.assertEqual(app.chart_host.winfo_x(), app.alerts_panel.winfo_x() + app.alerts_panel.winfo_width())
+            self.assertGreaterEqual(app.map.winfo_width(), app.chart_frame.winfo_width() - app.chart_host.winfo_x() - 1)
+            self.assertGreater(app.map.winfo_width(), root.winfo_width() * .6)
             self.assertGreater(app.map.winfo_height(), root.winfo_height() * .8)
             self.assertTrue(app.alerts_panel.winfo_ismapped())
             self.assertLess(app.alerts_panel.winfo_x(), app.map.winfo_width() / 2)

@@ -11,6 +11,12 @@
 - The static offline operator console and local coastline display geometry in `ui/`.
 - The rule-based Brain alert, countdown and response calculations in `argus/brain.py` and `argus/countdown.py`; the corrected minute-90 fictional replay and bundled fictional Space page in `ui/evidence/`.
 - Automated contract, Space, Brain and replay checks in `tests/`.
+- Nazar's attributed Irish coastal satellite image pack in `demo/imagery/`, prepared
+  on 13 October 2026: ten vessel figures from Ireland and the North Sea, six
+  simulated internet-cable risk figures, two Irish location overviews, contact
+  sheets and a reproducible Python preparation script. Pixels are real; demo
+  identities are fictional and cable/behavior overlays are simulated. Original
+  downloaded rasters remain ignored under `data/`.
 
 These are **pre-event** components. Git commits, not this summary, are the detailed record of authorship and timing. The fictional scenario, illustrative cable, simulated radar detection and assumed response assets are not operational validation.
 
