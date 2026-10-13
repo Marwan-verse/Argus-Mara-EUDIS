@@ -11,15 +11,24 @@ instead of one row per alert. No tkinter here, so it is tested without a display
   their board ID (``SIM-41``), so incident IDs read ``INC-999000001-1`` and
   ``INC-SIM-41-1``.
 * Status changes go through ``argus.incidents.set_status`` only.
+* ``Replay`` runs the board on the exercise replay clock: forwards in steps,
+  and backwards by rebuilding from the start and re-applying the analyst's
+  earlier decisions (``argus.incidents`` itself never goes back in time).
 """
 
 from __future__ import annotations
 
 from argus import incidents
-from argus.levels import RANK
+from argus.brain_board import rescore_exercise, update
+from argus.levels import LEVEL_NAMES, RANK
 
 # Below OPEN_LEVEL a contact is watched, not an incident.
 OPEN_RANK = RANK[incidents.OPEN_LEVEL]
+# Replay step: fine enough for 30 min quiet checks, cheap enough to rebuild a whole replay.
+STEP_S = 60
+EVENT_TEXT = {"opened": "Incident {id} opened at {level}", "raised": "Level raised to {level}",
+              "review_again": "Level rose after review: review again",
+              "quiet": f"Quiet {incidents.QUIET_CLOSE_S // 60} min below Medium: close?"}
 
 
 def vessel_key(item: dict) -> str:
@@ -101,3 +110,96 @@ class Tracker:
         if found is None:
             raise KeyError(f"{item['id']} has no open incident")
         return incidents.set_status(self.state, found["id"], status, reason)
+
+
+class Replay:
+    """Board items and their incidents at a replay time, moved forwards or backwards.
+
+    ``start_s`` is the replay time the board's simulated countdowns start from
+    (the exercise alert). A simulated contact appears ``raised_min_ago`` before
+    it; the exercise vessel is always present and re-scored on its own track.
+    """
+
+    def __init__(self, items: list[dict], scenario: dict, start_s: float, step_s: int = STEP_S):
+        self.items, self.scenario, self.start_s, self.step_s = items, scenario, int(start_s), step_s
+        self.decisions: list[dict] = []
+        self._reset()
+
+    def _reset(self) -> None:
+        self.tracker = Tracker()
+        self.now: int | None = None
+        self.log: dict[str, list[tuple[int, str]]] = {}
+        self.recipients: dict[str, str] = {}
+
+    def appear_s(self, item: dict) -> float:
+        if item.get("exercise"):
+            return float("-inf")
+        return self.start_s - item.get("raised_min_ago", 0) * 60
+
+    def present(self, item: dict) -> bool:
+        return self.now is not None and self.now >= self.appear_s(item)
+
+    def _note(self, identifier: str, t: int, text: str) -> None:
+        self.log.setdefault(identifier, []).append((t, text))
+
+    def _step(self, t: int) -> dict[str, list[str]]:
+        update(self.items, t - self.start_s)
+        for item in self.items:
+            if item.get("exercise"):
+                rescore_exercise(item, self.scenario, t)
+        self.now = t
+        events = self.tracker.step([item for item in self.items if t >= self.appear_s(item)], t)
+        by_id = {item["id"]: item for item in self.items}
+        for identifier, found in events.items():
+            incident = self.tracker.incident(by_id[identifier])
+            for event in found:
+                self._note(identifier, t, EVENT_TEXT[event].format(id=incident["id"],
+                                                                 level=LEVEL_NAMES[incident["level"]]))
+        return events
+
+    def _apply(self, decision: dict) -> bool:
+        item = next(item for item in self.items if item["id"] == decision["id"])
+        try:
+            self.tracker.decide(item, decision["status"], decision["reason"])
+        except (KeyError, ValueError):
+            return False
+        if decision["status"] == "Escalated" and decision.get("to"):
+            self.recipients[decision["id"]] = decision["to"]
+        else:
+            self.recipients.pop(decision["id"], None)
+        self._note(decision["id"], decision["t"], decision["text"])
+        return True
+
+    def seek(self, t: float) -> tuple[dict[str, list[str]], bool]:
+        """Move the board to replay time ``t``; return (events while moving forwards, whether it rewound).
+
+        Going back rebuilds from the earlier of 0 and ``t``, re-applying decisions made up to ``t``;
+        decisions made after ``t`` are dropped, as they had not happened yet.
+        """
+        t = int(t)
+        if self.now == t:
+            return {}, False
+        if self.now is not None and t > self.now:
+            events: dict[str, list[str]] = {}
+            for moment in [*range(self.now + self.step_s, t, self.step_s), t]:
+                for identifier, found in self._step(moment).items():
+                    events.setdefault(identifier, []).extend(found)
+            return events, False
+        rewound = self.now is not None
+        self._reset()
+        self.decisions = [decision for decision in self.decisions if decision["t"] <= t]
+        pending = sorted(self.decisions, key=lambda decision: decision["t"])
+        origin = min(0, t)
+        for moment in [*range(origin, t, self.step_s), t]:
+            self._step(moment)
+            while pending and pending[0]["t"] <= moment:
+                self._apply(pending.pop(0))
+        return {}, rewound
+
+    def decide(self, item: dict, status: str, text: str, reason: str | None = None, to: str | None = None) -> dict:
+        """Record a human decision at the current replay time (``KeyError`` with no open incident)."""
+        decision = {"t": self.now, "id": item["id"], "status": status, "reason": reason, "to": to, "text": text}
+        if not self._apply(decision):
+            raise KeyError(f"{item['id']} has no open incident for {status}")
+        self.decisions.append(decision)
+        return self.tracker.incident(item)

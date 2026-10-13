@@ -51,15 +51,15 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertTrue(app.alerts_panel.winfo_ismapped())
         self.assertGreaterEqual(app.chart_host.winfo_x(), app.alerts_panel.winfo_x() + app.alerts_panel.winfo_width())
         order = self.packed_cards()
-        self.assertEqual(len(order), 21)  # Medium and above: one incident card each; Low is folded away
+        self.assertEqual(len(order), 22)  # Medium and above: one incident card each; Low is folded away
         ranks = [RANK[board.by_id[key]['assessment']['level']] for key in order]
         self.assertEqual(ranks, sorted(ranks, reverse=True))
         self.assertEqual([board.tiles[f'{level}-count'].cget('text') for level in ('critical', 'high', 'medium', 'low')],
-                         ['4', '7', '10', '27'])
+                         ['4', '7', '11', '27'])
         self.assertEqual(board.cards['SIM-01']['stripe'].cget('bg'), STYLE['critical'][0])
         self.assertIn('In corridor', board.cards['SIM-01']['eta'].cget('text'))
-        self.assertIn('21 new', app.alert_counts_label.cget('text'))
-        self.assertEqual(board.summary.cget('text'), '21 open · 0 escalated')
+        self.assertIn('22 new', app.alert_counts_label.cget('text'))
+        self.assertEqual(board.summary.cget('text'), '22 open · 0 escalated')
         self.assertEqual(self.flags('SIM-45'), ['AIS spoofing?'])
         self.assertEqual(len(self.map_tags('sim-alert:')), len(board.items))
         badge = next(item for item in app.map.find_withtag('sim-badge') if app.map.type(item) == 'text')
@@ -128,7 +128,8 @@ class DesktopAlertBoardTests(unittest.TestCase):
         board.restart()
         self.assertEqual(board.status('SIM-01'), 'New')
         self.assertEqual(board.status('SIM-41'), 'New')
-        self.assertEqual(board.history, {})
+        self.assertEqual(board.replay.decisions, [])
+        self.assertEqual([text for _t, text in board.history['SIM-01']], ['Incident INC-SIM-01-1 opened at Critical'])
 
     def test_exercise_incident_shares_review_status_and_map_click_opens_it(self):
         app, board, tools = self.app, self.board, self.app.tools
@@ -184,11 +185,43 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertEqual(dialog.body._parent_canvas.yview()[0], 0)
         self.assertTrue(any(text.startswith('Also named: Gas interconnector IC2') for text in texts()))
 
+    def test_incidents_follow_the_replay_clock_and_a_card_click_centres_the_map(self):
+        app, board = self.app, self.board
+        start = app.alert['t']
+        self.assertEqual(board.clock.cget('text'), 'T+01:30')
+        app.position_s = start - 40 * 60  # before the exercise alert and before some contacts were raised
+        board.follow()
+        self.assertEqual(board.clock.cget('text'), 'T+00:50')
+        self.assertEqual(board.status('A1'), 'Watching')
+        self.assertEqual(board.group('SIM-07'), 'hidden')
+        self.assertNotIn('SIM-07', self.packed_cards())
+        self.assertNotIn('sim-alert:SIM-07', self.map_tags('sim-alert:'))
+        app.position_s = start
+        board.follow()
+        self.assertEqual(board.status('A1'), 'New')
+        self.assertIn('SIM-07', self.packed_cards())
+        app.position_s = start + 70 * 60  # SIM-48 crossed its line at +35 min and has been quiet since
+        board.follow()
+        self.assertEqual(board.group('SIM-48'), 'quiet')
+        self.assertIn('Quiet 30 min · close?', self.flags('SIM-48'))
+        self.assertEqual(board.history['SIM-48'][-1][1], 'Quiet 30 min below Medium: close?')
+        self.assertIn(board.stamp(board.replay.now), app.map_status_label.cget('text'))
+
+        app.fit_ireland()
+        self.root.update()
+        board.open('SIM-02', centre=True)
+        self.root.update()
+        item = board.by_id['SIM-02']
+        x, y = app._project(item['lat'], item['lon'])
+        width, height = app._map_size
+        self.assertLess(abs(y - (height / 2 - 20)), 40)
+        self.assertLess(x, width - board.dialog.covered_width())
+
     def test_countdown_raises_an_incident_and_the_board_can_hide(self):
         app, board = self.app, self.board
         board.decide('SIM-06', 'Reviewed', 'Reviewed')
-        board.started -= 4 * 60
-        board.tick()
+        app.position_s += 4 * 60
+        board.follow()
         self.assertEqual(board.by_id['SIM-06']['assessment']['level'], 'critical')
         self.assertEqual(board.tiles['critical-count'].cget('text'), '5')
         self.assertIn('GREY HERON review again', app.map_status_label.cget('text'))

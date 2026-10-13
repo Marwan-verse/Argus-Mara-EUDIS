@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from argus.brain_board import build_board, update
-from argus.incident_board import Tracker, feed, vessel_key
+from argus.incident_board import Replay, Tracker, feed, vessel_key
 from argus.incidents import QUIET_CLOSE_S
 from argus.levels import RANK
 
@@ -85,6 +85,68 @@ class IncidentBoardTests(unittest.TestCase):
         self.assertTrue(tracker.incident(boat)["suggest_close"])
         self.assertEqual(tracker.status(boat), "New")  # nothing closes on its own
         self.assertEqual(tracker.step([boat], 120 + QUIET_CLOSE_S), {})
+
+
+class ReplayTests(unittest.TestCase):
+    """The board on the exercise replay clock: forwards, backwards and decisions kept."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.scenario = json.loads((ROOT / "demo/scenario.json").read_text(encoding="utf-8"))
+        cls.alerts = json.loads((ROOT / "demo/alerts.json").read_text(encoding="utf-8"))["alerts"]
+        cls.start = min(alert["t"] for alert in cls.alerts)
+
+    def setUp(self):
+        self.items = build_board(self.scenario, self.alerts)
+        self.by_id = {item["id"]: item for item in self.items}
+        self.replay = Replay(self.items, self.scenario, self.start)
+
+    def open_ids(self):
+        return {incident["id"] for incident in self.replay.tracker.state["open"].values()}
+
+    def test_contacts_appear_at_their_raise_time_and_the_exercise_at_its_alert(self):
+        self.replay.seek(self.start - 30 * 60)
+        self.assertFalse(self.replay.present(self.by_id["SIM-07"]))  # raised 22 min before the alert
+        self.assertTrue(self.replay.present(self.by_id["SIM-11"]))   # raised 41 min before
+        self.assertTrue(self.replay.present(self.by_id["A1"]))
+        self.assertEqual(self.by_id["A1"]["assessment"]["level"], "none")
+        self.assertNotIn("INC-999000001-1", self.open_ids())
+        events, rewound = self.replay.seek(self.start)
+        self.assertFalse(rewound)
+        self.assertIn("opened", events["A1"])
+        self.assertIn("opened", events["SIM-07"])
+        self.assertEqual(self.replay.tracker.incident(self.by_id["A1"])["opened_t"], self.start)
+
+    def test_forward_play_raises_then_quiets_the_passing_ship(self):
+        self.replay.seek(self.start)
+        ship = self.by_id["SIM-48"]
+        self.assertEqual(self.replay.tracker.incident(ship)["level"], "medium")
+        self.replay.seek(self.start + 35 * 60)  # clear of the line
+        incident = self.replay.tracker.incident(ship)
+        self.assertEqual((incident["level"], incident["suggest_close"]), ("none", False))
+        events, _ = self.replay.seek(self.start + 65 * 60)
+        self.assertEqual(events["SIM-48"], ["quiet"])
+        self.assertTrue(incident["suggest_close"])
+        self.assertEqual(self.replay.log["SIM-48"][-1], (self.start + 65 * 60, "Quiet 30 min below Medium: close?"))
+
+    def test_rewind_rebuilds_and_keeps_only_earlier_decisions(self):
+        self.replay.seek(self.start)
+        self.replay.decide(self.by_id["SIM-01"], "Escalated", "Escalated to MRCC", to="Irish Coast Guard (MRCC)")
+        self.replay.seek(self.start + 10 * 60)
+        self.replay.decide(self.by_id["SIM-41"], "Rejected", "Rejected", reason="False alarm")
+        self.assertEqual(self.replay.tracker.status(self.by_id["SIM-41"]), "Rejected")
+        events, rewound = self.replay.seek(self.start + 5 * 60)
+        self.assertTrue(rewound)
+        self.assertEqual(events, {})
+        self.assertEqual(self.replay.tracker.status(self.by_id["SIM-01"]), "Escalated")
+        self.assertEqual(self.replay.recipients, {"SIM-01": "Irish Coast Guard (MRCC)"})
+        self.assertEqual(self.replay.tracker.status(self.by_id["SIM-41"]), "New")  # that decision was later
+        self.assertEqual(len(self.replay.decisions), 1)
+        self.replay.seek(self.start - 60 * 60)
+        self.assertIsNone(self.replay.tracker.status(self.by_id["SIM-01"]))  # not raised yet: no incident
+        self.assertEqual(self.replay.decisions, [])
+        with self.assertRaises(KeyError):
+            self.replay.decide(self.by_id["SIM-40"], "Acknowledged", "Acknowledged")
 
 
 if __name__ == "__main__":

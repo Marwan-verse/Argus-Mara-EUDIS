@@ -9,7 +9,12 @@ small craft that are capped or not (SIM-40 to SIM-43) and a ship approaching
 two lines at once, scored for the more urgent one (SIM-44). Three more carry
 fictional timed AIS tracks that the real ``ais_spoofing`` detector reads: one
 identity in two places (SIM-45), a small craft with an inland fix (SIM-46) and
-a single GPS glitch that must not count as spoofing (SIM-47).
+a single GPS glitch that must not count as spoofing (SIM-47). One more slows
+towards a line, crosses it and moves away (SIM-48), so its incident goes quiet.
+
+``update`` is a pure function of the board time, so a replay can move the
+board forwards or backwards; ``rescore_exercise`` re-scores the exercise
+vessel at a replay time.
 
 AIS ship types, classes and radar lengths below are assumptions for fictional
 contacts. Nothing here reads live AIS or sends anything.
@@ -22,6 +27,7 @@ from argus.alert_board import LINES, _item, sort_key
 from argus.assemble import apply_relevance, assess_vessel, context_from_scenario
 from argus.countdown import step
 from argus.detectors import ais_spoofing
+from argus.levels import assess
 
 # Assumed AIS ship type codes for the board's display types.
 SHIP_TYPES = {
@@ -113,6 +119,16 @@ TRACK_ITEMS = [
       {"eta_min": 70}), "A", _glitch_track),
 ]
 
+# Simulated items that cross their line and move away: (alert_board._item row, AIS class,
+# minutes after the ETA when the item is clear, observations then, title then).
+PASSING_ITEMS = [
+    (("SIM-48", "FAIR ISLE", "General cargo", 120, "greenlink", 51.95, -6.55, 110, 9.0, 3, "line",
+      "Unexplained slowdown 25 min before the Greenlink power interconnector",
+      "Watch the crossing; hail on VHF 16 if it slows further over the line.",
+      {"slowdown_near_corridor": True, "eta_min": 25}), "A", 10,
+     {"distance_nm": 3.0}, "Crossed Greenlink at steady speed and is moving away"),
+]
+
 # Board-only detectors whose reasons are already the item's title; other detectors' reasons become notes.
 QUIET_DETECTORS = frozenset({"alert_board_simulated", "legacy_cable_v1"})
 DETECTOR_NOTE_REASONS = 4
@@ -178,6 +194,13 @@ def build_board(scenario: dict | None = None, alerts: list | None = None) -> lis
         track = tracks[row[0]] = make_track()
         items.append({**_item(*row), "ais_class": ais_class, "lat": track[-1]["lat"], "lon": track[-1]["lon"],
                       "track": [(fix["lat"], fix["lon"]) for fix in track[:-1]]})
+    for row, ais_class, clear_after_min, observations_then, title_then in PASSING_ITEMS:
+        item = {**_item(*row), "ais_class": ais_class}
+        item["passing"] = {"clear_min": item["eta_start_min"] + clear_after_min,
+                           "before": (dict(item["observations"]), item["title"]),
+                           "after": ({"asset_class": item["observations"]["asset_class"], **observations_then},
+                                     title_then)}
+        items.append(item)
     context = context_from_scenario(scenario) if scenario else {}
     for item in items:
         if item.get("exercise"):
@@ -191,11 +214,30 @@ def build_board(scenario: dict | None = None, alerts: list | None = None) -> lis
 
 
 def update(items: list[dict], elapsed_s: float) -> list[str]:
-    """Count simulated ETAs down like ``alert_board.update``, keeping the small-vessel rule."""
+    """Count simulated ETAs down like ``alert_board.update``, keeping the small-vessel rule.
+
+    ``elapsed_s`` may be negative (before the board start) or go backwards; the
+    result depends only on it. A passing item takes its "after" observations
+    once it is clear of the line.
+    """
     before = {item["id"]: item["assessment"]["level"] for item in items}
-    alert_board.update(items, elapsed_s)
+    alert_board.update([item for item in items if "passing" not in item], elapsed_s)
     for item in items:
-        if item.get("relevance") and item.get("eta_start_min") is not None:
+        passing = item.get("passing")
+        if passing:
+            clear = elapsed_s / 60 >= passing["clear_min"]
+            observations, title = passing["after" if clear else "before"]
+            item["observations"], item["title"] = dict(observations), title
+            if not clear:
+                item["observations"]["eta_min"] = max(0.0, item["eta_start_min"] - elapsed_s / 60)
+            item["assessment"] = assess(item["observations"])
+        if item.get("relevance") and (passing or item.get("eta_start_min") is not None):
             item["assessment"] = _with_notes(apply_relevance(item["assessment"], item["relevance"]),
                                              item.get("detector_notes", []))
     return [item["id"] for item in items if item["assessment"]["level"] != before[item["id"]]]
+
+
+def rescore_exercise(item: dict, scenario: dict, now: float) -> None:
+    """Score the exercise vessel on its track up to replay time ``now`` (None before its first fix)."""
+    vessel = next(v for v in scenario["vessels"] if v["mmsi"] == item["alert"]["mmsi"])
+    _rescore(item, assess_vessel(vessel, context_from_scenario(scenario, int(now))))

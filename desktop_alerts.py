@@ -11,10 +11,8 @@ session; nothing is transmitted.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import math
 import sys
-import time
 import tkinter as tk
 import tkinter.font as tkfont
 
@@ -23,7 +21,7 @@ import customtkinter as ctk
 from argus.alert_board import line_path, sort_key
 from argus.brain_board import build_board, update
 from argus.explain import explain
-from argus.incident_board import OPEN_RANK, Tracker
+from argus.incident_board import OPEN_RANK, Replay
 from argus.incidents import QUIET_CLOSE_S, REASONS, STATUSES
 from argus.levels import LEVEL_NAMES, RANK
 
@@ -50,13 +48,8 @@ DETECTOR_REASONS = 4
 # List groups after the open incidents by level: quiet incidents, watched contacts, closed incidents.
 GROUP_TITLES = {"critical": "CRITICAL", "high": "HIGH", "medium": "MEDIUM", "quiet": "QUIET · BELOW MEDIUM",
                 "watching": "WATCHING · LOW, NO INCIDENT", "closed": "CLOSED"}
-EVENT_TEXT = {"opened": "Incident {id} opened at {level}", "raised": "Level raised to {level}",
-              "review_again": "Level rose after review: review again",
-              "quiet": f"Quiet {QUIET_CLOSE_S // 60} min below Medium: close?"}
-
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%H:%M:%SZ")
+# How often the panel checks the exercise replay clock.
+FOLLOW_MS = 250
 
 
 def age_text(minutes: float) -> str:
@@ -154,11 +147,9 @@ class AlertBoard:
         self.app, self.panel, self.ui = app, panel, ui
         self.items = build_board(app.scenario, app.alerts)
         self.by_id = {item["id"]: item for item in self.items}
-        self.started = time.monotonic()
-        self.tracker = Tracker()
-        self.tracker.step(self.items, 0)
-        self.recipients: dict[str, str] = {}
-        self.history: dict[str, list[tuple[str, str]]] = {}
+        # The board follows the exercise replay clock; its countdowns start at the exercise alert.
+        self.replay = Replay(self.items, app.scenario, app.alert["t"])
+        self.replay.seek(app.position_s)
         self.exercise_seen = "New"
         self.selected: str | None = None
         self.hovered: str | None = None
@@ -181,6 +172,7 @@ class AlertBoard:
         self._build()
         self.relayout()
         self.timer = app.root.after(1000, self.tick)
+        self.follower = app.root.after(FOLLOW_MS, self.follow)
         app.root.bind("<Escape>", self.dialog.escape, add="+")
 
     # ----- building -------------------------------------------------------------------
@@ -188,9 +180,7 @@ class AlertBoard:
         ui, app, panel = self.ui, self.app, self.panel
         head = tk.Frame(panel, bg=ui.CARD)
         head.pack(fill="x", padx=(16, 12), pady=(14, 0))
-        tk.Label(head, text="Incidents", bg=ui.CARD, fg=ui.INK, font=(SANS, 15, "bold")).pack(side="left")
-        tk.Label(head, text="SIMULATED", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 7, "bold"), padx=5,
-                 highlightthickness=1, highlightbackground=ui.LINE).pack(side="left", padx=(10, 0), pady=(3, 0))
+        # Buttons first, so a narrow panel squeezes the labels, not the buttons.
         close = ctk.CTkButton(head, text="", image=app.tools.icons.get("close"), command=app.tools.toggle_alerts,
                               width=30, height=30, fg_color="transparent", hover_color=ui.HOVER)
         close.pack(side="right")
@@ -198,7 +188,13 @@ class AlertBoard:
         restart = ctk.CTkButton(head, text="", image=app.tools.icons.get("refresh"), command=self.restart,
                                 width=30, height=30, fg_color="transparent", hover_color=ui.HOVER)
         restart.pack(side="right", padx=2)
-        app.tools.style_button(restart, "Restart the simulation: countdowns, incidents and decisions reset")
+        app.tools.style_button(restart, "Reset incidents and decisions at this replay time")
+        tk.Label(head, text="Incidents", bg=ui.CARD, fg=ui.INK, font=(SANS, 15, "bold")).pack(side="left")
+        tk.Label(head, text="SIM", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 7, "bold"), padx=5,
+                 highlightthickness=1, highlightbackground=ui.LINE).pack(side="left", padx=(8, 0), pady=(3, 0))
+        self.clock = tk.Label(head, text=self.stamp(self.replay.now), bg=ui.CARD, fg=ui.AMBER, font=(MONO, 9, "bold"))
+        self.clock.pack(side="left", padx=(6, 0), pady=(3, 0))
+        app.tools.attach_tooltip(self.clock, "Replay time: incidents follow the exercise replay (Play or the slider)")
 
         row = tk.Frame(panel, bg=ui.CARD)
         row.pack(fill="x", padx=(16, 12), pady=(2, 0))
@@ -308,13 +304,26 @@ class AlertBoard:
                 "reason": reason, "status": status, "flags": flags, "flag_labels": flag_labels,
                 "texts": {}, "background": ui.CARD}
         for widget in (frame, stripe, body, top, name, tag, age, reason, bottom, eta, status, flags, *flag_labels):
-            widget.bind("<Button-1>", lambda _event, key=item["id"]: self.open(key))
+            widget.bind("<Button-1>", lambda _event, key=item["id"]: self.open(key, centre=True))
             widget.bind("<Enter>", lambda _event, key=item["id"]: self.hover(key, True), add="+")
             widget.bind("<Leave>", lambda _event, key=item["id"]: self.hover(key, False), add="+")
         self.cards[item["id"]] = card
         self.paint(item["id"])
 
     # ----- state ----------------------------------------------------------------------
+    @property
+    def tracker(self):
+        return self.replay.tracker
+
+    @property
+    def recipients(self) -> dict[str, str]:
+        return self.replay.recipients
+
+    @property
+    def history(self) -> dict[str, list[tuple[int, str]]]:
+        """Per contact: (replay time, text) for Brain's incident events and the analyst's decisions."""
+        return self.replay.log
+
     def incident(self, identifier: str) -> dict | None:
         return self.tracker.incident(self.by_id[identifier])
 
@@ -323,22 +332,25 @@ class AlertBoard:
         return self.tracker.status(self.by_id[identifier]) or "Watching"
 
     def group(self, identifier: str) -> str:
-        """critical/high/medium for an open incident, else quiet, watching or closed."""
+        """critical/high/medium for an open incident, else quiet, watching, closed or hidden (not raised yet)."""
         item = self.by_id[identifier]
+        if not self.replay.present(item):
+            return "hidden"
         incident = self.tracker.open_incident(item)
         if incident is not None:
             return incident["level"] if RANK[incident["level"]] >= OPEN_RANK else "quiet"
         return "closed" if self.tracker.incident(item) is not None else "watching"
 
-    def elapsed_min(self) -> float:
-        return (time.monotonic() - self.started) / 60
+    def age_min(self, item: dict) -> float:
+        """Minutes since the contact was raised, on the replay clock."""
+        return (self.replay.now - self.replay.appear_s(item)) / 60
+
+    def stamp(self, t: int) -> str:
+        return "T+" + self.ui.clock(t)[:5] if t >= 0 else "T−" + self.ui.clock(-t)[:5]
 
     def counts(self) -> dict[str, int]:
-        states = [self.status(item["id"]) for item in self.items]
+        states = [self.status(item["id"]) for item in self.items if self.replay.present(item)]
         return {state: states.count(state) for state in (*STATUSES, "Watching")}
-
-    def log(self, identifier: str, text: str) -> None:
-        self.history.setdefault(identifier, []).append((utc_now(), text))
 
     def decide(self, identifier: str, status: str, text: str, reason: str | None = None,
                to: str | None = None) -> None:
@@ -348,25 +360,20 @@ class AlertBoard:
         item = self.by_id[identifier]
         if self.tracker.open_incident(item) is None:
             return
-        self.tracker.decide(item, status, reason)
-        if to:
-            self.recipients[identifier] = to
+        self.replay.decide(item, status, text, reason, to)
         self.sync_exercise(item, status)
-        self.log(identifier, text)
         self.changed(identifier)
 
     def mark_reviewed(self, identifier: str) -> None:
         if self.status(identifier) != "New":
             return
         item = self.by_id[identifier]
-        self.tracker.decide(item, "Reviewed")
+        self.replay.decide(item, "Reviewed", "Opened for review")
         self.sync_exercise(item, "Reviewed")
-        self.log(identifier, "Opened for review")
         self.changed(identifier, redraw=False)
 
     def withdraw(self, identifier: str) -> None:
         """Take back an escalation; the incident stays open as Reviewed."""
-        self.recipients.pop(identifier, None)
         self.decide(identifier, "Reviewed", "Escalation withdrawn; reviewing again")
 
     def sync_exercise(self, item: dict, status: str) -> None:
@@ -397,8 +404,7 @@ class AlertBoard:
             if value != self.exercise_seen and value in ("New", "Reviewed", "Acknowledged"):
                 self.exercise_seen = value
                 if self.tracker.open_incident(item) is not None and self.status(item["id"]) != value:
-                    self.tracker.decide(item, value)
-                    self.log(item["id"], f"{value} in the exercise replay")
+                    self.replay.decide(item, value, f"{value} in the exercise replay")
             self.paint(item["id"])
             if self.dialog.item and self.dialog.item["id"] == item["id"]:
                 self.dialog.refresh()
@@ -461,12 +467,11 @@ class AlertBoard:
         return proximity_text(item), countdown(item) is not None
 
     def update_live(self, identifier: str | None = None) -> None:
-        elapsed = self.elapsed_min()
         for key in [identifier] if identifier else self.cards:
             card = self.cards[key]
             item = card["item"]
             texts = card["texts"]
-            age = "replay" if item.get("exercise") else age_text(item.get("raised_min_ago", 0) + elapsed)
+            age = "replay" if item.get("exercise") else age_text(self.age_min(item))
             eta, ticking = self.timer_text(item)
             ticking = ticking and self.status(key) != "Rejected"
             if texts.get("age") != age:
@@ -503,8 +508,9 @@ class AlertBoard:
         return group == self.level_filter
 
     def visible_items(self) -> list[dict]:
-        """Contacts drawn on the map: everything not closed that passes the level filter."""
-        return [item for item in self.items if self.group(item["id"]) != "closed" and self.matches_filter(item["id"])]
+        """Contacts drawn on the map: everything raised by now and not closed that passes the level filter."""
+        return [item for item in self.items if self.group(item["id"]) not in ("closed", "hidden")
+                and self.matches_filter(item["id"])]
 
     def _order(self, identifier: str) -> tuple:
         incident = self.incident(identifier)
@@ -672,7 +678,8 @@ class AlertBoard:
         self.flashing[identifier] = self.app.root.after(300, lambda: self.flash(identifier, count - 1))
 
     # ----- actions --------------------------------------------------------------------
-    def open(self, identifier: str, reveal: bool = True) -> None:
+    def open(self, identifier: str, reveal: bool = True, centre: bool = False) -> None:
+        """Select a contact and show its review window; ``centre`` (a card click) centres the map on it."""
         if hasattr(self.app, 'require_tool') and not self.app.require_tool('alert.review'):
             return
         item = self.by_id.get(identifier)
@@ -686,7 +693,7 @@ class AlertBoard:
         self.dialog.show(item)
         self.scroll_to(identifier)
         if reveal:
-            self.reveal(item)
+            self.reveal(item, centre=centre)
         else:
             self.app._draw_map()
         self.app.map_status_label.configure(text=self.describe(identifier))
@@ -697,8 +704,8 @@ class AlertBoard:
             self.paint(previous)
         self.app._draw_map()
 
-    def reveal(self, item: dict, fit: bool = False) -> None:
-        """Bring the contact into the map area left of the review window; fit its track when asked."""
+    def reveal(self, item: dict, fit: bool = False, centre: bool = False) -> None:
+        """Bring the contact into the map area left of the review window; centre it or fit its track when asked."""
         app, ui = self.app, self.ui
         if hasattr(app, "ais_tracker"):
             app.ais_tracker.follow.set(False)
@@ -725,7 +732,7 @@ class AlertBoard:
         else:
             x, y = app._project(item["lat"], item["lon"])
             inside = left + 40 <= x <= width - right - 40 and 60 <= y <= height - 140
-            if inside and app.map_zoom >= 6:
+            if inside and app.map_zoom >= 6 and not centre:
                 app._draw_map()
                 return
             app.map_zoom = max(app.map_zoom, min(7, maximum))
@@ -734,16 +741,15 @@ class AlertBoard:
         app._change_map_center(ui.world_to_geo(*centre, app.map_zoom))
 
     def restart(self) -> None:
+        """Clear decisions and incidents and rebuild the board at the current replay time."""
         self.items = build_board(self.app.scenario, self.app.alerts)
         self.by_id = {item["id"]: item for item in self.items}
         for item in self.items:
             self.cards[item["id"]]["item"] = item
             self.cards[item["id"]]["texts"].clear()
-        self.started = time.monotonic()
-        self.tracker = Tracker()
-        self.tracker.step(self.items, 0)
-        self.recipients.clear()
-        self.history.clear()
+        self.replay = Replay(self.items, self.app.scenario, self.app.alert["t"])
+        self.replay.seek(self.app.position_s)
+        self.follow_exercise()
         tools = self.app.tools
         for identifier in tools.review_values:
             tools.review_values[identifier] = "New"
@@ -755,53 +761,77 @@ class AlertBoard:
             self.paint(identifier)
         self.relayout(top=True)
         self.app._draw_map()
-        self.app.map_status_label.configure(text="Simulation restarted · countdowns, incidents and decisions reset")
+        self.app.map_status_label.configure(text="Incidents restarted at this replay time · decisions reset")
 
-    def advance(self, elapsed_s: float) -> dict[str, list[str]]:
-        """Score the board at ``elapsed_s`` and fold it into the incidents; log, repaint and flash what changed."""
-        changed = update(self.items, elapsed_s)
-        events = self.tracker.step(self.items, int(elapsed_s))
-        for identifier, found in events.items():
-            incident = self.incident(identifier)
-            for event in found:
-                self.log(identifier, EVENT_TEXT[event].format(id=incident["id"], level=LEVEL_NAMES[incident["level"]]))
-        touched = set(changed) | set(events)
-        if not touched:
-            return events
-        for identifier in touched:
+    def snapshot(self) -> dict[str, tuple]:
+        return {item["id"]: (self.group(item["id"]), item["assessment"]["level"], item["title"])
+                for item in self.items}
+
+    def follow_exercise(self) -> None:
+        """Put the exercise contact at its AIS fix for the replay time (it keeps its last fix in a gap)."""
+        for item in self.items:
+            if not item.get("exercise"):
+                continue
+            track = self.app.vessel["track"]
+            fix = self.ui.fix_at(track, self.replay.now)
+            if fix:
+                item.update(lat=fix["lat"], lon=fix["lon"], cog_deg=fix["cog_deg"], sog_kn=fix["sog_kn"])
+            item["track"] = [(point["lat"], point["lon"]) for point in track if point["t"] <= self.replay.now][-40:]
+
+    def advance(self, t: float) -> dict[str, list[str]]:
+        """Move the board to replay time ``t``: re-score, fold into incidents, repaint and flash what changed."""
+        before = self.snapshot()
+        events, rewound = self.replay.seek(t)
+        self.follow_exercise()
+        after = self.snapshot()
+        touched = {key for key in after if after[key] != before[key]} | set(events)
+        self.clock.configure(text=self.stamp(self.replay.now))
+        for identifier in (self.cards if rewound else touched):
             self.paint(identifier)
-        self.relayout()
+        if rewound or touched:
+            self.relayout()
+        if self.selected and self.group(self.selected) == "hidden":
+            self.dialog.close()
         for identifier, found in events.items():
             if {"opened", "raised", "review_again"} & set(found):
                 self.flash(identifier)
         news = [f"{self.by_id[i]['name']} " + ("incident opened" if "opened" in found else
                 "review again" if "review_again" in found else "quiet: close?" if "quiet" in found
                 else f"now {LEVEL_NAMES[self.incident(i)['level']]}") for i, found in events.items()]
-        self.app._draw_map()
+        if rewound or touched:
+            self.app._draw_map()
         if news:
-            self.app.map_status_label.configure(text=" · ".join(news))
-        if self.dialog.item and self.dialog.item["id"] in touched:
+            self.app.map_status_label.configure(text=f"{self.stamp(self.replay.now)} · " + " · ".join(news[:4]))
+        if self.dialog.item and (rewound or self.dialog.item["id"] in touched):
             self.dialog.refresh()
+        self.update_live()
+        self.dialog.update_live()
         return events
+
+    def follow(self) -> None:
+        """Follow the exercise replay clock: Play, the timeline slider and jumps all move the board."""
+        self.follower = None
+        try:
+            if int(self.app.position_s) != self.replay.now:
+                self.advance(self.app.position_s)
+        finally:
+            self.follower = self.app.root.after(FOLLOW_MS, self.follow)
 
     def tick(self) -> None:
         self.timer = None
         try:
-            self.advance(time.monotonic() - self.started)
-            self.update_live()
-            self.dialog.update_live()
             self.pulse_halos()
         finally:
             self.timer = self.app.root.after(1000, self.tick)
 
     def close(self) -> None:
-        for timer in [self.timer, *self.flashing.values()]:
+        for timer in [self.timer, self.follower, *self.flashing.values()]:
             if timer:
                 try:
                     self.app.root.after_cancel(timer)
                 except tk.TclError:
                     pass
-        self.timer = None
+        self.timer = self.follower = None
         self.flashing.clear()
 
     # ----- map ------------------------------------------------------------------------
@@ -1036,7 +1066,7 @@ class ReviewDialog:
             meta.append(f"{item['length_m']:.0f} m")
         meta += [f"SOG {item['sog_kn']:.1f} kn", f"COG {item['cog_deg']:03.0f}°"]
         if not item.get("exercise"):
-            minutes = int(item.get("raised_min_ago", 0) + board.elapsed_min())
+            minutes = int(board.age_min(item))
             meta.append("raised now" if minutes < 1 else f"raised {minutes} min ago" if minutes < 60
                         else f"raised {minutes // 60} h {minutes % 60:02d} min ago")
         self.meta.configure(text="  ·  ".join(meta))
@@ -1131,7 +1161,7 @@ class ReviewDialog:
         for stamp, text in entries[-8:]:
             row = tk.Frame(self.body, bg=ui.CARD)
             row.pack(fill="x", padx=(6, 0), pady=1)
-            tk.Label(row, text=stamp, bg=ui.CARD, fg=ui.MUTED, font=(MONO, 9)).pack(side="left", anchor="n")
+            tk.Label(row, text=board.stamp(stamp), bg=ui.CARD, fg=ui.MUTED, font=(MONO, 9)).pack(side="left", anchor="n")
             tk.Label(row, text=text, bg=ui.CARD, fg=SECONDARY, font=(SANS, 10), anchor="w", justify="left",
                      wraplength=wrap - 40).pack(side="left", fill="x", expand=True, padx=(10, 0))
         self.heading("DATA LABELS")

@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from argus.alert_board import build_board as original_board
-from argus.brain_board import build_board, update
+from argus.brain_board import build_board, rescore_exercise, update
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -19,7 +19,7 @@ class BrainBoardTests(unittest.TestCase):
 
     def test_large_vessels_keep_their_levels(self):
         original = {item["id"]: item["assessment"] for item in original_board(self.scenario, self.alerts)}
-        self.assertEqual(len(self.items), len(original) + 8)
+        self.assertEqual(len(self.items), len(original) + 9)
         for identifier, assessment in original.items():
             item = self.by_id[identifier]
             if not item["relevance"]["small"]:
@@ -58,6 +58,27 @@ class BrainBoardTests(unittest.TestCase):
         self.assertIn("SIM-41", changed)  # 45 min ETA falls under 30 min
         self.assertEqual(self.by_id["SIM-41"]["assessment"]["level"], "critical")
         self.assertEqual(self.by_id["SIM-40"]["assessment"]["level"], "low")
+
+    def test_passing_ship_goes_quiet_and_update_can_rewind(self):
+        ship = self.by_id["SIM-48"]
+        self.assertEqual(ship["assessment"]["level"], "medium")
+        update(self.items, 34 * 60)
+        self.assertEqual(ship["observations"]["eta_min"], 0.0)
+        self.assertEqual(update(self.items, 35 * 60), ["SIM-48"])  # 25 min ETA + 10 min: clear of the line
+        self.assertEqual(ship["assessment"]["level"], "none")
+        self.assertTrue(ship["title"].startswith("Crossed Greenlink"))
+        update(self.items, -30 * 60)  # before the board start: further away, same rules
+        self.assertEqual((ship["assessment"]["level"], ship["observations"]["eta_min"]), ("medium", 55.0))
+        self.assertEqual(self.by_id["SIM-41"]["observations"]["eta_min"], 75.0)
+
+    def test_exercise_is_rescored_at_a_replay_time(self):
+        exercise = self.by_id["A1"]
+        rescore_exercise(exercise, self.scenario, 5000)
+        self.assertEqual(exercise["assessment"]["level"], "none")
+        self.assertEqual(exercise["findings"], [])
+        rescore_exercise(exercise, self.scenario, 5400)
+        self.assertEqual(exercise["assessment"]["level"], "high")
+        self.assertEqual(exercise["cable_id"], "cable-irish-sea-1")
 
 
 if __name__ == "__main__":
