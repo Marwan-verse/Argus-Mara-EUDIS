@@ -36,6 +36,14 @@ the SOC tests followed by AIS tests reproduces the same assertion on clean
 run also exposed missing timezone data and archive/other GUI failures. Timezone
 data was installed into the local environment before the final baseline comparison.
 
+The final full Windows run (live AIS autoconnection disabled, timezone data
+available) ran 219 tests on this branch and 209 on clean main. Both reported
+6 failures and 16 errors with identical failing test names; the 10 added startup
+tests passed. Existing failures include Windows archive durability, GUI gesture/
+history behavior and recorder console encoding. No additional failing cases were
+introduced by this change. GitHub's Ubuntu CI passed for Python 3.11 and 3.12
+on commit `760b49c`; real Docker runtime validation is still pending.
+
 ## Guided SOC interface and mixed groups
 
 All 19 SOC checks pass, including a room whose participants have disjoint group
