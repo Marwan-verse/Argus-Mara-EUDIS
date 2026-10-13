@@ -1,0 +1,6 @@
+{$SOC_DOMAIN} {
+    request_body {
+        max_size 16KB
+    }
+    reverse_proxy relay:8080
+}

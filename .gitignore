@@ -5,6 +5,11 @@ map.html
 __pycache__/
 .venv/
 .env
+soc/.env
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
 
 # the aisstream.io key, saved locally by the recorder. NEVER commit this.
 recorder/.apikey

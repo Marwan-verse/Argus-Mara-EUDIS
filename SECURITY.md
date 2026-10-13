@@ -10,6 +10,13 @@ If a credential may have been exposed, revoke or rotate it first and notify the 
 
 ## Data and safety boundaries
 
+The optional private SOC companion has separate accounts, server-side tool
+permissions and endpoint-encrypted two-person rooms. Its security/deployment
+contract and current limitations are in [soc/README.md](soc/README.md). Require
+the SOC entrypoint for connected use, compare safety codes outside the relay,
+and never expose the relay's private HTTP port. The local offline demo contains
+public/fictional material and is not an access-controlled private-data product.
+
 - Commit only public or fictional demo data. Keep raw AIS recordings, downloaded datasets, API keys, and `.env` files out of Git.
 - Label evidence `real`, `reconstructed`, `simulated`, `fictional`, or `assumption`. An AIS gap or unmatched radar contact is a lead for human review, not proof of hostile activity.
 - Do not use this prototype to make operational decisions or trigger an automated response. A human must approve any action.
