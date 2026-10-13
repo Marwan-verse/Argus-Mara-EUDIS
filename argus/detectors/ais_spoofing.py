@@ -12,6 +12,10 @@ d) ``two_places_events``: one MMSI alternating between two far-apart places,
 e) ``reappearance_events``: a return after an AIS gap outside the reachable
    circle of ``argus.prediction.reappearance_check``.
 
+Reachability in a) and d) (did the track come back?) and in e) uses the
+physical top speed for the AIS ship type, not the likely speed used for
+prediction: ferries and container ships really do 20-25 kn and more.
+
 One GPS glitch is normal, so ``persistence`` decides whether the events set
 ``spoof_signs`` (rule I2 in ``argus.levels``). Otherwise the finding stays a
 weak cue without it. Every threshold below is an assumption, not a regulation
@@ -53,7 +57,26 @@ WEAK_STRENGTH = 0.25
 MAX_EVENT_REASONS = 5
 GRID_DEG = 0.5  # land and port lookup cells
 
+# Physical top speed by AIS ship type (assumptions): the fastest a ship of the type can plausibly go,
+# so a return beyond it is impossible rather than unusual. Checks use the larger of this and
+# argus.prediction's 1.2 x the fastest SOG seen in the last hour.
+TYPE_TOP_KN = (
+    (range(70, 90), 25.0),  # cargo and tankers
+    (range(60, 70), 35.0),  # passenger ships and fast ferries
+    (range(40, 50), 50.0),  # high-speed craft (HSC)
+)
+OTHER_TOP_KN = 30.0  # unknown or other types
+
 DETECTOR = "ais_spoofing"
+
+
+def type_top_kn(ship_type) -> float:
+    """Physical top speed for an AIS ship type code (int or numeric string); 30 kn when unknown."""
+    try:
+        code = int(ship_type)
+    except (TypeError, ValueError):
+        return OTHER_TOP_KN
+    return next((top for codes, top in TYPE_TOP_KN if code in codes), OTHER_TOP_KN)
 
 
 def clean_track(track: list[dict], now: float | None = None) -> list[dict]:
@@ -95,12 +118,16 @@ def _event(kind: str, fix: dict, distance_nm: float | None, reason: str) -> dict
             "distance_nm": None if distance_nm is None else round(distance_nm, 2), "reason": reason}
 
 
-def _v_max(fixes: list[dict], index: int) -> float:
-    """``argus.prediction.v_max_kn`` over the hour before ``fixes[index]`` only, so the pass stays linear."""
+def _v_max(fixes: list[dict], index: int, ship_type=None) -> float:
+    """Top speed at ``fixes[index]``: max(1.2 x fastest SOG in the last hour, the type's physical top speed).
+
+    ``argus.prediction.v_max_kn`` with the type's top speed as its floor, over
+    the hour before the fix only, so the pass stays linear.
+    """
     t, start = fixes[index]["t"], index
     while start > 0 and fixes[start - 1]["t"] >= t - V_MAX_LOOKBACK_S:
         start -= 1
-    return v_max_kn(fixes[start:index + 1], t)
+    return v_max_kn(fixes[start:index + 1], t, default_kn=type_top_kn(ship_type))
 
 
 def _jump_text(step: dict) -> str:
@@ -108,7 +135,7 @@ def _jump_text(step: dict) -> str:
             f"limit {step['limit']:.0f} kn")
 
 
-def _chains(fixes: list[dict], steps: list[dict]) -> list[list[tuple[int, int]]]:
+def _chains(fixes: list[dict], steps: list[dict], ship_type=None) -> list[list[tuple[int, int]]]:
     """Impossible jumps that come back, grouped into chains.
 
     A return is a pair of consecutive jumps ``(i, j)`` where the fix after jump
@@ -121,7 +148,7 @@ def _chains(fixes: list[dict], steps: list[dict]) -> list[list[tuple[int, int]]]
     for i, j in zip(jumps, jumps[1:]):
         before, back = fixes[i], fixes[j + 1]
         elapsed = back["t"] - before["t"]
-        reach = _v_max(fixes, i) * elapsed / 3600 + JUMP_MIN_NM
+        reach = _v_max(fixes, i, ship_type) * elapsed / 3600 + JUMP_MIN_NM
         if elapsed > TWO_PLACES_WINDOW_S or nm_between(before["lat"], before["lon"], back["lat"], back["lon"]) > reach:
             continue
         if chains and chains[-1][-1][1] == i:
@@ -136,13 +163,13 @@ def _is_two_places(chain: list[tuple[int, int]]) -> bool:
     return len(chain) >= 2 or chain[0][1] - chain[0][0] >= 2
 
 
-def jump_events(fixes: list[dict], steps: list[dict]) -> list[dict]:
+def jump_events(fixes: list[dict], steps: list[dict], ship_type=None) -> list[dict]:
     """Check a): impossible jumps. A single fix that jumps away and straight back is one outlier event.
 
     Jumps that belong to a two-places pattern are left to ``two_places_events``.
     """
     events, used = [], set()
-    for chain in _chains(fixes, steps):
+    for chain in _chains(fixes, steps, ship_type):
         used.update(index for pair in chain for index in pair)
         if _is_two_places(chain):
             continue
@@ -157,10 +184,10 @@ def jump_events(fixes: list[dict], steps: list[dict]) -> list[dict]:
     return events
 
 
-def two_places_events(fixes: list[dict], steps: list[dict]) -> list[dict]:
+def two_places_events(fixes: list[dict], steps: list[dict], ship_type=None) -> list[dict]:
     """Check d): positions alternate between two far-apart places, as if two transmitters shared one MMSI."""
     events = []
-    for chain in _chains(fixes, steps):
+    for chain in _chains(fixes, steps, ship_type):
         if not _is_two_places(chain):
             continue
         jumps = sorted({index for pair in chain for index in pair})
@@ -330,13 +357,16 @@ def land_events(fixes: list[dict]) -> list[dict]:
     return events
 
 
-def reappearance_events(fixes: list[dict], steps: list[dict]) -> list[dict]:
-    """Check e): after a gap of 10 min or more, the return lies over 1 nm outside the reachable circle."""
+def reappearance_events(fixes: list[dict], steps: list[dict], ship_type=None) -> list[dict]:
+    """Check e): after a gap of 10 min or more, the return lies over 1 nm outside the reachable circle.
+
+    The circle uses the physical top speed for the ship type (see ``_v_max``).
+    """
     events = []
     for index, step in enumerate(steps):
         if step["dt"] < GAP_S:
             continue
-        check = reappearance_check(fixes[index], fixes[index + 1], _v_max(fixes, index))
+        check = reappearance_check(fixes[index], fixes[index + 1], _v_max(fixes, index, ship_type))
         excess = check["distance_nm"] - check["reachable_nm"]
         if check["verdict"] == "physically_inconsistent" and excess > REAPPEAR_MARGIN_NM:
             events.append(_event("reappearance", fixes[index + 1], excess,
@@ -365,9 +395,10 @@ def persistence(events: list[dict]) -> str | None:
 def ais_spoofing(vessel: dict, context: dict) -> list[dict]:
     """One ``ais_spoofing`` finding per vessel with physically impossible positions; none for a clean track."""
     fixes = clean_track(vessel.get("track") or [], context.get("now"))
-    steps = steps_between(fixes)
-    events = (jump_events(fixes, steps) + two_places_events(fixes, steps) + speed_mismatch_events(fixes, steps)
-              + land_events(fixes) + reappearance_events(fixes, steps))
+    steps, ship_type = steps_between(fixes), vessel.get("ship_type")
+    events = (jump_events(fixes, steps, ship_type) + two_places_events(fixes, steps, ship_type)
+              + speed_mismatch_events(fixes, steps) + land_events(fixes)
+              + reappearance_events(fixes, steps, ship_type))
     if not events:
         return []
     events.sort(key=lambda event: event["t"])

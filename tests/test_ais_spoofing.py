@@ -201,6 +201,32 @@ class ReappearanceTests(unittest.TestCase):
         self.assertIn("possible position spoofing or identity reuse", events[0]["reason"])
         self.assertEqual(spoof.detect(vessel(track), {})[0]["obs"], {"spoof_signs": True})
 
+    def test_physical_top_speed_by_ship_type(self):
+        self.assertEqual([spoof.type_top_kn(code) for code in (70, "84", 65, 45, 30, None, "x")],
+                         [25.0, 25.0, 35.0, 50.0, 30.0, 30.0, 30.0])
+
+    def gap_return(self, ship_type, speed_in_gap):
+        """Steams 6 kn for an hour, goes dark 2 h, returns as if it had run at speed_in_gap on the same course."""
+        track = straight(61, speed=6.0)
+        last = track[-1]
+        back = straight(10, lat=last["lat"], lon=last["lon"], speed=6.0, start=last["t"] + 2 * 3600)
+        track += [moved(fix, 90, speed_in_gap * 2) for fix in back]
+        return spoof.detect(vessel(track, ship_type=ship_type, length=200), {})
+
+    def test_fast_cargo_ship_after_a_gap_is_not_spoofing(self):
+        finding = self.gap_return(70, 22.0)  # 44 nm in 2 h; cargo top speed 25 kn reaches 50 nm
+        self.assertFalse(finding and finding[0]["obs"].get("spoof_signs"))
+
+    def test_fast_ferry_after_a_gap_is_not_spoofing(self):
+        finding = self.gap_return(60, 30.0)  # 60 nm in 2 h; passenger top speed 35 kn reaches 70 nm
+        self.assertFalse(finding and finding[0]["obs"].get("spoof_signs"))
+
+    def test_cargo_ship_at_40_knots_after_a_gap_is_spoofing(self):
+        finding = self.gap_return(70, 40.0)  # 80 nm in 2 h, 30 nm beyond the 50 nm circle
+        self.assertEqual(finding[0]["obs"], {"spoof_signs": True})
+        self.assertEqual(kinds(finding[0]), ["reappearance"])
+        self.assertIn("against an assumed maximum of 25.0 kn", finding[0]["reasons"][1])
+
     def test_return_inside_the_circle_is_fine(self):
         track = straight(30) + straight(10, lat=53.40, lon=-5.60, course=90, start=29 * 60 + 20 * 60)
         track[30:] = [moved(fix, 90, 5.0) for fix in track[30:]]
