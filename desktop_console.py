@@ -33,6 +33,11 @@ def build(app):
         command=app.tools.open_search, fg_color=ui.CONTROL, hover_color=ui.HOVER,
         text_color=ui.INK, width=142, height=34, corner_radius=8, font=ctk.CTkFont('Segoe UI', 12))
     search.pack(side='right', padx=(12, 18))
+    ctk.CTkButton(header, text='SOC session', command=lambda: app.soc.open(),
+                 width=110, height=34).pack(side='right', padx=6)
+    mode = 'Offline demo' if app.soc_client is None else f"SOC · {app.soc_client.user['username']}"
+    app.soc_mode_label = ctk.CTkLabel(header, text=mode, text_color=ui.MUTED)
+    app.soc_mode_label.pack(side='right', padx=6)
     app.tools.style_button(search, 'Search ships, ports, views or coordinates · Ctrl+K')
     utc = ctk.CTkFrame(header, fg_color='transparent')
     utc.pack(side='right', padx=14)

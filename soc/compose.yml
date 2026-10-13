@@ -1,0 +1,42 @@
+services:
+  relay:
+    build:
+      context: ..
+      dockerfile: soc/Dockerfile
+    environment:
+      ARGUS_SOC_ORIGIN: https://${SOC_DOMAIN:?Set SOC_DOMAIN to your DNS hostname}
+      ARGUS_SOC_DB: /data/accounts.sqlite3
+      ARGUS_SOC_PROXY_NETWORK: 172.30.65.0/24
+    volumes:
+      - accounts:/data
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    pids_limit: 64
+    networks: [private]
+  https:
+    image: caddy:2.11.3-alpine
+    environment:
+      SOC_DOMAIN: ${SOC_DOMAIN:?Set SOC_DOMAIN}
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - certificates:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    networks: [private]
+networks:
+  private:
+    ipam:
+      config:
+        - subnet: 172.30.65.0/24
+volumes:
+  accounts:
+  certificates:
+  caddy_config:

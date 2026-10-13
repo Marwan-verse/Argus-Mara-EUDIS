@@ -1,0 +1,3 @@
+# Private account/relay service; never install desktop dependencies in the image.
+aiohttp==3.14.4
+argon2-cffi==25.1.0
