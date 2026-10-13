@@ -15,8 +15,14 @@ committed under `ui/evidence/`. They preserve both shared demo files.
 `brain.py` uses four review cues: observed slowdown, heading change, an earlier
 AIS reception gap and a constant-course projected crossing of an assumed shallow
 section. Its `score` counts satisfied cues; it is not a threat probability.
-`countdown.py` also calculates assumed response arrival times. Additional modules
-are unnecessary for this v1 replay.
+`countdown.py` also calculates assumed response arrival times.
+
+`prediction.py` (D51) estimates where a vessel can be while its AIS is dark: a likely
+cone (last course ±30°, 0.7–1.1× last speed) and a reachable circle (assumed maximum
+speed), `position_at` for replay and intercept simulations, a worst-case countdown to
+the anchor-reachable section and a reappearance consistency check. Every value is
+labelled predicted, and neither JSON file changes. Try
+`python -m argus.prediction --t 1500:3300:300`.
 
 The detector now maintains reception gaps in one pass through each ordered track.
 Recorder Parquet imports stream allowed columns in 4,096-row batches. The optional
