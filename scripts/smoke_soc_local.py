@@ -19,7 +19,7 @@ def main():
         a.login('Marwan', values['ARGUS_DEMO_MARWAN_PASSWORD'])
         b.login('Igor', values['ARGUS_DEMO_IGOR_PASSWORD'])
         assert 'evidence.share' in a.user['permissions'] and 'evidence.share' not in b.user['permissions']
-        room = a.create('user')
+        room = a.create()  # Team session: accounts need not share a group.
         b.join(room['code'])
         a.lock()
         b.poll()

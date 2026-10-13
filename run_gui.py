@@ -1841,7 +1841,9 @@ class ArgusApp:
         # also prevents a closed window's timers leaking into another window.
         for callback in self.root.tk.call('after', 'info'):
             try:
-                self.root.after_cancel(callback)
+                # A timer may belong to a child widget (e.g. CTkTextbox).
+                # Cancel it in Tcl; let its owning widget delete the command.
+                self.root.tk.call('after', 'cancel', callback)
             except tk.TclError:
                 pass
         self.root.destroy()

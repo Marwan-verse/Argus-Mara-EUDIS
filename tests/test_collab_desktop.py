@@ -15,7 +15,7 @@ class FakeClient:
         self.user = {"id": "own", "username": "analyst", "admin": admin,
                      "groups": ["user"], "permissions": ["map.view", "chat", "ping", "contact.share"]}
         self.url = "https://soc.example.invalid"
-        self.room = {"members": [{"user_id": "own", "username": "analyst"}, {"user_id": "peer", "username": "colleague"}], "confirmed": ["own", "peer"], 'locked': True, 'host_id': 'own'}
+        self.room = {"members": [{"user_id": "own", "username": "analyst", 'groups': ['intelligence']}, {"user_id": "peer", "username": "colleague", 'groups': ['user']}], "confirmed": ["own", "peer"], 'locked': True, 'host_id': 'own', 'permissions': ['map.view', 'chat', 'ping', 'contact.share']}
         self.cipher = SimpleNamespace(verified=True, room_id="room", safety_code="ABCD " * 8, safety_codes={'peer': 'ABCD ' * 8})
         self.code = None
         self.calls = []
@@ -84,14 +84,47 @@ class DesktopSOCTests(unittest.TestCase):
         self.pump()
         soc = self.app.soc
         self.assertEqual(str(soc.send_button.cget("state")), "normal")
-        self.assertIn("colleague", soc.safety_label.cget("text"))
-        self.assertEqual(soc.kind_selector.cget("values"), ("chat", "contact"))
+        self.assertIn('Secure chat is ready', soc.stage_label.cget('text'))
+        self.assertIn('Contacts', soc.tools_label.cget('text'))
+        self.assertFalse(soc.evidence_button.winfo_manager())
         soc.group_selector.set("watch_team")
         soc.perm_vars["map.view"].set(True)
         soc.perm_vars["ping"].set(True)
         soc.save_group()
         self.pump()
         self.assertTrue(any(method == "PUT" and path == "/v1/admin/groups/watch_team" and data["permissions"] == ["map.view", "ping"] for method, path, data in self.client.calls))
+
+    def test_short_invite_copy_and_lobby_actions(self):
+        self.client.room.update(locked=False, confirmed=[], invitation_expires=time.time()+600)
+        self.client.cipher.room_id = None
+        self.client.code = 'ABCDEFGH'
+        self.app.soc.open()
+        self.app.soc.window.withdraw()
+        self.pump()
+        soc = self.app.soc
+        self.assertEqual(soc.invite_label.cget('text'), 'ABCD-EFGH')
+        soc.copy_invite()
+        self.assertEqual(soc.window.clipboard_get(), 'ABCD-EFGH')
+        self.assertEqual(soc.send_button.cget('state'), 'disabled')
+        self.assertTrue(soc.start_button.winfo_manager())
+        self.assertEqual(soc.group.get(), 'Team session (all groups)')
+
+    def test_empty_draft_and_enter_do_not_submit(self):
+        self.app.soc.open()
+        self.app.soc.window.withdraw()
+        self.pump()
+        soc = self.app.soc
+        soc.send_message = Mock()
+        soc.send_text()
+        soc.send_message.assert_not_called()
+        soc.message.insert('1.0', 'hello')
+        self.assertIsNone(soc.enter_message(SimpleNamespace(state=1)))
+        soc.send_message.assert_not_called()
+        self.assertEqual(soc.enter_message(SimpleNamespace(state=0)), 'break')
+        self.assertEqual(soc.send_message.call_args.args[:2], ('chat', {'text': 'hello'}))
+        self.assertEqual(soc.message.get('1.0', 'end').strip(), 'hello')
+        soc.send_message.call_args.args[2]()
+        self.assertEqual(soc.message.get('1.0', 'end').strip(), '')
 
 
 if __name__ == "__main__":

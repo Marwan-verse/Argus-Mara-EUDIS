@@ -1,5 +1,19 @@
 # Validation on 13 October 2026
 
+## Guided SOC interface and mixed groups
+
+All 19 SOC checks pass, including a room whose participants have disjoint group
+memberships, common-tool enforcement and group-change revocation. Invitation
+length/copying, draft preservation, Enter/Shift+Enter, lobby actions and encoding
+round-trip of all 128 safety bits are covered. All 16 native replay tests pass.
+The Docker relay was rebuilt and its actual HTTPS/E2EE smoke test passed.
+
+Native Computer Use captured the updated workspace and exposed a narrow-window
+text-wrap issue, which was fixed and visually rechecked. Routine background polls
+no longer disable interaction. New text widgets also exposed a timer ownership
+issue on window shutdown; Tcl timers are cancelled without prematurely deleting
+child-owned commands, and repeated GUI construction/shutdown tests now pass.
+
 ## Docker deployment after the Windows restart
 
 The local stack was actually built and started on this PC with Docker Engine

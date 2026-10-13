@@ -60,7 +60,7 @@ class Config:
 @dataclass
 class Room:
     id: str
-    group: str
+    group: str | None
     created: float
     code_hash: str
     invitation_expires: float
@@ -126,14 +126,31 @@ class Relay:
         self.purge()
         room = self.rooms.get(request.match_info["room_id"])
         user = request["user"]
-        if not room or user["id"] not in room.members or room.members[user["id"]]["token_hash"] != Store.token_hash(request["token"]) or room.group not in user["groups"]:
+        if not room or user["id"] not in room.members or room.members[user["id"]]["token_hash"] != Store.token_hash(request["token"]) or not self.eligible(room, user):
             raise web.HTTPNotFound(text="Session unavailable")
         return room
+
+    @staticmethod
+    def eligible(room, user):
+        return bool(user and 'chat' in user['permissions'] and
+                    (room.group is None or room.group in user['groups']))
+
+    def permissions(self, room):
+        grants = []
+        for user_id in room.members:
+            user = self.store.user(user_id)
+            grants.append(set(user['permissions']) if self.eligible(room, user) else set())
+        if room.group is not None:
+            row = self.store.db.execute('SELECT permissions FROM groups WHERE name=?', (room.group,)).fetchone()
+            grants.append(set(json.loads(row[0])) if row else set())
+        return sorted(set.intersection(*grants)) if grants else []
 
     def snapshot(self, room, after=0):
         return {"room_id": room.id, "group": room.group, "sequence": room.sequence,
                 'locked': room.locked, 'host_id': next(iter(room.members)), 'max_members': self.config.max_members,
-                "members": [{k: v for k, v in m.items() if k != "token_hash"} for m in room.members.values()],
+                'permissions': self.permissions(room), 'invitation_expires': room.invitation_expires,
+                "members": [{**{k: v for k, v in m.items() if k != "token_hash"},
+                             'groups': (self.store.user(m['user_id']) or {}).get('groups', [])} for m in room.members.values()],
                 "confirmed": sorted(room.confirmed),
                 "messages": [{"sequence": seq, "packet": packet} for seq, packet, _ in room.messages if seq > after]}
 
@@ -259,7 +276,7 @@ async def create_room(request):
     relay = request.app[SERVICE]
     data = await body(request)
     group = data.get("group")
-    if group not in request["user"]["groups"]:
+    if group is not None and (not isinstance(group, str) or group not in request["user"]["groups"]):
         raise web.HTTPForbidden(text="Group membership required")
     key = public_key(data.get("public_key"))
     relay.purge()
@@ -268,7 +285,12 @@ async def create_room(request):
         raise web.HTTPServiceUnavailable(text="Session limit reached")
     relay.close_user_rooms(user_id=request["user"]["id"])
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-    code = "".join(secrets.choice(alphabet) for _ in range(12))
+    # 40 random bits, authenticated joins, ten-minute expiry and global limits.
+    while True:
+        code = ''.join(secrets.choice(alphabet) for _ in range(8))
+        code_hash = Store.token_hash(code)
+        if not any(r.code_hash == code_hash for r in relay.rooms.values()):
+            break
     now = time.time()
     room = Room(secrets.token_hex(16), group, now, Store.token_hash(code), now + relay.config.invitation_ttl,
                 messages=deque(maxlen=relay.config.history_size))
@@ -281,21 +303,22 @@ async def join_room(request):
     require(request, "chat")
     relay = request.app[SERVICE]
     relay.limit(("join", request["user"]["id"]), 10, 600)
+    relay.limit(('join-global',), 120, 600)
     data = await body(request)
     key = public_key(data.get("public_key"))
     code = data.get("code")
-    if not isinstance(code, str) or not re.fullmatch(r"[A-Z2-9]{12}", code):
+    if not isinstance(code, str) or not re.fullmatch(r"[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}", code):
         raise web.HTTPNotFound(text="Invitation unavailable")
     relay.purge()
     room = next((r for r in relay.rooms.values() if secrets.compare_digest(r.code_hash, Store.token_hash(code))), None)
     user = request["user"]
-    if not room or room.locked or len(room.members) >= relay.config.max_members or room.invitation_expires <= time.time() or room.group not in user["groups"] or user["id"] in room.members:
+    if not room or room.locked or len(room.members) >= relay.config.max_members or room.invitation_expires <= time.time() or not relay.eligible(room, user) or user["id"] in room.members:
         raise web.HTTPNotFound(text="Invitation unavailable")
     # Host must still have a valid token and membership, not merely an old room.
     host = next(iter(room.members.values()))
     host_user = relay.store.user(host["user_id"])
     token_active = relay.store.db.execute("SELECT 1 FROM tokens WHERE hash=? AND expires>?", (host["token_hash"], time.time())).fetchone()
-    if not host_user or room.group not in host_user["groups"] or not token_active:
+    if not relay.eligible(room, host_user) or not token_active:
         del relay.rooms[room.id]
         raise web.HTTPNotFound(text="Invitation unavailable")
     relay.close_user_rooms(user_id=user["id"])
@@ -355,16 +378,15 @@ async def send(request):
     if not isinstance(kind, str) or kind not in KINDS:
         raise ValueError("Unknown message type")
     require(request, KINDS[kind])
-    group_perms = json.loads(relay.store.db.execute("SELECT permissions FROM groups WHERE name=?", (room.group,)).fetchone()[0])
-    if KINDS[kind] not in group_perms:
-        raise web.HTTPForbidden(text="Tool unavailable in this group session")
+    if KINDS[kind] not in relay.permissions(room):
+        raise web.HTTPForbidden(text='This tool is not available to every session participant')
     if not room.locked or len(room.confirmed) != len(room.members):
         raise web.HTTPConflict(text='Every participant must confirm the safety codes')
     # Revalidate both parties before sending, including the receiver's expiry.
     for m in room.members.values():
         peer = relay.store.user(m["user_id"])
         active = relay.store.db.execute("SELECT 1 FROM tokens WHERE hash=? AND expires>?", (m["token_hash"], time.time())).fetchone()
-        if not active or not peer or room.group not in peer["groups"]:
+        if not active or not relay.eligible(room, peer):
             del relay.rooms[room.id]
             raise web.HTTPNotFound(text="Session unavailable")
     counter = data["counter"]
@@ -423,12 +445,15 @@ async def admin_group(request):
     require(request, admin=True)
     relay = request.app[SERVICE]
     group = request.match_info["group"]
+    affected = [r[0] for r in relay.store.db.execute('SELECT user_id FROM memberships WHERE group_name=?', (group,))]
     if request.method == "DELETE":
         relay.store.delete_group(group, request["user"]["id"])
     else:
         data = await body(request)
         relay.store.set_group(group, data.get("permissions"), request["user"]["id"])
     relay.close_user_rooms(group=group)
+    for user_id in affected:
+        relay.close_user_rooms(user_id=user_id)
     return json_response({"ok": True})
 
 

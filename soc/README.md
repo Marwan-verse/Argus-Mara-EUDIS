@@ -10,6 +10,13 @@ Compose configurations, databases and certificate volumes.
 For an English implementation summary and the full two-user walkthrough, see
 [IMPLEMENTATION-AND-TESTING.md](IMPLEMENTATION-AND-TESTING.md).
 
+The current SOC workspace guides users through Connect, Verify and Chat.
+Invitations are eight symbols displayed as `ABCD-EFGH`, with one-click copying.
+Choose **Team session (all groups)** to communicate across different groups;
+choose **Private: group-name** to restrict membership to that group. Team rooms
+allow only message tools granted to every participant. An intelligence user
+cannot broadcast evidence to a user without that permission.
+
 ## Deploy on one Linux host
 
 Install Docker Engine with Compose. Point a DNS hostname at the host and permit
@@ -78,15 +85,15 @@ protect public files already installed on a device.
 
 1. Sign in as administrator; open **SOC session → Administration**. Create two
    distinct accounts with unique passwords (14–128 characters).
-2. Give them a common group. Create a session on device one and privately share
-   its random 12-character invitation (ten-minute expiry). It admits up to 16
-   distinct authenticated participants in the same group while the lobby is open.
-3. Once everyone joins, the host presses **Start encrypted session · lock
-   participants**. The code stops working and the roster becomes immutable.
-4. Each participant compares the **entire safety code for each peer** by voice or
-   in person. Codes differ between pairs; each pair's two endpoints must match.
-   Press **All peer codes match · confirm** only after every comparison. Everyone
-   must confirm before sending. If codes differ, leave and investigate.
+2. Choose a Team session, or a private group session. Create it and privately share
+   its random 8-character invitation (ten-minute expiry). It admits up to 16
+   distinct authenticated participants while the lobby is open. Private rooms
+   additionally require membership of their selected group.
+3. Once everyone joins, the host presses **Start secure chat**. The code stops working and the roster becomes immutable.
+4. Use **Compare keys** beside each peer. Compare the entire code by voice or
+   in person and press **The codes match** only if both devices agree. Codes
+   differ between pairs. Once all your peers have been checked, your confirmation
+   is submitted automatically. Everyone must finish verification before sending.
 5. Send text, share the selected AIS contact, or use the existing map Ping.
    Received pings last 15 seconds; they are analyst annotations, not sensor alerts.
 
@@ -115,7 +122,9 @@ clients refresh rights while connected. Default groups remain but their tools
 are editable. Administrator accounts cannot be changed in the UI, preventing
 accidental loss of the only administrator.
 
-Both account rights and room-group rights must allow an outgoing message type.
+All participants' account rights must allow a broadcast message type. A private
+room also applies its selected group's rights. Group changes close shared rooms
+containing affected users, as well as private rooms scoped to that group.
 Because the relay cannot inspect E2EE content, an authorized analyst could paste
 evidence into chat. Tool permissions are not a classification/DLP system. Local
 tool restrictions are convenience controls, not protection against a modified
@@ -134,7 +143,9 @@ depends on `cryptography`. Account authentication uses HTTPS and Argon2id:
   for each pair of participants. The v2 label also binds the sorted pair IDs.
   Broadcast sends a separately encrypted copy to every other member; no group
   decryption key is uploaded to the relay.
-- The 128-bit safety code binds the shared secret and transcript. Compare it
+- The 128-bit safety value is displayed using 26 readable base32 symbols instead
+  of 32 hex symbols. All 128 bits remain; no security bits are truncated. It binds
+  the shared secret and transcript. Compare it
   **outside the relay** to detect substituted keys. Confirming without comparing
   does not authenticate the peer against a malicious relay.
 - AES-GCM authenticates version, room, sender, recipient, kind and counter. Nonces combine
