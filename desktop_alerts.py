@@ -311,6 +311,8 @@ class AlertBoard:
         self.history.setdefault(identifier, []).append((utc_now(), text))
 
     def decide(self, identifier: str, status: str, text: str, **details) -> None:
+        if hasattr(self.app, 'require_tool') and not self.app.require_tool('alert.review'):
+            return
         if status == "Acknowledged" and identifier in self.app.tools.review_values:
             self.decisions.pop(identifier, None)
             self.app.tools.set_alert_status(identifier, "Acknowledged")
@@ -551,6 +553,8 @@ class AlertBoard:
 
     # ----- actions --------------------------------------------------------------------
     def open(self, identifier: str, reveal: bool = True) -> None:
+        if hasattr(self.app, 'require_tool') and not self.app.require_tool('alert.review'):
+            return
         item = self.by_id.get(identifier)
         if not item:
             return

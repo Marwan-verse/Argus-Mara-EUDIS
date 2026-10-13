@@ -1,0 +1,443 @@
+"""Native group collaboration and administrator controls."""
+from concurrent.futures import ThreadPoolExecutor
+import queue
+import os
+import time
+import tkinter as tk
+from tkinter import messagebox, ttk
+
+import customtkinter as ctk
+
+from argus.collab_client import ClientError, SOCClient
+from argus.collab_crypto import KINDS
+
+
+def login_screen(root, initial_url, on_login, *, allow_loopback_http=False):
+    """No protected app is constructed until HTTPS authentication succeeds."""
+    root.title("Argus Mara · SOC sign in")
+    root.geometry("580x430")
+    frame = ctk.CTkFrame(root)
+    frame.pack(fill="both", expand=True, padx=24, pady=24)
+    ctk.CTkLabel(frame, text="SOC sign in", font=ctk.CTkFont(size=22, weight="bold")).pack(pady=(12, 8))
+    fields = {}
+    for key, title in (("url", "SOC HTTPS address"), ("username", "Username"), ("password", "Password")):
+        ctk.CTkLabel(frame, text=title).pack(anchor="w", padx=16)
+        entry = ctk.CTkEntry(frame, show="•" if key == "password" else "")
+        entry.pack(fill="x", padx=16, pady=(0, 8))
+        fields[key] = entry
+    fields["url"].insert(0, initial_url or "")
+    status = ctk.CTkLabel(frame, text="Administrator accounts are created on the server.", wraplength=480)
+    status.pack(padx=16, pady=4)
+    executor = ThreadPoolExecutor(max_workers=1)
+    events = queue.Queue()
+    busy = False
+    closed = False
+
+    def submit():
+        nonlocal busy
+        if busy:
+            return
+        try:
+            client = SOCClient(fields["url"].get().strip(), allow_loopback_http=allow_loopback_http,
+                               ca_file=os.environ.get('ARGUS_SOC_CA_FILE') or None)
+        except ValueError as error:
+            status.configure(text=str(error))
+            return
+        username, secret = fields["username"].get().strip(), fields["password"].get()
+        fields["password"].delete(0, "end")
+        busy = True
+        button.configure(state="disabled")
+        status.configure(text="Signing in securely…")
+
+        def job():
+            try:
+                client.login(username, secret)
+                events.put((client, None))
+            except Exception as error:
+                events.put((None, str(error)))
+        executor.submit(job)
+
+    def check():
+        nonlocal busy, closed
+        if closed:
+            return
+        try:
+            client, error = events.get_nowait()
+        except queue.Empty:
+            root.after(100, check)
+            return
+        if error:
+            busy = False
+            button.configure(state="normal")
+            status.configure(text=error)
+            root.after(100, check)
+        else:
+            closed = True
+            executor.shutdown(wait=False)
+            frame.destroy()
+            on_login(client)
+
+    def close():
+        nonlocal closed
+        closed = True
+        executor.shutdown(wait=False, cancel_futures=True)
+        root.destroy()
+
+    button = ctk.CTkButton(frame, text="Sign in", command=submit)
+    button.pack(pady=8)
+    fields["password"].bind("<Return>", lambda _: submit())
+    root.protocol("WM_DELETE_WINDOW", close)
+    root.after(100, check)
+
+
+class DesktopSOC:
+    def __init__(self, app):
+        self.app = app
+        self.client = app.soc_client
+        self.executor = ThreadPoolExecutor(max_workers=1)
+        self.events = queue.Queue()
+        self.pending = 0
+        self.busy = 0
+        self.window = None
+        self.login_window = None
+        self.stopping = False
+        self.history = []
+        self.verified_peers = set()
+        self.last_poll = 0
+        self._tick_after = None
+        self.last_status = "Sign in to communicate" if not self.client else "Signed in · create or join a session"
+        self._tick_after = self.app.root.after(250, self.tick)
+
+    def task(self, function, callback=None, background=False):
+        if self.stopping or self.pending >= 8:
+            self.status("Please wait for the current request")
+            return
+        self.pending += 1
+        if not background:
+            self.busy += 1
+        self.render()
+        def job():
+            try:
+                self.events.put((callback, function(), None, background))
+            except Exception as error:
+                self.events.put((callback, None, error, background))
+        self.executor.submit(job)
+
+    def tick(self):
+        if self.stopping:
+            return
+        if self._tick_after:
+            try:
+                self.app.root.after_cancel(self._tick_after)
+            except tk.TclError:
+                pass
+        self._tick_after = None
+        while True:
+            try:
+                callback, result, error, background = self.events.get_nowait()
+            except queue.Empty:
+                break
+            self.pending -= 1
+            if not background:
+                self.busy -= 1
+            if error:
+                self.status(str(error))
+                if isinstance(error, ClientError) and error.status == 401:
+                    messagebox.showinfo("Sign in required", "Your access expired or was revoked. Sign in again.", parent=self.app.root)
+                    self.app.close()
+                    return
+                if self.client and self.client.room is None:
+                    self.history.clear()
+                    self.verified_peers.clear()
+                if isinstance(error, ClientError) and error.status is None:
+                    self.app.soc_online = False
+            else:
+                self.app.soc_online = True
+                if callback:
+                    callback(result)
+        if self.client and self.pending == 0 and time.monotonic() - self.last_poll >= 1.5:
+            self.last_poll = time.monotonic()
+            self.task(self.client.poll, self.receive, background=True)
+        self.render()
+        self._tick_after = self.app.root.after(100, self.tick)
+
+    def status(self, text):
+        self.last_status = text
+        if self.window and self.window.winfo_exists():
+            self.status_label.configure(text=text)
+
+    def receive(self, messages):
+        for message in messages:
+            payload, kind = message["payload"], message["kind"]
+            sender = message.get('sender', 'Peer')
+            if kind == "ping":
+                self.app._place_map_ping((payload["lat"], payload["lon"]), share=False)
+                self.app.map_status_label.configure(text="Peer ping · analyst annotation · not a sensor alert")
+                text = f"{sender} ping: {payload['lat']:.5f}, {payload['lon']:.5f}"
+            else:
+                text = f"{sender} · {'Message' if kind == 'chat' else kind.title()}\n{payload['text']}"
+            self.history.append(text)
+        self.history = self.history[-100:]
+        self.render()
+
+    def open(self):
+        if not self.client:
+            if self.login_window and self.login_window.winfo_exists():
+                self.login_window.lift()
+                return
+            window = ctk.CTkToplevel(self.app.root)
+            self.login_window = window
+            window.transient(self.app.root)
+            def attached(client):
+                self.client = self.app.soc_client = client
+                self.app.soc_online = True
+                self.app.soc_mode_label.configure(text=f"SOC · {client.user['username']}")
+                window.destroy()
+                self.open()
+            login_screen(window, "", attached)
+            return
+        if self.window and self.window.winfo_exists():
+            self.window.lift()
+            return
+        from desktop_soc_view import build
+        build(self)
+        self.render()
+
+    def reset(self, result=None):
+        self.history.clear()
+        self.verified_peers.clear()
+        self.status('Session ready. Verify your teammates.' if self.client.room and self.client.room.get('locked') else 'Connected. Invite your teammates.')
+        self.render()
+
+    def create(self):
+        scope = self.group.get()
+        group = None if scope == 'Team session (all groups)' else scope.removeprefix('Private: ')
+        self.task(lambda: self.client.create(group), self.reset)
+
+    def join(self, code):
+        if len(code.replace('-', '').replace(' ', '')) != 8:
+            self.status('Enter the 8-character invitation, for example ABCD-EFGH.')
+            return
+        self.task(lambda: self.client.join(code), self.reset)
+
+    def copy_invite(self):
+        if not self.client.code:
+            return
+        code = self.client.code
+        self.window.clipboard_clear()
+        self.window.clipboard_append(code[:4] + '-' + code[4:])
+        self.status('Invitation copied. Send it to your teammate; it expires after 10 minutes.')
+
+    def leave(self):
+        if messagebox.askyesno('Leave session', 'Leaving ends this session for everyone. Continue?', parent=self.window):
+            self.task(self.client.leave, lambda _: self.reset())
+
+    def confirmed(self, _=None):
+        self.status('Your teammates are verified. Waiting for their confirmation.')
+        self.render()
+
+    def compare_peer(self, user_id):
+        cipher, room = self.client.cipher, self.client.room
+        if not cipher or not cipher.room_id or user_id not in cipher.safety_codes:
+            self.status('Wait for the host to start the secure chat.')
+            return
+        member = next(m for m in room['members'] if m['user_id'] == user_id)
+        room_id = room['room_id']
+        from desktop_soc_view import label, button, BG, CARD, MUTED
+        dialog = ctk.CTkToplevel(self.window)
+        dialog.title('Verify ' + member['username'])
+        dialog.geometry('610x340')
+        dialog.resizable(False, False)
+        dialog.configure(fg_color=CARD)
+        dialog.transient(self.window)
+        dialog.grab_set()
+        label(dialog, 'Compare with ' + member['username'], 21, True).pack(padx=24, pady=(22, 8))
+        label(dialog, 'Ask them to open Compare keys beside your name. Both codes must match exactly. Compare by voice or in person.',
+              wraplength=545, justify='left', text_color=MUTED).pack(padx=24, pady=8)
+        code = cipher.safety_codes[user_id]
+        label(dialog, code, font=ctk.CTkFont('Consolas', 19, 'bold')).pack(padx=20, pady=18)
+        def copy():
+            dialog.clipboard_clear()
+            dialog.clipboard_append(code)
+        button(dialog, 'Copy verification code', copy).pack(pady=4)
+        row = ctk.CTkFrame(dialog, fg_color='transparent')
+        row.pack(fill='x', padx=24, pady=18)
+        def match():
+            current = self.client.cipher
+            if current is not cipher or not self.client.room or self.client.room['room_id'] != room_id:
+                dialog.destroy()
+                self.status('Session changed. Verify the new session instead.')
+                return
+            self.verified_peers.add(user_id)
+            dialog.destroy()
+            self.render()
+            if set(cipher.safety_codes) <= self.verified_peers:
+                self.task(self.client.confirm, self.confirmed)
+        button(row, 'Cancel', dialog.destroy, width=130).pack(side='left')
+        button(row, 'The codes match', match, True, width=220).pack(side='right')
+
+    def render(self):
+        from desktop_soc_view import render
+        render(self)
+
+    def send_message(self, kind, payload, on_success=None):
+        permissions = (self.client.room or {}).get('permissions', self.client.user['permissions'])
+        if KINDS.get(kind) not in permissions:
+            self.status('This tool is not available to everyone in the session.')
+            return
+        def done(_):
+            self.history.append(f"You · {kind.title()}\n{payload.get('text', payload)}")
+            self.history = self.history[-100:]
+            if on_success:
+                on_success()
+            self.status('Message sent.' if kind == 'chat' else 'Shared with your team.')
+            self.render()
+        self.task(lambda: self.client.send(kind, payload), done)
+
+    def send_text(self):
+        if self.busy:
+            self.status('A request is finishing. Your draft is saved; try again in a moment.')
+            return
+        draft = self.message.get('1.0', 'end').strip()
+        if not draft:
+            self.status('Write a message first.')
+            return
+        def sent():
+            if self.window and self.window.winfo_exists() and self.message.get('1.0', 'end').strip() == draft:
+                self.message.delete('1.0', 'end')
+        self.send_message('chat', {'text': draft}, sent)
+
+    def enter_message(self, event):
+        if event.state & 1:
+            return None
+        self.send_text()
+        return 'break'
+
+    def share_ping(self, point):
+        if self.client and self.client.cipher and self.client.cipher.verified and self.client.room and self.client.room.get('locked') and len(self.client.room['confirmed']) == len(self.client.room['members']):
+            self.send_message("ping", {"lat": point[0], "lon": point[1]})
+
+    def share_contact(self):
+        tracker = self.app.ais_tracker
+        vessel = tracker.state.vessels.get(tracker.selected)
+        if not vessel:
+            self.status("Select an AIS contact first")
+            return
+        import json
+        self.send_message("contact", {"text": json.dumps({k: vessel.get(k) for k in ("mmsi", "name", "lat", "lon", "sog_kn", "cog_deg", "received_utc", "label")}, ensure_ascii=False)})
+
+    def share_evidence(self):
+        self.send_message('evidence', {'text': self.app._evidence_text()[:4000]})
+
+    def build_admin(self, frame):
+        self.admin_frame = frame
+        self.admin_data = None
+        ttk.Button(frame, text="Refresh users / groups", command=self.refresh_admin).pack(anchor="w")
+        self.user_selector = ttk.Combobox(frame, state="readonly")
+        self.user_selector.pack(fill="x", pady=5)
+        self.user_selector.bind("<<ComboboxSelected>>", lambda _: self.select_user())
+        self.admin_username = ttk.Entry(frame)
+        self.admin_username.pack(fill="x", pady=4)
+        ttk.Label(frame, text="Username (new accounts only)").pack(anchor="w")
+        self.admin_password = ttk.Entry(frame, show="•")
+        self.admin_password.pack(fill="x", pady=4)
+        ttk.Label(frame, text="Password: 14+ characters; leave blank to keep it when updating").pack(anchor="w")
+        self.memberships = ttk.Frame(frame)
+        self.memberships.pack(fill="x", pady=5)
+        self.disabled = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frame, text="Disable account and revoke access", variable=self.disabled).pack(anchor="w")
+        row = ttk.Frame(frame)
+        row.pack(fill="x", pady=5)
+        ttk.Button(row, text="Create account", command=lambda: self.save_user(True)).pack(side="left")
+        ttk.Button(row, text="Update selected / revoke sessions", command=lambda: self.save_user(False)).pack(side="left", padx=4)
+        ttk.Separator(frame).pack(fill="x", pady=12)
+        self.group_selector = ttk.Combobox(frame)
+        self.group_selector.pack(fill="x", pady=4)
+        self.group_selector.bind("<<ComboboxSelected>>", lambda _: self.select_group())
+        ttk.Label(frame, text="Select a group or enter a new name. Check its permitted tools.").pack(anchor="w")
+        self.permissions_frame = ttk.Frame(frame)
+        self.permissions_frame.pack(fill="x")
+        row = ttk.Frame(frame)
+        row.pack(fill="x", pady=8)
+        ttk.Button(row, text="Save group", command=self.save_group).pack(side="left")
+        ttk.Button(row, text="Delete custom group", command=self.delete_group).pack(side="left", padx=4)
+        self.refresh_admin()
+
+    def refresh_admin(self):
+        self.task(lambda: self.client.request("GET", "/v1/admin"), self.show_admin)
+
+    def show_admin(self, data):
+        if not self.window or not self.window.winfo_exists():
+            return
+        self.admin_data = data
+        self.user_selector.configure(values=[u["username"] for u in data["users"]])
+        self.group_selector.configure(values=[g["name"] for g in data["groups"]])
+        for frame in (self.memberships, self.permissions_frame):
+            for child in frame.winfo_children():
+                child.destroy()
+        self.group_vars = {g["name"]: tk.BooleanVar(value=False) for g in data["groups"]}
+        for group, variable in self.group_vars.items():
+            ttk.Checkbutton(self.memberships, text=group, variable=variable).pack(side="left")
+        self.perm_vars = {p: tk.BooleanVar(value=False) for p in data["available_permissions"]}
+        for permission, variable in self.perm_vars.items():
+            ttk.Checkbutton(self.permissions_frame, text=permission, variable=variable).pack(anchor="w")
+        self.select_user()
+        self.select_group()
+        self.status("Administration refreshed")
+
+    def select_user(self):
+        if not self.admin_data:
+            return
+        user = next((u for u in self.admin_data["users"] if u["username"] == self.user_selector.get()), None)
+        if user:
+            self.admin_username.delete(0, "end")
+            self.admin_username.insert(0, user["username"])
+            self.disabled.set(bool(user["disabled"]))
+            for group, variable in self.group_vars.items():
+                variable.set(group in user["groups"])
+
+    def select_group(self):
+        if not self.admin_data:
+            return
+        group = next((g for g in self.admin_data["groups"] if g["name"] == self.group_selector.get()), None)
+        for permission, variable in self.perm_vars.items():
+            variable.set(bool(group and permission in group["permissions"]))
+
+    def save_user(self, create):
+        if not self.admin_data:
+            return
+        data = {"username": self.admin_username.get(), "password": self.admin_password.get(),
+                "groups": [g for g, v in self.group_vars.items() if v.get()], "disabled": self.disabled.get()}
+        self.admin_password.delete(0, "end")
+        path = "/v1/admin/users"
+        if not create:
+            user = next((u for u in self.admin_data["users"] if u["username"] == self.user_selector.get()), None)
+            if not user:
+                self.status("Select an account")
+                return
+            path += "/" + user["id"]
+        self.task(lambda: self.client.request("POST" if create else "PUT", path, data), lambda _: self.refresh_admin())
+
+    def save_group(self):
+        import re
+        group = self.group_selector.get().lower()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{2,39}", group):
+            self.status("Use 3–40 letters, digits, dots, hyphens or underscores")
+            return
+        data = {"permissions": [p for p, v in self.perm_vars.items() if v.get()]}
+        self.task(lambda: self.client.request("PUT", "/v1/admin/groups/" + group, data), lambda _: self.refresh_admin())
+
+    def delete_group(self):
+        group = self.group_selector.get()
+        if not self.admin_data or group not in [g["name"] for g in self.admin_data["groups"]]:
+            self.status("Select an existing custom group")
+            return
+        if messagebox.askyesno("Delete group", f"Remove {group} and close its active sessions?", parent=self.window):
+            self.task(lambda: self.client.request("DELETE", "/v1/admin/groups/" + group), lambda _: self.refresh_admin())
+
+    def close(self):
+        self.stopping = True
+        client = self.client
+        if client:
+            self.executor.submit(client.logout)
+        self.executor.shutdown(wait=False, cancel_futures=False)
