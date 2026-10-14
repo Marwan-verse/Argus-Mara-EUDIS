@@ -76,6 +76,31 @@ readiness time, range and drone site is a labelled assumption (D58).
 Reset with the ↻ button in the Incidents panel. Send, Recall and Escalate are simulated
 decisions written to the incident log; nothing is transmitted.
 
+### Brain finds it from the track: the anchor-drag story (about 2 minutes)
+
+Same app, same start: the replay at the exercise alert, T+01:30, at the default 60×
+(one replay minute per second). VESNA DRIFT, HOLM SENTINEL, LAMBAY ROSE and SKERRIES
+DART are fictional ships on fictional AIS tracks. Nobody wrote their observations:
+at every replay step Brain's detectors read the track and score it against the
+illustrative cable routes (D59). Their cards carry the tag **BRAIN** and the words
+"from track"; the older simulated contacts say **SIM** and "hand-written".
+
+| Click | What the judges see | Say |
+|---|---|---|
+| Click the **WATCH** tile in the Incidents panel. | VESNA DRIFT · BRAIN: "Under way at 12 kn, … nm from Dublin–Holyhead telecom cable: no behaviour cue". LAMBAY ROSE at anchor 3 nm from the line, also no cue. | "A ship near a cable is not an alarm. Ships cross cables all day." |
+| Press **Play**. At T+01:50 VESNA DRIFT crosses the Dublin–Holyhead route at 12 kn. | It stays in Watch. SKERRIES DART, a 19 kn ferry, crosses three routes and stays in Watch too. | "Fast and straight across the line: nothing to explain." |
+| Keep playing. At T+01:57 the card jumps up as an incident. | **High**, "Slowing and yawing across EWIC without an AIS gap", ETA about 27 min to EWIC, and a red line: "No responder in time · best D1 38 min, 11 min late". | "It slowed from 12 to 9 knots 5 nm from the interconnector, with no AIS gap. The old four-cue rule needed a gap and would have missed it." |
+| At T+02:05 it turns **Critical**; the ETA counts down from about 21 min. | The card's timer runs in red. | "Now the course is unsteady too: speed down 25%, course swinging 26°, the anchor-drag pattern. And nobody can be there in time, so the level goes up one step." |
+| Press **Pause** and click the card. | Review window tagged **BRAIN · FROM TRACK**. *Why this level*: +4 anchor-drag pattern, +4 reaches the anchor-reachable section in 20 min, +2 power interconnector. *Findings by detector*: "Cable risk from the track" with each number and its threshold. *Data labels*: SOURCE, SIMULATED, ILLUSTRATIVE, ASSUMPTION. | "Every point has a reason and a threshold you can argue with. Brain found this; we only wrote the ship's track." |
+| Press **Escalate**. | *Who can reach it*: Drone D1 (Howth) 39 min, 18 min late; Rescue 116 49 min; Drone D2 50 min; the aircraft 61 min. | "Honest answer: nobody arrives before the anchor can reach the cable. That is why the level is Critical." |
+| Press **Send** on D1, then **Play**. | Log: "Sent Drone D1: eyes on in 39 min, 18 min late". On the map D1 is *preparing*, then *en route*. At T+02:24 VESNA DRIFT is "In corridor" and back to **High** (the corridor rules score it now). D1 is *on scene* at about T+02:45. | "We still send the fastest asset: eyes on and evidence for the operator, even when we cannot prevent the contact." |
+| Optional: click HOLM SENTINEL. | Medium at T+02:05: "Held at 3 kn or less within 2 nm of the line for 1.0 h". At about T+02:30 it anchors 0.9 nm from the North Dublin cluster and stays **High** (loitering, then anchored by the line). | "A second pattern from the same detector: loitering, then anchoring next to the cluster." |
+
+Limits to say if asked: the routes are illustrative, so their depth is unknown and an
+anchor is assumed to reach the seabed along the whole route. Every threshold is a team
+assumption (D59), and the level is a rule outcome for review, not a probability of intent.
+Reset with ↻; rewinding the slider replays the stories backwards too.
+
 ## 3.5 Hard questions to rehearse
 
 1. **"Commercial AIS cable-watch services already exist (NKT, Sentinel Proactive, UltramapGlobal, Gatehouse). Why you?"**
