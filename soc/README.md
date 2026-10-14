@@ -162,8 +162,10 @@ depends on `cryptography`. Account authentication uses HTTPS and Argon2id:
   New participants require new rooms/keys and fresh safety comparisons. Each
   sender has a monotonically increasing counter, tracked separately by recipients.
 
-Text payloads have at most 4000 characters/6000 encoded bytes; pings contain
-validated `lat` and `lon`. The relay sees identities, keys, kinds, timing, sizes
+Text payloads have at most 4000 characters/6000 encoded bytes and may not contain
+control, direction-override or other invisible characters (line breaks, tabs and
+the joiners used by emoji are allowed). Both sender and receiver check this. Pings
+contain validated `lat` and `lon`. The relay sees identities, keys, kinds, timing, sizes
 and counters, and can drop/reorder traffic or deny service. Ciphertext is retained
 in memory only (256 messages and 256 KiB per room, eight-hour expiry). Missed history requires
 a new room. Endpoint displays hold the latest 100 messages in memory.

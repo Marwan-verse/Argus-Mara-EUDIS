@@ -139,6 +139,22 @@ class CryptoTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 cipher.confirm()
 
+    def test_text_rejects_invisible_and_direction_changing_characters(self):
+        for text in ('report.‮gnp.exe', 'pay​ment', '⁦hidden⁩', 'a\u0085b', 'a\x7fb', 'a\rb', 'lone \ud800'):
+            with self.assertRaises(ValueError):
+                validate_payload('chat', {'text': text})
+        for text in ('Привет, команда', 'line one\n\tline two', 'analyst \U0001F469‍\U0001F4BB', 'می‌خواهم'):
+            self.assertEqual(validate_payload('chat', {'text': text})['text'], text)
+        # A modified client that skips its own check is still refused by the receiver.
+        a, b, members = ciphers()
+        type_codes(a, b)
+        a.confirm()
+        b.confirm()
+        with patch('argus.collab_crypto.validate_payload', lambda kind, payload: payload):
+            packet = a.encrypt('chat', {'text': 'report.‮gnp.exe'})
+        with self.assertRaises(ValueError):
+            b.decrypt(packet)
+
     def test_payload_and_url_validation(self):
         for payload in ({"lat": float("nan"), "lon": 0}, {"lat": True, "lon": 0}, {"lat": 91, "lon": 0}, {"lat": 0, "lon": 181}):
             with self.assertRaises(ValueError):
