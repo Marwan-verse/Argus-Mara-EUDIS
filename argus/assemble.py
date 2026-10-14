@@ -8,9 +8,10 @@ and scores the result with ``argus.levels.assess``.
 
 Two rules for detector authors:
 
-* ``eta_min``, ``distance_nm``, ``asset_class`` and ``in_corridor`` count only
-  when the finding names ``related.cable_id``. They are then taken together
-  from the single most urgent cable, never mixed across cables.
+* ``eta_min``, ``distance_nm``, ``asset_class``, ``in_corridor`` and
+  ``method_possible`` count only when the finding names ``related.cable_id``.
+  They are then taken together from the single most urgent cable, never mixed
+  across cables.
 * Put a radar-measured length in ``obs["radar_length_m"]``. The small-vessel
   filter uses it to see that a vessel declared small is really large.
 
@@ -27,7 +28,7 @@ from pathlib import Path
 from argus.alert_board import exercise_item
 from argus.brain import detect_vessel
 from argus.contracts import validate_scenario
-from argus.detectors import ais_spoofing
+from argus.detectors import ais_spoofing, cable_risk
 from argus.levels import CRITICAL_ASSETS, LEVEL_NAMES, RANK, RULES_VERSION, assess
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,7 +36,8 @@ DEFAULT_OUTPUT = ROOT / "data/brain/assessments.json"
 
 # Observation keys that describe one line. They come only from findings with a
 # related.cable_id, and all of them from the same, most urgent cable.
-CABLE_KEYS = ("in_corridor", "eta_min", "distance_nm", "asset_class")
+# method_possible is False when only a section too deep for an anchor is near.
+CABLE_KEYS = ("in_corridor", "eta_min", "distance_nm", "asset_class", "method_possible")
 
 # Small-vessel relevance. These thresholds are assumptions, not regulation:
 # small craft rarely carry anchors or gear heavy enough to damage a buried line.
@@ -76,6 +78,7 @@ def legacy_cable_v1(vessel: dict, context: dict) -> list[dict]:
 DETECTORS = [
     legacy_cable_v1,
     ais_spoofing.detect,
+    cable_risk.detect,
 ]
 
 
@@ -84,9 +87,10 @@ def _asset_weight(asset_class: str) -> int:
 
 
 def _urgency(line: dict) -> tuple:
-    """Sort key: inside the corridor first, then the soonest ETA, the nearest distance, the most critical line."""
+    """Sort key: a line an anchor can damage first, then inside the corridor, the soonest ETA, the nearest
+    distance and the most critical line."""
     eta, distance = line.get("eta_min"), line.get("distance_nm")
-    return (not line.get("in_corridor"), float("inf") if eta is None else eta,
+    return (line.get("method_possible") is False, not line.get("in_corridor"), float("inf") if eta is None else eta,
             float("inf") if distance is None else distance, -_asset_weight(line.get("asset_class")))
 
 
@@ -94,8 +98,8 @@ def threatened_cable(findings: list[dict]) -> tuple[str | None, dict]:
     """Pick the one line under threat; return its cable ID and its ``CABLE_KEYS`` values.
 
     Findings naming the same ``related.cable_id`` are combined first (in the
-    corridor if any says so, soonest ETA, nearest distance, most critical
-    class). The most urgent cable then wins; ties keep the first one found.
+    corridor or damage feasible if any says so, soonest ETA, nearest distance,
+    most critical class). The most urgent cable then wins; ties keep the first one found.
     """
     lines: dict[str, dict] = {}
     for finding in findings:
@@ -107,7 +111,7 @@ def threatened_cable(findings: list[dict]) -> tuple[str | None, dict]:
             value = (finding.get("obs") or {}).get(key)
             if value is None:
                 continue
-            if key == "in_corridor":
+            if isinstance(value, bool):
                 line[key] = bool(line.get(key)) or value
             elif key == "asset_class":
                 if key not in line or _asset_weight(value) > _asset_weight(line[key]):
@@ -124,8 +128,9 @@ def merge_observations(findings: list[dict]) -> dict:
     """Combine findings' ``obs`` into one observation set for ``argus.levels.assess``.
 
     Numbers take the maximum and flags are true if any finding sets them.
-    ``eta_min``, ``distance_nm``, ``asset_class`` and ``in_corridor`` count only
-    when the finding names ``related.cable_id``, and all four come together from
+    ``eta_min``, ``distance_nm``, ``asset_class``, ``in_corridor`` and
+    ``method_possible`` count only when the finding names ``related.cable_id``,
+    and all five come together from
     the most urgent cable (see ``threatened_cable``). A radar-measured length
     belongs in ``radar_length_m``; the small-vessel filter reads it. Other
     values keep the first finding's value.

@@ -20,6 +20,7 @@ DETECTORS = {
     "alert_board_simulated": "Board observations",
     "legacy_cable_v1": "Cable approach rule v1",
     "ais_spoofing": "AIS spoofing check",
+    "cable_risk": "Cable risk from the track",
 }
 DATA_LABELS = {"simulated": "SIMULATED", "fictional": "EXERCISE", "real": "REAL"}
 # Notes the small-vessel rule adds (argus.assemble.apply_relevance); shown in their own part.

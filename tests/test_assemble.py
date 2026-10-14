@@ -171,7 +171,8 @@ class DemoTests(unittest.TestCase):
     def test_legacy_detector_matches_alert_board_exercise_item(self):
         alert = build_alerts(self.scenario)["alerts"][0]
         expected = exercise_item(self.scenario, alert)
-        result = assess_vessel(self.scenario["vessels"][0], context_from_scenario(self.scenario))
+        result = assess_vessel(self.scenario["vessels"][0], context_from_scenario(self.scenario),
+                               [assemble.legacy_cable_v1])
         self.assertEqual(result["assessment"], expected["assessment"])
         self.assertEqual(result["assessment"]["level"], "high")
         legacy = result["findings"][0]
@@ -197,7 +198,8 @@ class DemoTests(unittest.TestCase):
 
     def test_now_before_the_alert_fix_gives_no_finding(self):
         result = assess_vessel(self.scenario["vessels"][0], context_from_scenario(self.scenario, now=5340))
-        self.assertEqual(result["findings"], [])
+        self.assertNotIn("legacy_cable_v1", [f["detector"] for f in result["findings"]])
+        self.assertEqual(result["assessment"]["groups"]["B"], 0)  # cable_risk sees the line, but no behaviour yet
         self.assertEqual(result["assessment"]["level"], "none")
 
     def test_new_detector_connects_with_one_line(self):
@@ -206,7 +208,7 @@ class DemoTests(unittest.TestCase):
 
         with mock.patch.object(assemble, "DETECTORS", [*assemble.DETECTORS, watchlist]):
             result = assess_vessel(self.scenario["vessels"][0], context_from_scenario(self.scenario))
-        self.assertEqual([f["detector"] for f in result["findings"]], ["legacy_cable_v1", "watchlist"])
+        self.assertEqual([f["detector"] for f in result["findings"]], ["legacy_cable_v1", "cable_risk", "watchlist"])
         self.assertIn("C1", [factor["code"] for factor in result["assessment"]["factors"]])
 
     def test_cli_writes_a_separate_file_and_leaves_alerts_untouched(self):
@@ -217,7 +219,7 @@ class DemoTests(unittest.TestCase):
                            cwd=ROOT, check=True, capture_output=True)
             result = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual(result["vessels"][0]["assessment"]["level"], "high")
-        self.assertEqual(result["detectors"], ["legacy_cable_v1", "ais_spoofing"])
+        self.assertEqual(result["detectors"], ["legacy_cable_v1", "ais_spoofing", "cable_risk"])
         refused = subprocess.run([sys.executable, "-m", "argus.assemble", "--output", "demo/alerts.json"],
                                  cwd=ROOT, capture_output=True)
         self.assertNotEqual(refused.returncode, 0)

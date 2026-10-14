@@ -22,9 +22,9 @@ class BrainBoardTests(unittest.TestCase):
         self.assertEqual(len(self.items), len(original) + 9)
         for identifier, assessment in original.items():
             item = self.by_id[identifier]
-            if not item["relevance"]["small"]:
+            if not item["relevance"]["small"] and identifier != "A1":  # A1 also runs the track detectors
                 self.assertEqual(item["assessment"], assessment, identifier)
-        self.assertEqual(self.by_id["A1"]["detectors"], ["legacy_cable_v1"])
+        self.assertEqual(self.by_id["A1"]["detectors"], ["legacy_cable_v1", "cable_risk"])
         self.assertEqual(self.by_id["A1"]["assessment"]["level"], "high")
 
     def test_small_craft_are_capped_or_explained(self):
@@ -75,7 +75,7 @@ class BrainBoardTests(unittest.TestCase):
         exercise = self.by_id["A1"]
         rescore_exercise(exercise, self.scenario, 5000)
         self.assertEqual(exercise["assessment"]["level"], "none")
-        self.assertEqual(exercise["findings"], [])
+        self.assertEqual([f["detector"] for f in exercise["findings"]], ["cable_risk"])  # near, no behaviour
         rescore_exercise(exercise, self.scenario, 5400)
         self.assertEqual(exercise["assessment"]["level"], "high")
         self.assertEqual(exercise["cable_id"], "cable-irish-sea-1")

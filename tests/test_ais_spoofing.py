@@ -253,8 +253,8 @@ class DemoTests(unittest.TestCase):
         alerts = json.loads((ROOT / "demo/alerts.json").read_text(encoding="utf-8"))["alerts"]
         exercise = next(item for item in build_board(self.scenario, alerts) if item["id"] == "A1")
         self.assertEqual(exercise["assessment"]["level"], "high")
-        self.assertEqual(exercise["assessment"]["basis"], "B4 I3 P3 A1 C0 = 11")
-        self.assertEqual(exercise["detectors"], ["legacy_cable_v1"])
+        self.assertNotIn("ais_spoofing", exercise["detectors"])
+        self.assertEqual(exercise["assessment"]["groups"]["I"], 3)  # no spoofing points
 
 
 class AssembleTests(unittest.TestCase):

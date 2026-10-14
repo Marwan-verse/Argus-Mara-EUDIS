@@ -42,7 +42,8 @@ class ExplainTests(unittest.TestCase):
         self.assertEqual(len(spoofing["reasons"]), 4)
         self.assertIn("inside land", spoofing["reasons"][3])
         exercise = explain(self.by_id["A1"])["findings"]
-        self.assertEqual([(f["title"], f["label"]) for f in exercise], [("Cable approach rule v1", "EXERCISE")])
+        self.assertEqual([(f["title"], f["label"]) for f in exercise],
+                         [("Cable approach rule v1", "EXERCISE"), ("Cable risk from the track", "EXERCISE")])
 
     def test_small_vessel_rule_capped_or_lifted(self):
         capped = explain(self.by_id["SIM-40"])["small_vessel"]

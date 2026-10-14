@@ -51,15 +51,17 @@ class IncidentTests(unittest.TestCase):
                          [(60, "low", "medium"), (180, "medium", "high"), (240, "high", "medium")])
         self.assertEqual((incident["level"], incident["peak_level"]), ("medium", "high"))
 
-    def test_demo_scenario_has_one_incident_rising_to_high(self):
+    def test_demo_scenario_has_one_incident_rising_to_high_then_critical(self):
         scenario = json.loads((ROOT / "demo/scenario.json").read_text(encoding="utf-8"))
         incidents = all_incidents(run_scenario(scenario, 60))
         ours = [inc for inc in incidents if inc["mmsi"] == 999000001]
         self.assertEqual(len(ours), 1)
         incident = ours[0]
-        self.assertEqual(incident["peak_level"], "high")
+        # High at the A1 alert; Critical once cable_risk's live ETA to the reachable section is 30 min or less.
+        self.assertEqual(incident["peak_level"], "critical")
         self.assertEqual(incident["cable_id"], "cable-irish-sea-1")
         self.assertTrue(any(h["to"] == "high" and h["t"] <= 5400 for h in incident["history"]))
+        self.assertTrue(any(h["to"] == "critical" and h["t"] > 5400 for h in incident["history"]))
         self.assertEqual(incident["status"], "New")
 
     def test_analyst_status_survives_updates(self):

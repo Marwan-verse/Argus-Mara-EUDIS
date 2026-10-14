@@ -121,9 +121,13 @@ class ReplayResponseTests(unittest.TestCase):
         self.replay = Replay(self.items, self.scenario, self.start)
         self.replay.seek(self.start)
 
-    def test_the_exercise_deadline_is_its_alert_eta(self):
+    def test_the_exercise_deadline_is_its_earliest_line_eta(self):
+        """The earlier of the A1 alert ETA and cable_risk's ETA from the current track (they agree within a minute)."""
         exercise = self.by_id["A1"]
-        self.assertEqual(deadline_s(exercise, self.start + 600), self.start + self.alerts[0]["eta_earliest_s"])
+        alert_eta = self.start + self.alerts[0]["eta_earliest_s"]
+        deadline = deadline_s(exercise, self.start + 600)
+        self.assertLessEqual(deadline, alert_eta)
+        self.assertAlmostEqual(deadline, alert_eta, delta=60)
         self.assertFalse(self.replay.responses["A1"]["no_response_in_time"])
 
     def test_no_responder_in_time_raises_the_level_once_with_a_note(self):
