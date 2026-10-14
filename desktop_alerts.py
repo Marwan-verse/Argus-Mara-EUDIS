@@ -10,9 +10,9 @@ escalate and reject go through ``argus.incidents.set_status`` and stay in this
 session; nothing is transmitted.
 
 Each incident also shows who can reach it (``argus.responders``): one line on
-the card, every asset with minutes and reasons in the review window, and on the
-map the bases and a dashed line from the best asset to where it meets the
-vessel. The storm switch grounds the drones; the wind is an exercise value.
+the card, every asset with minutes and reasons in the review window while
+escalating, and on the map the bases and a dashed line from the best asset to
+where it meets the vessel. The storm switch grounds the drones; the wind is an exercise value.
 Send and Recall (permission ``response.review``) record a simulated human
 decision: a sent asset is busy for every other incident, so one that relied
 on it can rise, and the review window warns before that happens.
@@ -1161,7 +1161,7 @@ class ReviewDialog:
         self.scale = tk.Canvas(self.frame, height=44, bg=ui.CARD, highlightthickness=0)
         self.scale.pack(fill="x", padx=20, pady=(12, 0))
         self.scale.bind("<Configure>", lambda _event: self.draw_scale())
-        facts = tk.Frame(self.frame, bg=ui.CARD)
+        facts = self.facts_frame = tk.Frame(self.frame, bg=ui.CARD)
         facts.pack(fill="x", padx=20, pady=(8, 0))
         self.facts = {}
         for index, (key, caption) in enumerate((("asset", "ASSET"), ("time", "TIME TO ASSET"), ("status", "STATUS"))):
@@ -1323,8 +1323,12 @@ class ReviewDialog:
         for child in self.body.winfo_children():
             child.destroy()
         wrap = round((float(self.frame.cget("width")) - 110) * self.px)
+        self.compact(self.mode == "escalate")
+        if self.mode == "escalate":
+            # Escalating is when an asset is chosen: the window shows who can reach the vessel instead.
+            self.fill_responders(wrap)
+            return
         self.fill_why(explain(item), wrap)
-        self.fill_responders(wrap)
         self.heading("RECOMMENDED ACTION")
         tk.Label(self.body, text=item["recommendation"], bg=ui.CARD, fg=ui.INK, font=(SANS, 10), anchor="w",
                  justify="left", wraplength=wrap + 40).pack(fill="x", padx=(6, 0))
@@ -1355,8 +1359,8 @@ class ReviewDialog:
     def fill_responders(self, wrap: int) -> None:
         """Who can reach it: the storm switch, the card line, then every asset with minutes or a reason."""
         ui, item, board = self.ui, self.item, self.board
-        head = self.responders_head = tk.Frame(self.body, bg=ui.CARD)
-        head.pack(fill="x", padx=(6, 0), pady=(16, 6))
+        head = tk.Frame(self.body, bg=ui.CARD)
+        head.pack(fill="x", padx=(6, 0), pady=(4, 6))
         tk.Label(head, text="WHO CAN REACH IT", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 8, "bold")).pack(side="left")
         storm = board.replay.storm
         switch = ctk.CTkButton(
@@ -1444,6 +1448,16 @@ class ReviewDialog:
                             "sites and the patrol ship position are team assumptions. VHF and satellite only look.",
                  bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9), anchor="w", justify="left", wraplength=wrap - 70).pack(
             side="left", fill="x", expand=True, padx=(8, 0))
+
+    def compact(self, on: bool) -> None:
+        """While escalating, fold the level scale and facts so the asset list has room."""
+        if on:
+            self.scale.pack_forget()
+            self.facts_frame.pack_forget()
+        elif not self.scale.winfo_manager():
+            above = self.flags if self.flags.winfo_manager() else self.title
+            self.scale.pack(fill="x", padx=20, pady=(12, 0), after=above)
+            self.facts_frame.pack(fill="x", padx=20, pady=(8, 0), after=self.scale)
 
     def chip(self, parent, tag: str, width: int = 0) -> tk.Label:
         """A small data-label tag such as SIMULATED, REAL or ASSUMPTION."""
@@ -1544,21 +1558,16 @@ class ReviewDialog:
         self.choice.set(RECIPIENTS[0] if mode == "escalate" else REASONS[0])
         self.fill_actions()
         self.fill_form()
-        if mode == "escalate":
-            self.show_responders()
-
-    def show_responders(self) -> None:
-        """Scroll the review window to "Who can reach it", so escalating comes with sending an asset."""
-        head = getattr(self, "responders_head", None)
+        self.fill_body()
         canvas = getattr(self.body, "_parent_canvas", None)
-        if head is None or canvas is None or not head.winfo_exists():
-            return
-        self.body.update_idletasks()
-        total = max(1, self.body.winfo_height())
-        canvas.yview_moveto(max(0.0, (head.winfo_y() - 4) / total))
+        if canvas is not None:
+            canvas.yview_moveto(0)
 
     def fill_form(self) -> None:
         ui = self.ui
+        note = getattr(self, "note", None)
+        # A Send while escalating rebuilds the form; keep the note the analyst already typed.
+        typed = note.get() if self.mode and note is not None and note.winfo_exists() else ""
         for child in self.form.winfo_children():
             child.destroy()
         if not self.mode:
@@ -1580,6 +1589,8 @@ class ReviewDialog:
                                  fg_color=ui.CONTROL, border_color=ui.LINE, text_color=ui.INK,
                                  font=ctk.CTkFont(SANS, 12))
         self.note.pack(fill="x", pady=(8, 0))
+        if typed:
+            self.note.insert(0, typed)
         self.note.bind("<Return>", lambda _event: self.confirm())
         buttons = tk.Frame(self.form, bg=ui.CARD)
         buttons.pack(fill="x", pady=(10, 4))
@@ -1597,6 +1608,7 @@ class ReviewDialog:
         self.mode = None
         self.fill_form()
         self.fill_actions()
+        self.fill_body()
 
     def confirm(self) -> None:
         if not self.mode or self.item is None:

@@ -204,8 +204,11 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertTrue(board.cards['SIM-06']['respond'].cget('text').startswith('No responder in time'))
         self.assertFalse(board.cards['SIM-40']['respond'].winfo_manager())  # watched, not an incident
         board.open('SIM-41')
+        self.assertNotIn('WHO CAN REACH IT', texts())  # shown while escalating, not in the plain review
+        dialog.open_form('escalate')
         shown = texts()
         self.assertIn('WHO CAN REACH IT', shown)
+        self.assertNotIn('WHY THIS LEVEL', shown)
         self.assertIn('Drone D1 · 42 min · in time (+3 min)', shown)
         self.assertIn('42 min · in time (+3)', shown)
         self.assertTrue(any(text.startswith('out of range (87 nm from base') for text in shown))
@@ -218,6 +221,8 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertIn('Exercise wind 30 kn', self.app.map_status_label.cget('text'))
         board.toggle_storm()
         self.assertEqual(board.by_id['SIM-41']['assessment']['level'], 'high')
+        dialog.cancel_form()
+        self.assertIn('WHY THIS LEVEL', texts())
         board.deselect()
         self.assertFalse(self.map_tags('sim-response'))
 
