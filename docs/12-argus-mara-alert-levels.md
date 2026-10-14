@@ -1,8 +1,8 @@
 # Argus Mara alert levels
 
 How Argus Mara gives a vessel near a cable or pipeline its alert level, and how the
-docked alert panel in the desktop app works. Rules version: **levels v1**
-(`argus/levels.py`). Decision D47 in [DECISIONS.md](../DECISIONS.md).
+docked alert panel in the desktop app works. Rules version: **levels v1.1**
+(`argus/levels.py`). Decisions D47 and D61 in [DECISIONS.md](../DECISIONS.md).
 
 A level answers one question: **how much attention does this line need now?** It does
 not say the crew is guilty, and it is a rule outcome, not a probability of hostile
@@ -39,6 +39,8 @@ operator's computer.
 | | Anchored within 1 nm of the line | 2 |
 | | Bottom-fishing pattern within 2 nm | 2 |
 | | Unexplained slowdown within 5 nm | 2 |
+| | Stopped 2 h or more away from any port or designated anchorage (30 min or more: 2) | 3 |
+| | Stayed 1 h or more inside the protection zone around a coastal site | 3 |
 | | Slowed over these lines on earlier voyages; AIS status contradicts the movement | +1 each |
 | **I · Identity and data**, max 3 | No AIS from a radar contact, or AIS silent 10 min or more near the line | 2 |
 | | Spoofing signs: impossible jump, or two positions for one identity | 2 |
@@ -46,12 +48,14 @@ operator's computer.
 | | Radar length differs more than 25% from the AIS length | 1 |
 | | Name, flag or MMSI changed in the last 12 months | 1 |
 | | Static AIS data incomplete: destination or IMO missing | 1 |
-| **P · Proximity**, counts only when B + I is 2 or more | Inside the 1 nm corridor, or 30 min or less from an anchor-reachable section | 4 |
+| **P · Proximity**, counts only when B + I is 2 or more | Inside the 1 nm corridor or a site's zone, or 30 min or less from an anchor-reachable section | 4 |
 | | Reaches the line within 2 h | 3 |
-| | Reaches the line within 6 h, or is within 5 nm | 1 |
+| | Reaches the line within 6 h, or is within 5 nm of the line or the site's zone | 1 |
 | **A · Line at risk**, counts only when B + I is 2 or more | Gas pipeline, power interconnector, only link on its route, cluster of three or more lines, transatlantic cable | 2 |
 | | Telecom cable with alternative routes | 1 |
 | | Exposed, shallow-buried or previously damaged segment | +1 |
+| | Site at risk: naval base, or cable or pipeline landfall | 2 |
+| | Site at risk: offshore wind farm | 1 |
 | **C · Context**, max 3 | On a sanctions or shadow-fleet watch list | 2 |
 | | A second sensor (fibre or radar) reports activity at the line | 2 |
 | | Recent flag change or opaque ownership | 1 |
@@ -86,6 +90,37 @@ Gates stop one noisy signal from producing a high level. Overrides apply after t
 | Watch-listed tanker with a recent flag change, transiting normally 4 nm away | B0 I1 P0 A0 C3 = 4 | Low: proximity does not count without behaviour or identity |
 | Ferry on its usual route through the corridor | 0 | None: not listed |
 
+## Coastal sites, stops and loitering
+
+`argus/sites.py` adds two detectors that work on a timed AIS track (time, position,
+speed). Both run on the fictional tracks of the four coastal-site contacts, so their
+cues come from code, not hand-written observations.
+
+- **Stopped away from ports.** The vessel has been at 0.5 kn or less up to its latest
+  fix, and that fix is more than 3 nm from every port in the bundled NGA World Port
+  Index and Marine Atlas files and from the edge of a rough designated anchorage
+  (Dublin Bay, Cork Harbour, Shannon Estuary, Waterford Harbour). Fishing vessels are
+  skipped because they stop at sea for work. A reception gap over 30 min ends the stop.
+- **Loitering at a site.** The vessel has stayed inside the site's zone continuously up
+  to its latest fix. A ship crossing a 2 nm zone at 10 kn is inside for about 24 min,
+  so an hour or more means it stayed, whatever its speed.
+
+| Site | Kind | Zone |
+|---|---|---|
+| Haulbowline naval base | Naval base | 1 nm |
+| EWIC landfall, Rush | Landfall | 2 nm |
+| Greenlink landfall, Baginbun | Landfall | 2 nm |
+| IC2 gas landfall, Gormanston | Landfall | 2 nm |
+| Transatlantic cable landfall, Killala Bay | Landfall | 2 nm |
+| Arklow Bank offshore wind farm | Wind farm | 2 nm |
+
+Positions are approximate public locations; landfalls sit where the illustrative routes
+reach the shore. Zones and anchorages are design choices, not charted limits. Selecting
+a site contact draws its zone as a dashed ring labelled "approximate zone"; the review
+window shows **In zone** or the distance to the zone. Haulbowline sits inside a busy
+harbour, so the stop rule never fires there (Cobh is a port) and harbour traffic would
+make the loiter rule noisy without a list of expected vessels.
+
 ## The alert panel
 
 | Part | Behaviour |
@@ -109,11 +144,13 @@ to anyone, and a human decides every action.
 
 ## The simulated board
 
-The board holds 40 items: the fictional exercise alert from the demo files, 15
-hand-written scenarios and 24 frequent minor alerts. Minor alerts are the most common,
+The board holds 45 items: the fictional exercise alert from the demo files, 15
+hand-written scenarios, 4 coastal-site contacts scored from fictional tracks and 25
+frequent minor alerts. Minor alerts are the most common,
 as in real operations: short reception gaps, GPS glitches, measurement noise,
 watch-listed ships in normal transit, pilot-area slowdowns and notified repair or
-survey work. At start it shows 3 Critical, 5 High, 8 Medium and 24 Low.
+survey work and stops in open water. At start it shows 3 Critical, 7 High, 10 Medium
+and 25 Low.
 
 | ID | Vessel | Situation | Basis | Level |
 |---|---|---|---|---|
@@ -124,6 +161,8 @@ survey work. At start it shows 3 Critical, 5 High, 8 Medium and 24 Low.
 | SIM-04 | MOY HARVESTER | Four trawl passes over the North Dublin cable cluster | B3 I0 P4 A3 C0 = 10 | High |
 | SIM-06 | GREY HERON | Loitered 6 h beside the IC2 gas pipeline, now heading for it | B3 I3 P3 A2 C2 = 13 | High; Critical when within 30 min |
 | SIM-07 | CORRIB MIST | Slowing with an unsteady course 3 nm from Greenlink | B3 I2 P3 A2 C0 = 10 | High |
+| SIM-41 | VELVET PETREL | Circling 2.5 h off Haulbowline naval base after a 30 min AIS gap | B3 I2 P4 A2 C0 = 11 | High |
+| SIM-44 | MERROW LIGHT | Stopped 2.5 h off the Greenlink landfall beach, away from any port | B4 I0 P4 A2 C0 = 10 | High |
 | A1 | CORMORANT STAR | Fictional exercise: slowdown and turn towards a cable after an AIS gap | B4 I3 P3 A1 C0 = 11 | High |
 | SIM-13 | BLASKET SPRAY | Two trawl passes over the North Dublin cable cluster | B2 I0 P4 A3 C0 = 9 | Medium (High gate not met) |
 | SIM-10 | NORTHERN SKUA | Slow transit at 5 kn over the Dublin–Holyhead corridor | B3 I0 P4 A1 C0 = 8 | Medium |
@@ -132,6 +171,8 @@ survey work. At start it shows 3 Critical, 5 High, 8 Medium and 24 Low.
 | SIM-15 | KILKEE ROSE | Watch-listed tanker slowing 4 nm from the Celtic Interconnector route | B2 I1 P1 A2 C2 = 8 | Medium |
 | SIM-11 | TARA SOUND | AIS gap of 25 min ended 3 nm from EWIC; slowed afterwards | B2 I2 P1 A2 C0 = 7 | Medium |
 | SIM-14 | CLARE VOYAGER | Reports "at anchor" while moving 4 kn near the Dublin–Holyhead cable | B3 I1 P1 A1 C1 = 7 | Medium |
+| SIM-42 | HALCYON REACH | Circling 1.6 h inside the Arklow Bank wind farm with no notified work | B3 I0 P4 A1 C0 = 8 | Medium |
+| SIM-43 | SORREL ISLE | Stopped 2 h 20 min in Killala Bay, 1 nm outside the cable landfall zone | B3 I1 P1 A2 C0 = 7 | Medium |
 | SIM-12 | ARDMORE TIDE | Renamed and reflagged this year; slowing near the North Dublin cluster | B2 I1 P1 A3 C0 = 7 | Medium |
 
 Vessel names are fictional. Line routes are rough illustrative paths for familiar
@@ -146,6 +187,8 @@ alert fix; only the two contacts with an ETA count down.
 - The level is a rule outcome, not a measured probability. A Low is not "safe" and a
   Critical is not proof of sabotage.
 - "A damage method possible at this depth" defaults to yes; depth data is not yet wired in.
+- The stop and loiter detectors run only on fictional tracks; they are not yet wired to
+  received live AIS. Small boats landing on a beach often carry no AIS at all.
 - No live AIS or radar detector feeds this board yet. Received live AIS on the map is
   separate and never scored.
 
@@ -154,10 +197,12 @@ alert fix; only the two contacts with an ETA count down.
 | File | Role |
 |---|---|
 | `argus/levels.py` | Rules: points, caps, gates, overrides and bands |
-| `argus/alert_board.py` | The simulated board: scenarios, minor alerts, tracks and the countdown update |
+| `argus/sites.py` | Coastal sites, anchorages, and the stop and site-loiter detectors |
+| `argus/alert_board.py` | The simulated board: scenarios, coastal-site contacts, minor alerts, tracks and the countdown update |
 | `desktop_alerts.py` | Docked panel, review window and map markers |
 | `desktop_gestures.py` | Two-finger scrolling on Tk 9 and pinch-to-zoom on macOS |
 | `tests/test_levels.py` | Rule cases, including every worked example above |
+| `tests/test_sites.py` | Stop and loiter detection, port and anchorage exclusions, and the new rule cues |
 | `tests/test_alert_board.py` | Labels, sorting, counts and the countdown raising a level |
 | `tests/test_desktop_alerts.py` | Panel, decisions, filters, map markers and hiding the panel |
 | `tests/test_desktop_gestures.py` | Trackpad scrolling of the queue and pinch zoom steps |

@@ -15,7 +15,7 @@ import tkinter as tk
 
 import customtkinter as ctk
 
-from argus.alert_board import build_board, line_path, sort_key, update
+from argus.alert_board import build_board, inside, line_path, sort_key, update
 from argus.levels import LEVEL_NAMES
 
 LEVELS = ("critical", "high", "medium", "low")
@@ -62,6 +62,8 @@ def countdown(item: dict) -> str | None:
 def proximity_text(item: dict) -> str:
     """Where the contact is relative to the asset, as one short phrase."""
     observations = item["observations"]
+    if observations.get("in_zone"):
+        return "In zone"
     if observations.get("in_corridor"):
         return "In corridor"
     clock = countdown(item)
@@ -446,7 +448,7 @@ class AlertBoard:
         else:
             def time_key(item):
                 observations = item["observations"]
-                eta = 0.0 if observations.get("in_corridor") else observations.get("eta_min")
+                eta = 0.0 if inside(observations) else observations.get("eta_min")
                 return (eta if eta is not None else 1e9, sort_key(item))
             key = time_key if mode == "Time to asset" else (lambda item: (item.get("raised_min_ago", 0), sort_key(item)))
             for item in sorted(visible, key=key):
@@ -737,7 +739,8 @@ class AlertBoard:
             visible = [(x, y) for x, y in visible if 40 <= x <= width - 160 and 70 <= y <= height - 100]
             vessel = app._project(selected["lat"], selected["lon"])
             for x, y in sorted(visible, key=lambda point: -math.dist(point, vessel)):
-                if self._label(x, y + 12, f"{selected['line_name']} · illustrative route",
+                zone = "approximate zone" if selected.get("asset_kind") == "site" else "illustrative route"
+                if self._label(x, y + 12, f"{selected['line_name']} · {zone}",
                                STYLE[selected["assessment"]["level"]][0], ("sim-selected",), "n", occupied, force=False):
                     break
         if items:
@@ -893,7 +896,9 @@ class ReviewDialog:
         self.title.configure(text=item["title"])
         self.draw_scale()
         self.facts["asset"][0].configure(text=item["line_name"])
-        self.facts["asset"][1].configure(text="Fictional cable" if item.get("exercise") else "Illustrative route")
+        self.facts["asset"][1].configure(text="Fictional cable" if item.get("exercise") else
+                                         "Approximate site zone" if item.get("asset_kind") == "site" else
+                                         "Illustrative route")
         self.update_live(force=True)
         status = board.status(item["id"])
         decision = board.decisions.get(item["id"], {})
@@ -916,6 +921,8 @@ class ReviewDialog:
         elif countdown(item) is not None:
             value, detail = countdown(item), "Constant speed and course"
             colour, font = STYLE[item["assessment"]["level"]][0], (MONO, 12, "bold")
+        elif observations.get("in_zone"):
+            value, detail = "In zone", "Inside the site's protection zone"
         elif observations.get("in_corridor"):
             value, detail = "In corridor", "Within 1 nm of the asset"
         elif observations.get("distance_nm") is not None:
@@ -992,6 +999,8 @@ class ReviewDialog:
             tk.Label(row, text=text, bg=ui.CARD, fg=SECONDARY, font=(SANS, 10), anchor="w", justify="left",
                      wraplength=wrap - 40).pack(side="left", fill="x", expand=True, padx=(10, 0))
         source = ("Fictional exercise alert from the demo files." if item.get("exercise") else
+                  "Simulated contact. Vessel, track and observations are fictional; the site position and "
+                  "zone are approximate." if item.get("asset_kind") == "site" else
                   "Simulated contact. Vessel, track and observations are fictional; the route is illustrative.")
         tk.Label(self.body, text=source + " Decisions are logged locally and not transmitted.", bg=ui.CARD,
                  fg=ui.MUTED, font=(SANS, 9), anchor="w", justify="left", wraplength=wrap + 40).pack(

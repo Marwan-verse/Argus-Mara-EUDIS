@@ -48,10 +48,10 @@ class DesktopAlertBoardTests(unittest.TestCase):
         ranks = [RANK[board.by_id[key]['assessment']['level']] for key in order]
         self.assertEqual(ranks, sorted(ranks, reverse=True))
         self.assertEqual(board.tiles['critical-count'].cget('text'), '3')
-        self.assertEqual(board.tiles['low-count'].cget('text'), '24')
+        self.assertEqual(board.tiles['low-count'].cget('text'), '25')
         self.assertEqual(board.cards['SIM-01']['code'].cget('text'), 'CRIT')
         self.assertEqual(board.cards['SIM-01']['score'].cget('text'), '10')
-        self.assertIn('40 new', app.alert_counts_label.cget('text'))
+        self.assertIn('45 new', app.alert_counts_label.cget('text'))
         self.assertEqual(len(self.map_tags('sim-alert:')), len(board.items))
         badge = next(item for item in app.map.find_withtag('sim-badge') if app.map.type(item) == 'text')
         self.assertIn('SIMULATED', app.map.itemcget(badge, 'text'))
@@ -125,6 +125,19 @@ class DesktopAlertBoardTests(unittest.TestCase):
         app._inspect_map_item(SimpleNamespace(x=(left + right) / 2, y=(top + bottom) / 2))
         self.assertEqual(board.selected, 'SIM-02')
         self.assertTrue(board.dialog.visible)
+
+    def test_coastal_site_contact_shows_its_zone(self):
+        app, board = self.app, self.board
+        item = board.by_id['SIM-41']
+        self.assertEqual(item['assessment']['level'], 'high')
+        self.assertEqual(board.cards['SIM-41']['eta'].cget('text'), 'In zone')
+        board.open('SIM-41')
+        self.root.update()
+        dialog = board.dialog
+        self.assertEqual(dialog.facts['asset'][0].cget('text'), 'Haulbowline naval base')
+        self.assertEqual(dialog.facts['asset'][1].cget('text'), 'Approximate site zone')
+        self.assertEqual(dialog.facts['time'][0].cget('text'), 'In zone')
+        self.assertTrue(app.map.find_withtag('sim-selected'))
 
     def test_countdown_raises_a_contact_and_the_board_can_hide(self):
         app, board = self.app, self.board

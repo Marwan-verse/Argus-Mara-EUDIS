@@ -2,8 +2,10 @@
 
 Every contact here is fictional and labelled ``simulated``: names, tracks and
 observations are generated to demonstrate the risk levels in ``argus.levels``.
-Line routes are illustrative, not surveyed positions. The board never reads live
-AIS and never sends anything; the operator decides every action.
+Line routes are illustrative and site positions approximate, not surveyed. The
+coastal-site contacts run the ``argus.sites`` detectors on fictional timed tracks.
+The board never reads live AIS and never sends anything; the operator decides
+every action.
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ import random
 
 from argus.countdown import step
 from argus.levels import RANK, assess
+from argus.sites import SITES, circle_track, load_ports, observe, stop_track, zone_path
 
 SOURCE_NOTE = "Simulated alert data · fictional vessels and observations"
 
@@ -107,6 +110,28 @@ SCENARIOS = [
      {"slowdown_near_corridor": True, "identity_changes": 1, "distance_nm": 4, "watchlist": True}),
 ]
 
+# Coastal-site contacts whose stop and loiter cues come from the detectors in ``argus.sites``:
+# (id, name, vessel type, length m, site, lat, lon, track, (radius nm, hours) or (course, minutes),
+#  title, recommendation, extra observations).
+SITE_SCENARIOS = [
+    ("SIM-41", "VELVET PETREL", "Survey vessel", 58, "haulbowline", 51.838, -8.305, "circle", (0.35, 2.5),
+     "Circling 2.5 h off Haulbowline naval base after a 30 min AIS gap",
+     "Inform Naval Service base security, hail the vessel and ask it to state its intentions.",
+     {"ais_gap_min": 30}),
+    ("SIM-44", "MERROW LIGHT", "Workboat", 34, "baginbun-landfall", 52.155, -6.79, "stop", (200, 150),
+     "Stopped 2.5 h off the Greenlink landfall beach, away from any port",
+     "Ask the Coast Guard to identify it and notify the landfall operator; small boats landing may carry no AIS.",
+     {}),
+    ("SIM-42", "HALCYON REACH", "Offshore supply vessel", 72, "arklow-bank", 52.80, -5.93, "circle", (0.5, 1.6),
+     "Circling 1.6 h inside the Arklow Bank wind farm with no notified work",
+     "Ask the wind farm operator whether work is scheduled; hail the vessel if none is notified.",
+     {}),
+    ("SIM-43", "SORREL ISLE", "General cargo", 81, "killala-landfall", 54.25, -9.15, "stop", (150, 140),
+     "Stopped 2 h 20 min in Killala Bay, 1 nm outside the cable landfall zone",
+     "Hail on VHF 16 for the reason for the stop; keep under watch while it stays near the landfall.",
+     {"static_incomplete": True}),
+]
+
 # Frequent minor alerts: (template, name, line, lat, lon, course, speed, minutes ago, value).
 LOW_TEMPLATES = {
     "gap": ("Short AIS reception gap ({v} min) near the coast", "Probably a coverage gap; keep monitoring.",
@@ -130,6 +155,9 @@ LOW_TEMPLATES = {
                           "authorised": True}),
     "survey": ("Survey vessel running lines near the cable with consent (authorised)", "Authorised survey; no action.",
                lambda v: {"passes_6h": v, "in_corridor": True, "authorised": True}),
+    "stop": ("Stopped {v} min in open water with destination blank, likely waiting on weather",
+             "Request voyage details; no action unless it moves towards a line or site.",
+             lambda v: {"stopped_offport_min": v, "static_incomplete": True}),
 }
 LOW_CONTACTS = [
     ("gap", "SILVER CURLEW", "Container ship", "dublin-holyhead", 53.28, -5.85, 120, 14.2, 7, 12),
@@ -156,7 +184,29 @@ LOW_CONTACTS = [
     ("destination", "MIST KESTREL", "General cargo", "dublin-holyhead", 53.45, -5.60, 95, 10.5, 66, 11),
     ("repair", "CABLE WARDEN", "Cable ship", "cork-atlantic", 51.30, -10.60, 90, 0.4, 140, 9),
     ("survey", "SEABED LARK", "Survey vessel", "mayo-atlantic", 54.50, -10.60, 260, 4.5, 170, 6),
+    ("stop", "TERN HOLLOW", "General cargo", "cork-atlantic", 51.95, -9.95, 0, 0.2, 28, 45),
 ]
+_PORTS: list | None = None
+
+
+def ports() -> list:
+    """Bundled reference ports, loaded once."""
+    global _PORTS
+    if _PORTS is None:
+        _PORTS = load_ports()
+    return _PORTS
+
+
+def asset_info(asset_id: str) -> tuple[str, str, str]:
+    """(name, asset class, kind) for a line or coastal site; kind is "line" or "site"."""
+    if asset_id in SITES:
+        return SITES[asset_id][0], SITES[asset_id][1], "site"
+    return LINES[asset_id][0], LINES[asset_id][1], "line"
+
+
+def inside(observations: dict) -> bool:
+    """Already in the line's corridor or the site's zone."""
+    return bool(observations.get("in_corridor") or observations.get("in_zone"))
 
 
 def _track(lat, lon, course, speed, pattern, seed):
@@ -195,14 +245,34 @@ def _track(lat, lon, course, speed, pattern, seed):
 
 def _item(identifier, name, kind, length, line_id, lat, lon, course, speed, minutes, pattern,
           title, recommendation, observations, label="simulated"):
-    line_name, asset_class, _path = LINES[line_id]
+    line_name, asset_class, asset_kind = asset_info(line_id)
     observations = {"asset_class": asset_class, **observations}
     return {"id": identifier, "label": label, "name": name, "vessel_type": kind, "length_m": length,
-            "line_id": line_id, "line_name": line_name, "lat": lat, "lon": lon, "cog_deg": course,
+            "line_id": line_id, "line_name": line_name, "asset_kind": asset_kind, "lat": lat, "lon": lon, "cog_deg": course,
             "sog_kn": speed, "raised_min_ago": minutes, "title": title, "recommendation": recommendation,
             "eta_start_min": observations.get("eta_min"), "observations": observations,
             "track": _track(lat, lon, course, speed, pattern, identifier),
             "assessment": assess(observations)}
+
+
+def site_item(identifier, name, kind, length, site_id, lat, lon, shape, shape_args, title, recommendation, extra):
+    """A coastal-site contact: build a fictional timed track and run the detectors on it."""
+    if shape == "circle":
+        radius, hours = shape_args
+        fixes = circle_track(lat, lon, radius, hours)
+        # Circling clockwise: the heading is 90° ahead of the bearing from the centre.
+        course = math.degrees(math.atan2(fixes[-1]["lon"] - lon, (fixes[-1]["lat"] - lat) / math.cos(math.radians(lat)))) + 90
+    else:
+        course, minutes = shape_args
+        fixes = stop_track(lat, lon, course, minutes)
+    last = fixes[-1]
+    observations = {**observe(fixes, ports(), kind), **extra}
+    if observations.pop("site_id") != site_id:
+        raise ValueError(f"{identifier} is nearer another site than {site_id}")
+    item = _item(identifier, name, kind, length, site_id, last["lat"], last["lon"], round(course) % 360,
+                 last["sog_kn"], 15, "line", title, recommendation, observations)
+    item["track"] = [(fix["lat"], fix["lon"]) for fix in fixes[-60:]]
+    return item
 
 
 def exercise_item(scenario: dict, alert: dict) -> dict:
@@ -225,7 +295,7 @@ def exercise_item(scenario: dict, alert: dict) -> dict:
     return {"id": alert["id"], "label": "fictional", "exercise": True, "alert": alert,
             "name": alert["vessel_name"], "vessel_type": vessel.get("type", "Vessel").title(),
             "length_m": vessel.get("ais_length_m"), "line_id": alert["segment_id"],
-            "line_name": cable.get("name", "Illustrative cable"), "lat": fix["lat"], "lon": fix["lon"],
+            "line_name": cable.get("name", "Illustrative cable"), "asset_kind": "line", "lat": fix["lat"], "lon": fix["lon"],
             "cog_deg": fix["cog_deg"], "sog_kn": fix["sog_kn"], "raised_min_ago": 0,
             "title": "Fictional exercise: slowdown and turn towards a cable after an AIS gap",
             "recommendation": "Open the exercise replay to review the countdown and response options.",
@@ -237,6 +307,7 @@ def build_board(scenario: dict | None = None, alerts: list | None = None) -> lis
     """Return the fictional exercise alerts and simulated contacts, sorted by severity."""
     items = [exercise_item(scenario, alert) for alert in (alerts or [])] if scenario else []
     items.extend(_item(*row) for row in SCENARIOS)
+    items.extend(site_item(*row) for row in SITE_SCENARIOS)
     for index, (template, name, kind, line_id, lat, lon, course, speed, minutes, value) in enumerate(LOW_CONTACTS, 16):
         title, recommendation, observe = LOW_TEMPLATES[template]
         pattern = "hover" if template == "repair" else "passes" if template == "survey" else "line"
@@ -261,6 +332,9 @@ def update(items: list[dict], elapsed_s: float) -> list[str]:
 
 
 def line_path(line_id: str, scenario: dict | None = None) -> list[tuple[float, float]]:
+    """The route of a line, or the zone ring of a coastal site."""
+    if line_id in SITES:
+        return zone_path(line_id)
     if line_id in LINES:
         return LINES[line_id][2]
     cable = next((c for c in (scenario or {}).get("cables", []) if c["id"] == line_id), None)
@@ -268,8 +342,8 @@ def line_path(line_id: str, scenario: dict | None = None) -> list[tuple[float, f
 
 
 def sort_key(item: dict) -> tuple:
-    """Severity first; within a level, a contact already in the corridor, then the soonest ETA."""
+    """Severity first; within a level, a contact already in the corridor or zone, then the soonest ETA."""
     assessment = item["assessment"]
-    eta = 0.0 if item["observations"].get("in_corridor") else item["observations"].get("eta_min")
+    eta = 0.0 if inside(item["observations"]) else item["observations"].get("eta_min")
     return (-RANK[assessment["level"]], eta if eta is not None else 1e9, -assessment["score"],
             item.get("raised_min_ago", 0), item["id"])

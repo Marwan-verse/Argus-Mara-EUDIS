@@ -419,9 +419,10 @@ ship or another team member and do not create an alert.
 
 ### Docked alert board (simulated)
 
-The left **Alerts** panel is the main working list. It shows 40 labelled items:
-the fictional exercise alert, 15 hand-written scenarios and 24 frequent minor alerts,
-sorted Critical → High → Medium → Low. Click a level counter to filter, or change the
+The left **Alerts** panel is the main working list. It shows 45 labelled items:
+the fictional exercise alert, 15 hand-written scenarios, 4 coastal-site contacts
+(stopped away from ports, or loitering by a naval base, landfall or wind farm) and 25
+frequent minor alerts, sorted Critical → High → Medium → Low. Click a level counter to filter, or change the
 sort to time to the asset or newest. Click a row or a map marker to open its review
 window: the score scale, the indicators behind the level, the time to the asset, the
 recommended action and the log. **Acknowledge**, **Escalate** (duty officer, line

@@ -20,8 +20,11 @@ CRITICAL_ASSETS = {
     "gas": "gas pipeline", "power": "power interconnector", "sole_link": "only link on its route",
     "cluster": "cluster of three or more lines", "transatlantic": "transatlantic cable",
 }
+# Coastal sites from ``argus.sites``: label and points.
+SITE_ASSETS = {"naval_base": ("naval base", 2), "landfall": ("cable or pipeline landfall", 2),
+               "wind_farm": ("offshore wind farm", 1)}
 BEHAVIOUR_CAP, IDENTITY_CAP, CONTEXT_CAP = 6, 3, 3
-RULES_VERSION = "levels v1"
+RULES_VERSION = "levels v1.1"
 
 
 def _band(score: int) -> str:
@@ -64,6 +67,13 @@ def _behaviour(obs, factors):
         patterns.append(("B10", 2, "Bottom-fishing pattern within 2 nm of the line"))
     if obs.get("slowdown_near_corridor"):
         patterns.append(("B11", 2, "Unexplained slowdown within 5 nm of the line"))
+    stopped = obs.get("stopped_offport_min") or 0
+    if stopped >= 30:
+        hours = f"{stopped / 60:.1f} h" if stopped >= 120 else f"{stopped:.0f} min"
+        patterns.append(("B12", 3 if stopped >= 120 else 2,
+                         f"Stopped {hours} away from any port or designated anchorage"))
+    if (obs.get("site_loiter_hours") or 0) >= 1:
+        patterns.append(("B13", 3, f"Stayed {obs['site_loiter_hours']:.1f} h inside the protection zone around the site"))
     patterns.sort(key=lambda item: -item[1])
     total = 0
     for index, (code, points, text) in enumerate(patterns):
@@ -91,7 +101,8 @@ def _identity(obs, factors):
     if obs.get("no_ais"):
         items.append(("I1", 2, "No AIS transmission from this radar contact"))
     elif (obs.get("ais_gap_min") or 0) >= 10:
-        items.append(("I1", 2, f"AIS silent for {obs['ais_gap_min']:.0f} min near the line"))
+        near = "site" if obs.get("asset_class") in SITE_ASSETS else "line"
+        items.append(("I1", 2, f"AIS silent for {obs['ais_gap_min']:.0f} min near the {near}"))
     if obs.get("spoof_signs"):
         items.append(("I2", 2, "Impossible position jump or two positions for one identity"))
     if obs.get("dark_radar_contact"):
@@ -107,7 +118,10 @@ def _identity(obs, factors):
 
 def _proximity(obs, factors, counted):
     eta, distance = obs.get("eta_min"), obs.get("distance_nm")
-    if obs.get("in_corridor"):
+    noun = "site's zone" if obs.get("asset_class") in SITE_ASSETS else "line"
+    if obs.get("in_zone"):
+        code, points, text = "P1", 4, "Inside the protection zone around the site"
+    elif obs.get("in_corridor"):
         code, points, text = "P1", 4, "Inside the line's 1 nm corridor"
     elif eta is not None and eta <= 30:
         code, points, text = "P1", 4, f"Reaches an anchor-reachable section in {eta:.0f} min"
@@ -115,7 +129,7 @@ def _proximity(obs, factors, counted):
         code, points, text = "P2", 3, f"Reaches the line in {eta:.0f} min"
     elif (eta is not None and eta <= 360) or (distance is not None and distance <= 5):
         code, points = "P3", 1
-        text = f"Reaches the line in {eta / 60:.1f} h" if eta is not None and eta <= 360 else f"{distance:.1f} nm from the line"
+        text = f"Reaches the {noun} in {eta / 60:.1f} h" if eta is not None and eta <= 360 else f"{distance:.1f} nm from the {noun}"
     else:
         return 0
     if not counted:
@@ -130,9 +144,13 @@ def _asset(obs, factors, counted):
     asset = obs.get("asset_class")
     if not asset:
         return 0
-    label = CRITICAL_ASSETS.get(asset, "telecom cable with alternative routes")
-    points = 2 if asset in CRITICAL_ASSETS else 1
-    items = [("A1" if points == 2 else "A2", points, f"Line at risk: {label}")]
+    if asset in SITE_ASSETS:
+        label, points = SITE_ASSETS[asset]
+        items = [("A4", points, f"Site at risk: {label}")]
+    else:
+        label = CRITICAL_ASSETS.get(asset, "telecom cable with alternative routes")
+        points = 2 if asset in CRITICAL_ASSETS else 1
+        items = [("A1" if points == 2 else "A2", points, f"Line at risk: {label}")]
     if obs.get("asset_vulnerable"):
         items.append(("A3", 1, "Exposed, shallow-buried or previously damaged segment"))
     total = 0
@@ -174,7 +192,7 @@ def assess(obs: dict) -> dict:
 
     method_possible = obs.get("method_possible", True)
     high_gate = b >= 3 and method_possible and p >= 3
-    critical_gate = high_gate and p == 4
+    critical_gate = high_gate and p == 4  # in the corridor or zone, or within 30 min
     if b == 0 and RANK[level] > RANK["medium"]:
         level = "medium"
         notes.append("Capped at Medium: no behavioural indicator.")
