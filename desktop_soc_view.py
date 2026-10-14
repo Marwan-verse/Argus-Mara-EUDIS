@@ -29,6 +29,8 @@ def build(soc):
     header = ctk.CTkFrame(soc.window, fg_color='transparent')
     header.pack(fill='x', padx=22, pady=(18, 4))
     label(header, 'Team communication', 23, True).pack(side='left')
+    soc.sign_out_button = button(header, 'Sign out', soc.sign_out, width=96)
+    soc.sign_out_button.pack(side='right', padx=(12, 0))
     label(header, soc.client.user['username'], text_color=MUTED).pack(side='right')
     soc.tabs = ctk.CTkTabview(soc.window, fg_color=BG, segmented_button_selected_color=CONTROL,
                              segmented_button_selected_hover_color=CONTROL)
@@ -193,7 +195,7 @@ def render(soc):
         heading, hint = '3  Secure chat is ready', 'Everyone verified. Messages and pings are encrypted between devices.'
     elif locked:
         heading = '2  Verify your teammates'
-        hint = 'Waiting for others to verify.' if cipher and cipher.verified else 'Choose Compare keys beside each teammate. Confirm only if both devices show the same code.'
+        hint = 'Waiting for others to verify.' if cipher and cipher.verified else 'Choose Compare keys beside each teammate and type the code they read to you.'
     elif room:
         heading, hint = '1  Bring your team together', 'Share the invite, then start once everyone has joined.' if host else 'You have joined. Your host will start the secure chat.'
     else:

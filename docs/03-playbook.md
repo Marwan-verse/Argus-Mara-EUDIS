@@ -62,7 +62,7 @@ and measured performance claims are pending validation.
 
 Run it in the desktop app (`RUN-GUI-WINDOWS.bat`) with the replay at the exercise
 alert, T+01:30. Every contact is fictional; bases are public places, and every speed,
-readiness time, range and drone site is a labelled assumption (D58).
+readiness time, range and drone site is a labelled assumption (D61).
 
 | Click | What the judges see | Say |
 |---|---|---|
@@ -82,7 +82,7 @@ Same app, same start: the replay at the exercise alert, T+01:30, at the default 
 (one replay minute per second). VESNA DRIFT, HOLM SENTINEL, LAMBAY ROSE and SKERRIES
 DART are fictional ships on fictional AIS tracks. Nobody wrote their observations:
 at every replay step Brain's detectors read the track and score it against the
-illustrative cable routes (D59). Their cards carry the tag **BRAIN** and the words
+illustrative cable routes (D62). Their cards carry the tag **BRAIN** and the words
 "from track"; the older simulated contacts say **SIM** and "hand-written".
 
 | Click | What the judges see | Say |
@@ -98,7 +98,7 @@ illustrative cable routes (D59). Their cards carry the tag **BRAIN** and the wor
 
 Limits to say if asked: the routes are illustrative, so their depth is unknown and an
 anchor is assumed to reach the seabed along the whole route. Every threshold is a team
-assumption (D59), and the level is a rule outcome for review, not a probability of intent.
+assumption (D62), and the level is a rule outcome for review, not a probability of intent.
 Reset with ↻; rewinding the slider replays the stories backwards too.
 
 ## 3.5 Hard questions to rehearse

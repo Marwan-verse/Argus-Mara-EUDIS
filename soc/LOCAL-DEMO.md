@@ -27,7 +27,7 @@ command can finish. Closing clients leaves shared containers running and preserv
 accounts/certificates. Use the stop command below when the server is no longer needed.
 
 If `data/soc-local/demo.env` is absent, startup creates random passwords for
-`Marwan`, `Igor` and `admin` in that ignored private file. Open it locally to read
+`Mykhailo`, `Igor` and `admin` in that ignored private file. Open it locally to read
 them; passwords are never logged or passed as process arguments. Existing files
 and account passwords are preserved. Preserve the file with the account volume:
 recreating the file does not reset accounts already in Docker.
@@ -55,18 +55,20 @@ changes when needed; relay recreation closes existing rooms.
 Create the private `data/soc-local/demo.env` from the repository root:
 
 ```text
-ARGUS_DEMO_MARWAN_PASSWORD=<local Marwan test password>
+ARGUS_DEMO_MYKHAILO_PASSWORD=<local Mykhailo test password>
 ARGUS_DEMO_IGOR_PASSWORD=<local Igor test password>
 ARGUS_DEMO_ADMIN_PASSWORD=<separate long administrator password>
 ```
 
-The file is already prepared on Ihor's PC with the requested credentials. It is
-ignored by Git and excluded from the Docker build context. The admin password
+The file is already prepared on Ihor's PC with the requested credentials. A file
+made when the first sample account was `Marwan` gains a `Mykhailo` password on
+the next start; the old `marwan` account stays in an existing account volume and
+can be ignored. The file is ignored by Git and excluded from the Docker build context. The admin password
 must have at least 14 characters. Short passwords are permitted only by local
 demo seeding; normal account creation still requires at least 14 characters.
 Do not publish this file or reuse sample passwords on other services.
 
-`Marwan` belongs to `intelligence` and `user`; `Igor` belongs only to `user`.
+`Mykhailo` belongs to `intelligence` and `user`; `Igor` belongs only to `user`.
 Logins are case-insensitive and passwords are case-sensitive. Neither account
 is an administrator. A separate `admin` account manages users and groups.
 
@@ -89,15 +91,15 @@ is unchanged and TLS verification remains enabled.
 
 ## 4. Test communication
 
-1. Sign in as `Marwan` in the first window and `Igor` in the second.
-2. Open **SOC session**. Marwan chooses **Team session (all groups)** and
+1. Sign in as `Mykhailo` in the first window and `Igor` in the second.
+2. Open **SOC session**. Mykhailo chooses **Team session (all groups)** and
    **Create a session**.
 3. Igor enters the invitation and clicks **Join session**. Additional users
    can use the same code while the lobby is open, for up to ten minutes.
 4. The host clicks **Start secure chat** after everyone joins. The roster
    becomes fixed, with up to 16 participants.
-5. Each person opens **Compare keys** beside every colleague, compares the full
-   code by voice/in person and clicks **The codes match** only if both agree.
+5. Each person opens **Compare keys** beside every colleague, reads their own
+   code aloud, types the code the colleague reads back and clicks **Check code**.
    Confirmation is automatic after all peers are checked. Codes differ between
    pairs; only the two codes within the same pair must match.
 6. Once everyone is verified, send a message. Use Ping on the right map toolbar:
@@ -135,6 +137,7 @@ account and certificate volumes.
 | Certificate error | Rerun startup; check the CA file and use exactly `https://localhost:8443` |
 | Port 8443 occupied | Stop the other local server or consistently change Compose, origin and client address |
 | Sign-in fails | Check password case and demo.env; seeding never resets existing accounts |
+| The app opens without the sign-in screen | A saved sign-in was used; press **Sign out** in Team communication to return to the screen with **Start local server** |
 | Cannot join | Check Team/private scope, membership, expiry, roster lock and capacity |
 | Send disabled | The host must start secure chat and everyone must finish peer verification |
 | History expires or someone leaves | Start a new room; retention is limited to 256 messages and 256 KiB of ciphertext per room |

@@ -1,4 +1,5 @@
-"""HTTPS SOC client. Tokens, passwords and ephemeral keys stay in memory."""
+"""HTTPS SOC client. Passwords and ephemeral keys stay in memory; only a token the
+user chose to remember goes to the OS keychain (see soc_session)."""
 import json
 import ssl
 from urllib.error import HTTPError
@@ -32,6 +33,7 @@ def server_url(value, allow_loopback_http=False):
 class SOCClient:
     def __init__(self, url, *, allow_loopback_http=False, ca_file=None):
         self.url = server_url(url, allow_loopback_http)
+        self.ca_file = ca_file
         context = ssl.create_default_context(cafile=ca_file)
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         self.opener = build_opener(NoRedirect(), HTTPSHandler(context=context))
@@ -41,6 +43,7 @@ class SOCClient:
         self.cipher = None
         self.cursor = 0
         self.code = None
+        self.remember = False  # A remembered sign-in survives closing the app; see soc_session.
 
     def request(self, method, path, data=None):
         headers = {"Accept": "application/json"}
@@ -75,6 +78,15 @@ class SOCClient:
         self.user = self.request("GET", "/v1/me")
         return self.user
 
+    def resume(self, token):
+        """Sign in with a remembered token; the server decides whether it is still valid."""
+        self.token = token
+        try:
+            return self.refresh_user()
+        except ClientError:
+            self.token = None
+            raise
+
     def create(self, group=None):
         self.leave()
         cipher = RoomCipher()
@@ -102,6 +114,8 @@ class SOCClient:
     def confirm(self):
         if not self.cipher or not self.cipher.room_id:
             raise ClientError('Wait for the host to start the encrypted session')
+        if self.cipher.unverified_peers():
+            raise ClientError('Type the code each teammate reads to you first')
         self.request("POST", f"/v1/rooms/{self.room['room_id']}/confirm", {})
         self.cipher.confirm()
 

@@ -16,7 +16,7 @@ def main():
     clients = [SOCClient(args.url, ca_file=args.ca) for _ in range(2)]
     try:
         a, b = clients
-        a.login('Marwan', values['ARGUS_DEMO_MARWAN_PASSWORD'])
+        a.login('Mykhailo', values['ARGUS_DEMO_MYKHAILO_PASSWORD'])
         b.login('Igor', values['ARGUS_DEMO_IGOR_PASSWORD'])
         assert 'evidence.share' in a.user['permissions'] and 'evidence.share' not in b.user['permissions']
         room = a.create()  # Team session: accounts need not share a group.
@@ -26,6 +26,8 @@ def main():
         assert a.cipher.safety_codes[b.user['id']] == b.cipher.safety_codes[a.user['id']]
         # Programmatic comparison is valid only in this synthetic, locally
         # controlled smoke check. Real analysts compare through a trusted channel.
+        assert a.cipher.verify_peer(b.user['id'], b.cipher.safety_codes[a.user['id']])
+        assert b.cipher.verify_peer(a.user['id'], a.cipher.safety_codes[b.user['id']])
         a.confirm()
         b.confirm()
         a.poll()

@@ -2811,7 +2811,7 @@ def main() -> int:
         login_screen(root, args.soc, logged_in, allow_loopback_http=args.soc_dev_http,
                      on_offline=None if args.soc_login or args.soc_client else
                      lambda: ArgusApp(root, scenario, alerts, coastline),
-                     local_launcher=not args.soc_client)
+                     local_launcher=not args.soc_client, remember=not args.soc_client)
     else:
         ArgusApp(root, scenario, alerts, coastline)
     root.mainloop()

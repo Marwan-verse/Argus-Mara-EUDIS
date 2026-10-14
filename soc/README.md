@@ -42,7 +42,10 @@ Only Caddy publishes ports. **Do not expose relay:8080 through an unencrypted
 route.** TLS ends at Caddy; the backend connection stays inside the host's private
 Docker network. If that connection crosses an untrusted network, add TLS there.
 The relay trusts the HTTPS proxy header only from the configured private subnet
-(`172.30.65.0/24`) and rejects other plain HTTP requests. If this subnet conflicts
+(`172.30.65.0/24`) and rejects other plain HTTP requests. Sign-in and request
+limits apply per client address, taken from the last `X-Forwarded-For` entry only
+when the request comes from that subnet, so one address cannot block everyone.
+Requests without a valid sign-in have separate limits from signed-in users. If this subnet conflicts
 with your host's networks, change both Compose IPAM and `ARGUS_SOC_PROXY_NETWORK`.
 Run one relay process/replica. Restarting closes rooms and requires fresh invitations
 and keys; accounts persist. This configuration is for a small team, not a public service.
@@ -86,6 +89,17 @@ demo directly, using public/fictional files.
 Do not use the offline entrypoint for private data. Hiding a local tool cannot
 protect public files already installed on a device.
 
+**Stay signed in on this computer (up to 8 hours)** is ticked by default. The app
+then keeps the server's sign-in token, never the password, in the operating
+system's keychain (macOS Keychain, Windows Credential Manager) and uses it on the
+next launch until the 8-hour token expires or is revoked; it then asks for the
+password with the address and username filled in. Closing the app keeps the token
+but leaves any open session. **Sign out** in Team communication revokes the token
+and removes it from the computer. Encryption keys are never saved, so after a
+restart you create or join a new session and compare codes again. Without a
+usable keychain nothing is remembered. The second window of the local two-window
+demo (`--soc-client`) never reads or saves a sign-in.
+
 1. Sign in as administrator; open **SOC session → Administration**. Create two
    distinct accounts with unique passwords (14–128 characters).
 2. Choose a Team session, or a private group session. Create it and privately share
@@ -93,10 +107,12 @@ protect public files already installed on a device.
    distinct authenticated participants while the lobby is open. Private rooms
    additionally require membership of their selected group.
 3. Once everyone joins, the host presses **Start secure chat**. The code stops working and the roster becomes immutable.
-4. Use **Compare keys** beside each peer. Compare the entire code by voice or
-   in person and press **The codes match** only if both devices agree. Codes
-   differ between pairs. Once all your peers have been checked, your confirmation
-   is submitted automatically. Everyone must finish verification before sending.
+4. Use **Compare keys** beside each peer. Read your code aloud by voice or in
+   person, type the code the peer reads to you and press **Check code**. Only the
+   complete matching code verifies that peer; a different code means leave the
+   session. Codes differ between pairs. Once all your peers have been checked,
+   your confirmation is submitted automatically. Everyone must finish
+   verification before sending.
 5. Send text, share the selected AIS contact, or use the existing map Ping.
    Received pings last 15 seconds; they are analyst annotations, not sensor alerts.
 
@@ -149,8 +165,10 @@ depends on `cryptography`. Account authentication uses HTTPS and Argon2id:
 - The 128-bit safety value is displayed using 26 readable base32 symbols instead
   of 32 hex symbols. All 128 bits remain; no security bits are truncated. It binds
   the shared secret and transcript. Compare it
-  **outside the relay** to detect substituted keys. Confirming without comparing
-  does not authenticate the peer against a malicious relay.
+  **outside the relay** to detect substituted keys. Each person types the code
+  the peer reads aloud; the endpoint refuses to confirm until every peer's typed
+  code matches. The displayed code cannot be copied. Typing one's own code instead
+  of listening still defeats the check against a malicious relay.
 - AES-GCM authenticates version, room, sender, recipient, kind and counter. Nonces combine
   the directional four-byte prefix and eight-byte increasing counter. Fresh
   keys and separate directions prevent nonce reuse.
@@ -158,8 +176,10 @@ depends on `cryptography`. Account authentication uses HTTPS and Argon2id:
   New participants require new rooms/keys and fresh safety comparisons. Each
   sender has a monotonically increasing counter, tracked separately by recipients.
 
-Text payloads have at most 4000 characters/6000 encoded bytes; pings contain
-validated `lat` and `lon`. The relay sees identities, keys, kinds, timing, sizes
+Text payloads have at most 4000 characters/6000 encoded bytes and may not contain
+control, direction-override or other invisible characters (line breaks, tabs and
+the joiners used by emoji are allowed). Both sender and receiver check this. Pings
+contain validated `lat` and `lon`. The relay sees identities, keys, kinds, timing, sizes
 and counters, and can drop/reorder traffic or deny service. Ciphertext is retained
 in memory only (256 messages and 256 KiB per room, eight-hour expiry). Missed history requires
 a new room. Endpoint displays hold the latest 100 messages in memory.

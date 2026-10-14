@@ -15,8 +15,9 @@ apply the chosen group's restrictions.
 Invitations are eight symbols displayed as `ABCD-EFGH`, with **Copy invite** and
 an expiry countdown. Authenticated join attempts remain limited per account and
 globally. Verification is a separate **Compare keys** dialog for each peer: the
-26-symbol code represents all 128 verification bits. Press **The codes match**
-only after comparing through a trusted channel. Your confirmation is submitted
+26-symbol code represents all 128 verification bits. Read your code aloud, type
+the code the peer reads to you through a trusted channel and press **Check code**;
+only the complete matching code verifies that peer. Your confirmation is submitted
 once all your peers have been checked. No chat is enabled before everyone finishes.
 
 Messages send with Enter; Shift+Enter adds a line. Empty messages are rejected,
@@ -87,12 +88,12 @@ build context. The password values are deliberately not included in this documen
 
 | Login | Membership | Access |
 | --- | --- | --- |
-| `Marwan` | `intelligence`, `user` | Intelligence tools and participation in Igor's common user room |
+| `Mykhailo` | `intelligence`, `user` | Intelligence tools and participation in Igor's common user room |
 | `Igor` | `user` | Standard operator tools and communication |
 | `admin` | `intelligence`, `user`, plus admin flag | Account/group management; separate generated long password |
 
-Logins are case-insensitive, passwords are case-sensitive. Neither Marwan nor
-Igor has administrator privileges. Marwan has both memberships so that the two
+Logins are case-insensitive, passwords are case-sensitive. Neither Mykhailo nor
+Igor has administrator privileges. Mykhailo has both memberships so that the two
 accounts can still communicate in a private `user` room. A Team session does not
 require their groups to overlap. Igor cannot join a private intelligence room
 until an administrator adds that membership.
@@ -107,7 +108,7 @@ notepad data/soc-local/demo.env
 Fill it with your own test values and save:
 
 ```text
-ARGUS_DEMO_MARWAN_PASSWORD=<chosen local Marwan password>
+ARGUS_DEMO_MYKHAILO_PASSWORD=<chosen local Mykhailo password>
 ARGUS_DEMO_IGOR_PASSWORD=<chosen local Igor password>
 ARGUS_DEMO_ADMIN_PASSWORD=<unique password of at least 14 characters>
 ```
@@ -146,20 +147,20 @@ TLS verification stays enabled and the CA private key is not exported.
 
 ## 4. Verify communication manually
 
-1. Sign in as **Marwan** in the first window and **Igor** in the second. The
+1. Sign in as **Mykhailo** in the first window and **Igor** in the second. The
    address should already be `https://localhost:8443`.
-2. Open **SOC session** in both windows. Marwan selects **Team session (all groups)**, clicks
+2. Open **SOC session** in both windows. Mykhailo selects **Team session (all groups)**, clicks
    **Create session**, and shares the displayed invitation with Igor.
 3. Igor pastes the code and clicks **Join**. Both clients should show both names.
-4. Marwan clicks **Start secure chat**. The invitation
+4. Mykhailo clicks **Start secure chat**. The invitation
    stops working and the roster becomes immutable.
-5. Choose **Compare keys** beside your teammate. Compare the complete Marwan↔Igor
-   safety codes in the two dialogs. They must match. On separate
-   devices compare by voice or in person; if they differ, leave and investigate.
-6. Both users click **The codes match** in their dialog. Wait for **Secure chat
+5. Choose **Compare keys** beside your teammate. Each reads the Mykhailo↔Igor
+   code aloud and the other types it. On separate devices do this by voice or in
+   person; if **Check code** reports a difference, leave and investigate.
+6. Both users press **Check code** in their dialog. Wait for **Secure chat
    is ready**. Your confirmation is submitted after all your peers are checked;
    Send stays disabled until everyone has finished.
-7. Send a chat message from Marwan. Igor should receive it under Marwan's name.
+7. Send a chat message from Mykhailo. Igor should receive it under Mykhailo's name.
    Reply from Igor and check the first window.
 8. Align the map views, choose the existing **Ping** tool on one client and click
    a point. The other client should see a cyan ping at the same coordinates for
@@ -168,7 +169,7 @@ TLS verification stays enabled and the CA private key is not exported.
    text summary. AIS may be empty when the separate public AIS service has no
    data; chat and pings do not depend on that feed.
 10. Verify the permission difference: Igor has no evidence-sharing/review tools,
-    while Marwan's account does. A mixed Team room allows only everyone's common
+    while Mykhailo's account does. A mixed Team room allows only everyone's common
     message tools; evidence sharing needs a session with authorized
     members. A refused evidence send in the user room is expected.
 11. Leave on either client. The room closes for everyone. Create a fresh session
@@ -181,8 +182,9 @@ account, assign `user`, and open a third client. Join with the same invitation
 **before** the host locks the roster. Repeat for up to 16 different accounts.
 
 Every participant uses **Compare keys** for each peer. Codes differ between pairs;
-only the two displays for the same pair should match. Compare each and press
-**The codes match**. Confirmation follows automatically after the last peer.
+only the two displays for the same pair should match. For each peer, type the
+code they read aloud and press **Check code**. Confirmation follows
+automatically after the last peer.
 Adding someone after locking requires a new session.
 
 | Tools | `user` | `intelligence` |

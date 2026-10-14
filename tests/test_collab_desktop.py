@@ -113,6 +113,73 @@ class DesktopSOCTests(unittest.TestCase):
         self.assertTrue(soc.start_button.winfo_manager())
         self.assertEqual(soc.group.get(), 'Team session (all groups)')
 
+    def test_typed_code_verifies_peer_and_wrong_code_does_not(self):
+        from argus.collab_crypto import RoomCipher
+        own, peer = RoomCipher(), RoomCipher()
+        members = [{'user_id': 'own', 'username': 'analyst', 'public_key': own.public_key},
+                   {'user_id': 'peer', 'username': 'colleague', 'public_key': peer.public_key}]
+        own.establish('room', 'own', members)
+        peer.establish('room', 'peer', members)
+        self.client.cipher = own
+        self.client.room.update(room_id='room', confirmed=[])
+        self.client.confirm = Mock()
+        self.app.soc.open()
+        self.app.soc.window.withdraw()
+        self.pump()
+        soc = self.app.soc
+        soc.compare_peer('peer')
+        read_aloud = peer.safety_codes['own']
+        soc.verify_entry.insert(0, ('B' if read_aloud[0] == 'A' else 'A') + read_aloud[1:])
+        soc.verify_check()
+        self.assertIn('codes differ', soc.verify_problem.cget('text'))
+        self.assertNotIn('peer', soc.verified_peers)
+        self.assertEqual(own.verified_peers, set())
+        self.client.confirm.assert_not_called()
+        soc.verify_entry.delete(0, 'end')
+        soc.verify_entry.insert(0, read_aloud)
+        soc.verify_check()
+        self.pump()
+        self.assertIn('peer', soc.verified_peers)
+        self.assertEqual(own.verified_peers, {'peer'})
+        self.client.confirm.assert_called_once()
+        self.assertFalse(soc.verify_window.winfo_exists())
+
+    def test_closing_keeps_a_remembered_sign_in_but_leaves_the_session(self):
+        self.client.remember = True
+        self.client.leave, self.client.logout = Mock(), Mock()
+        soc = self.app.soc
+        soc.close()
+        soc.executor.shutdown(wait=True)
+        self.client.leave.assert_called_once()
+        self.client.logout.assert_not_called()
+        soc.client = None  # The app closes again in tearDown.
+
+    def test_sign_out_forgets_the_saved_sign_in_and_revokes_it(self):
+        self.client.remember = True
+        self.client.logout = Mock()
+        with patch('desktop_soc.messagebox.askyesno', return_value=True), \
+                patch('desktop_soc.soc_session.forget') as forget, patch.object(self.app, 'close') as close:
+            self.app.soc.sign_out()
+        forget.assert_called_once()
+        close.assert_called_once()
+        self.assertFalse(self.client.remember)
+        soc = self.app.soc
+        soc.close()
+        soc.executor.shutdown(wait=True)
+        self.client.logout.assert_called_once()
+        soc.client = None
+
+    def test_revoked_access_forgets_the_saved_sign_in(self):
+        from argus.collab_client import ClientError
+        soc = self.app.soc
+        soc.pending += 1
+        soc.events.put((None, None, ClientError('Sign in required', 401), True))
+        with patch('desktop_soc.messagebox.showinfo'), patch('desktop_soc.soc_session.forget') as forget, \
+                patch.object(self.app, 'close') as close:
+            soc.tick()
+        forget.assert_called_once()
+        close.assert_called_once()
+
     def test_empty_draft_and_enter_do_not_submit(self):
         self.app.soc.open()
         self.app.soc.window.withdraw()

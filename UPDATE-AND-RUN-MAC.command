@@ -26,7 +26,7 @@ if [ ! -x .venv/bin/python ]; then
     finish 1
   fi
 fi
-if ! .venv/bin/python -c "import customtkinter, PIL, cryptography" >/dev/null 2>&1; then
+if ! .venv/bin/python -c "import customtkinter, PIL, cryptography, keyring" >/dev/null 2>&1; then
   echo "Installing the desktop UI packages..."
   if ! .venv/bin/python -m pip install --quiet --disable-pip-version-check -r requirements.txt; then
     echo "Install failed. Check your internet connection and try again."

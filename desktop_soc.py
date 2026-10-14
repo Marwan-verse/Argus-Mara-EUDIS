@@ -9,15 +9,21 @@ from tkinter import messagebox, ttk
 
 import customtkinter as ctk
 
+from argus import soc_session
 from argus.collab_client import ClientError, SOCClient
 from argus.collab_crypto import KINDS
 
 
 def login_screen(root, initial_url, on_login, *, allow_loopback_http=False,
-                 on_offline=None, local_launcher=False):
-    """No protected app is constructed until HTTPS authentication succeeds."""
+                 on_offline=None, local_launcher=False, remember=False):
+    """No protected app is constructed until HTTPS authentication succeeds.
+
+    With remember, a sign-in saved on this computer is tried first and the
+    "Stay signed in" box is offered; a second local demo window passes False.
+    """
     root.title("Argus Mara · SOC sign in")
-    root.geometry("620x620" if local_launcher else "580x430")
+    height = (620 if local_launcher else 430) + (40 if remember else 0)
+    root.geometry(f"{620 if local_launcher else 580}x{height}")
     frame = ctk.CTkFrame(root)
     frame.pack(fill="both", expand=True, padx=24, pady=24)
     ctk.CTkLabel(frame, text="SOC sign in", font=ctk.CTkFont(size=22, weight="bold")).pack(pady=(12, 8))
@@ -28,7 +34,13 @@ def login_screen(root, initial_url, on_login, *, allow_loopback_http=False,
         entry.pack(fill="x", padx=16, pady=(0, 8))
         fields[key] = entry
     fields["url"].insert(0, initial_url or "")
-    status = ctk.CTkLabel(frame, text="Administrator accounts are created on the server.", wraplength=480)
+    remember_box = None
+    if remember:
+        remember_box = ctk.CTkCheckBox(frame, text="Stay signed in on this computer (up to 8 hours)")
+        remember_box.select()
+        remember_box.pack(anchor="w", padx=16, pady=(0, 6))
+    welcome = "Administrator accounts are created on the server."
+    status = ctk.CTkLabel(frame, text=welcome, wraplength=480)
     status.pack(padx=16, pady=4)
     executor = ThreadPoolExecutor(max_workers=1)
     events = queue.Queue()
@@ -56,15 +68,44 @@ def login_screen(root, initial_url, on_login, *, allow_loopback_http=False,
             return
         username, secret = fields["username"].get().strip(), fields["password"].get()
         fields["password"].delete(0, "end")
+        keep = bool(remember_box.get()) if remember_box else None
         set_busy(True)
         status.configure(text="Signing in securely…")
 
         def job():
             try:
                 client.login(username, secret)
+                if keep:
+                    client.remember = soc_session.save(client)
+                elif keep is False:
+                    soc_session.forget()
                 events.put(("login", client, None))
             except Exception as error:
                 events.put(("login", None, str(error)))
+        executor.submit(job)
+
+    def resume():
+        set_busy(True)
+        status.configure(text="Looking for a sign-in saved on this computer…")
+
+        def job():
+            saved = soc_session.load()
+            if not saved or (initial_url and initial_url.rstrip("/") != saved["url"]):
+                events.put(("resume", None, welcome))
+                return
+            try:
+                client = SOCClient(saved["url"], allow_loopback_http=allow_loopback_http, ca_file=saved.get("ca_file"))
+                client.resume(saved["token"])
+                client.remember = True
+                events.put(("login", client, None))
+            except ClientError as error:
+                if error.status == 401:
+                    soc_session.forget()
+                    events.put(("resume", saved, "Your saved sign-in has expired. Sign in again."))
+                else:
+                    events.put(("resume", saved, f"{error} Sign in again or retry later."))
+            except (ValueError, OSError) as error:
+                events.put(("resume", saved, f"The saved sign-in could not be used: {error}"))
         executor.submit(job)
 
     def launch_local():
@@ -104,6 +145,14 @@ def login_screen(root, initial_url, on_login, *, allow_loopback_http=False,
         if kind == "progress":
             status.configure(text=result)
             root.after(100, check)
+        elif kind == "resume":
+            # No usable saved sign-in: fill in what it remembered and ask for the password.
+            set_busy(False)
+            for key in ("url", "username"):
+                if result and result.get(key) and not fields[key].get():
+                    fields[key].insert(0, result[key])
+            status.configure(text=error)
+            root.after(100, check)
         elif error:
             set_busy(False)
             status.configure(text=error)
@@ -116,7 +165,7 @@ def login_screen(root, initial_url, on_login, *, allow_loopback_http=False,
             fields["url"].insert(0, url)
             try:
                 open_second_client(url, ca_file)
-                status.configure(text="Local server ready. Sign in separately in each window as Marwan / Igor. "
+                status.configure(text="Local server ready. Sign in separately in each window as Mykhailo / Igor. "
                                       "Passwords: data/soc-local/demo.env")
                 # Exactly two windows per launch screen, including this one.
                 local_button.pack_forget()
@@ -144,7 +193,7 @@ def login_screen(root, initial_url, on_login, *, allow_loopback_http=False,
 
     button = ctk.CTkButton(frame, text="Sign in", command=submit)
     button.pack(pady=8)
-    controls.extend([button, *fields.values()])
+    controls.extend([button, *fields.values()] + ([remember_box] if remember_box else []))
     if local_launcher:
         local_button = ctk.CTkButton(frame, text="Start local server + two sign-in windows", command=launch_local)
         local_button.pack(fill="x", padx=16, pady=(16, 4))
@@ -157,6 +206,8 @@ def login_screen(root, initial_url, on_login, *, allow_loopback_http=False,
         controls.append(offline_button)
     fields["password"].bind("<Return>", lambda _: submit())
     root.protocol("WM_DELETE_WINDOW", close)
+    if remember:
+        resume()
     root.after(100, check)
 
 
@@ -213,6 +264,7 @@ class DesktopSOC:
             if error:
                 self.status(str(error))
                 if isinstance(error, ClientError) and error.status == 401:
+                    soc_session.forget()
                     messagebox.showinfo("Sign in required", "Your access expired or was revoked. Sign in again.", parent=self.app.root)
                     self.app.close()
                     return
@@ -302,6 +354,13 @@ class DesktopSOC:
         if messagebox.askyesno('Leave session', 'Leaving ends this session for everyone. Continue?', parent=self.window):
             self.task(self.client.leave, lambda _: self.reset())
 
+    def sign_out(self):
+        if not messagebox.askyesno('Sign out', 'Sign out and remove the saved sign-in from this computer?', parent=self.window):
+            return
+        soc_session.forget()
+        self.client.remember = False  # Closing now revokes the sign-in on the server.
+        self.app.close()
+
     def confirmed(self, _=None):
         self.status('Your teammates are verified. Waiting for their confirmation.')
         self.render()
@@ -316,35 +375,47 @@ class DesktopSOC:
         from desktop_soc_view import label, button, BG, CARD, MUTED
         dialog = ctk.CTkToplevel(self.window)
         dialog.title('Verify ' + member['username'])
-        dialog.geometry('610x340')
+        dialog.geometry('610x470')
         dialog.resizable(False, False)
         dialog.configure(fg_color=CARD)
         dialog.transient(self.window)
         dialog.grab_set()
         label(dialog, 'Compare with ' + member['username'], 21, True).pack(padx=24, pady=(22, 8))
-        label(dialog, 'Ask them to open Compare keys beside your name. Both codes must match exactly. Compare by voice or in person.',
+        label(dialog, f"Read your code aloud to {member['username']}, then type the code they read to you. "
+                      'Compare by voice or in person, not through this application.',
               wraplength=545, justify='left', text_color=MUTED).pack(padx=24, pady=8)
-        code = cipher.safety_codes[user_id]
-        label(dialog, code, font=ctk.CTkFont('Consolas', 19, 'bold')).pack(padx=20, pady=18)
-        def copy():
-            dialog.clipboard_clear()
-            dialog.clipboard_append(code)
-        button(dialog, 'Copy verification code', copy).pack(pady=4)
+        # The code is shown for reading aloud and is deliberately not copyable:
+        # only a code typed from the peer's own screen proves both keys agree.
+        label(dialog, 'Your code', text_color=MUTED).pack(padx=24, pady=(8, 0))
+        label(dialog, cipher.safety_codes[user_id], font=ctk.CTkFont('Consolas', 19, 'bold')).pack(padx=20, pady=(2, 12))
+        label(dialog, f"Code {member['username']} reads to you", text_color=MUTED).pack(padx=24)
+        entry = ctk.CTkEntry(dialog, width=420, height=38, font=ctk.CTkFont('Consolas', 17),
+                             placeholder_text='XXXXX XXXXX XXXXX XXXXX XXXXX X')
+        entry.pack(padx=24, pady=(2, 4))
+        problem = label(dialog, '', text_color='#ff7b72', wraplength=545, justify='left')
+        problem.pack(padx=24, pady=4)
         row = ctk.CTkFrame(dialog, fg_color='transparent')
-        row.pack(fill='x', padx=24, pady=18)
-        def match():
+        row.pack(fill='x', padx=24, pady=12)
+        def check(_=None):
             current = self.client.cipher
             if current is not cipher or not self.client.room or self.client.room['room_id'] != room_id:
                 dialog.destroy()
                 self.status('Session changed. Verify the new session instead.')
+                return
+            if not cipher.verify_peer(user_id, entry.get()):
+                problem.configure(text='The codes differ. Check the code again together. If it still differs, '
+                                       'do not chat: someone may be intercepting. Leave the session.')
                 return
             self.verified_peers.add(user_id)
             dialog.destroy()
             self.render()
             if set(cipher.safety_codes) <= self.verified_peers:
                 self.task(self.client.confirm, self.confirmed)
+        entry.bind('<Return>', check)
         button(row, 'Cancel', dialog.destroy, width=130).pack(side='left')
-        button(row, 'The codes match', match, True, width=220).pack(side='right')
+        button(row, 'Check code', check, True, width=220).pack(side='right')
+        self.verify_window, self.verify_entry, self.verify_problem, self.verify_check = dialog, entry, problem, check
+        entry.focus_set()
 
     def render(self):
         from desktop_soc_view import render
@@ -509,5 +580,6 @@ class DesktopSOC:
         self.stopping = True
         client = self.client
         if client:
-            self.executor.submit(client.logout)
+            # A remembered sign-in stays valid; leaving still ends the open session for everyone.
+            self.executor.submit(client.leave if getattr(client, 'remember', False) else client.logout)
         self.executor.shutdown(wait=False, cancel_futures=False)
