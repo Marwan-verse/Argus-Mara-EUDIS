@@ -186,6 +186,41 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertEqual(dialog.body._parent_canvas.yview()[0], 0)
         self.assertTrue(any(text.startswith('Also named: Gas interconnector IC2') for text in texts()))
 
+    def test_who_can_reach_it_shows_on_card_window_and_map_and_a_storm_grounds_drones(self):
+        board, dialog = self.board, self.board.dialog
+
+        def texts():
+            found, stack = [], list(dialog.body.winfo_children())
+            while stack:
+                widget = stack.pop(0)
+                stack.extend(widget.winfo_children())
+                if isinstance(widget, tk.Label):
+                    found.append(widget.cget('text'))
+            return found
+
+        card = board.cards['SIM-41']['respond']
+        self.assertTrue(card.winfo_manager())
+        self.assertEqual(card.cget('text'), 'Drone D1 · 42 min · in time (+3 min)')
+        self.assertTrue(board.cards['SIM-06']['respond'].cget('text').startswith('No responder in time'))
+        self.assertFalse(board.cards['SIM-40']['respond'].winfo_manager())  # watched, not an incident
+        board.open('SIM-41')
+        shown = texts()
+        self.assertIn('WHO CAN REACH IT', shown)
+        self.assertIn('Drone D1 · 42 min · in time (+3 min)', shown)
+        self.assertIn('42 min · in time (+3)', shown)
+        self.assertTrue(any(text.startswith('out of range (87 nm from base') for text in shown))
+        self.assertTrue(self.map_tags('sim-response'))
+        board.toggle_storm()
+        self.assertTrue(board.replay.storm)
+        self.assertEqual(board.by_id['SIM-41']['assessment']['level'], 'critical')
+        self.assertTrue(card.cget('text').startswith('No responder in time'))
+        self.assertIn('wind 30 kn above the 25 kn drone limit', texts())
+        self.assertIn('Exercise wind 30 kn', self.app.map_status_label.cget('text'))
+        board.toggle_storm()
+        self.assertEqual(board.by_id['SIM-41']['assessment']['level'], 'high')
+        board.deselect()
+        self.assertFalse(self.map_tags('sim-response'))
+
     def test_incidents_follow_the_replay_clock_and_a_card_click_centres_the_map(self):
         app, board = self.app, self.board
         start = app.alert['t']

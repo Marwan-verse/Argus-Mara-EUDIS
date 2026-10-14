@@ -8,6 +8,11 @@ incident card; Low and None contacts are watched, not incidents. Each is marked
 EXERCISE or SIM in its card, in its review window and on the map. Acknowledge,
 escalate and reject go through ``argus.incidents.set_status`` and stay in this
 session; nothing is transmitted.
+
+Each incident also shows who can reach it (``argus.responders``): one line on
+the card, every asset with minutes and reasons in the review window, and on the
+map the bases and a dashed line from the best asset to where it meets the
+vessel. The storm switch grounds the drones; the wind is an exercise value.
 """
 from __future__ import annotations
 
@@ -18,6 +23,7 @@ import tkinter.font as tkfont
 
 import customtkinter as ctk
 
+from argus import responders
 from argus.alert_board import line_path, sort_key
 from argus.brain_board import build_board, update
 from argus.explain import explain
@@ -45,6 +51,10 @@ CHIP = {"SIMULATED": ("#c3ced6", "#2a3542"), "EXERCISE": ("#e1b164", "#34301f"),
         "ASSUMPTION": ("#d8b25c", "#34301f"), "ILLUSTRATIVE": ("#a8b6c2", "#1c2a36"),
         "RULE OUTCOME": ("#a8b6c2", "#1c2a36")}
 DETECTOR_REASONS = 4
+# Responder colours: arrives before the earliest line ETA, arrives after it, cannot go.
+IN_TIME, LATE, UNAVAILABLE = "#47c7da", "#ec8a3c", "#7d8b97"
+RESPONSE_SHAPE = {"aircraft": "square", "helicopter": "square", "ship": "circle", "drone": "diamond",
+                  "hail": "ring"}
 # List groups after the open incidents by level: quiet incidents, watched contacts, closed incidents.
 GROUP_TITLES = {"critical": "CRITICAL", "high": "HIGH", "medium": "MEDIUM", "quiet": "QUIET · BELOW MEDIUM",
                 "watching": "WATCHING · LOW, NO INCIDENT", "closed": "CLOSED"}
@@ -294,6 +304,7 @@ class AlertBoard:
         status.pack(side="left")
         age = tk.Label(bottom, bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9))
         age.pack(side="right")
+        respond = tk.Label(body, text="", bg=ui.CARD, fg=ui.MUTED, font=self.meta_font, anchor="w")
         flags = tk.Frame(body, bg=ui.CARD)
         flag_labels = []
         for _ in range(3):
@@ -302,8 +313,9 @@ class AlertBoard:
             flag_labels.append(label)
         card = {"item": item, "frame": frame, "stripe": stripe, "name": name, "age": age, "eta": eta,
                 "reason": reason, "status": status, "flags": flags, "flag_labels": flag_labels,
-                "texts": {}, "background": ui.CARD}
-        for widget in (frame, stripe, body, top, name, tag, age, reason, bottom, eta, status, flags, *flag_labels):
+                "respond": respond, "bottom": bottom, "texts": {}, "background": ui.CARD}
+        for widget in (frame, stripe, body, top, name, tag, age, reason, bottom, eta, status, respond, flags,
+                       *flag_labels):
             widget.bind("<Button-1>", lambda _event, key=item["id"]: self.open(key, centre=True))
             widget.bind("<Enter>", lambda _event, key=item["id"]: self.hover(key, True), add="+")
             widget.bind("<Leave>", lambda _event, key=item["id"]: self.hover(key, False), add="+")
@@ -330,6 +342,35 @@ class AlertBoard:
     def status(self, identifier: str) -> str:
         """Incident status, "Rejected" once closed, or "Watching" for a Low contact without an incident."""
         return self.tracker.status(self.by_id[identifier]) or "Watching"
+
+    def response(self, identifier: str) -> dict | None:
+        """Who can reach an open incident at this replay time (``argus.responders``), else None."""
+        if self.status(identifier) in ("Rejected", "Watching") or self.group(identifier) == "hidden":
+            return None
+        return self.replay.responses.get(identifier)
+
+    def response_line(self, identifier: str) -> tuple[str, bool] | None:
+        result = self.response(identifier)
+        return responders.summary_line(result) if result else None
+
+    def toggle_storm(self) -> None:
+        """Switch the exercise wind between normal and storm and score the current replay time again."""
+        before = self.snapshot()
+        self.replay.storm = not self.replay.storm
+        events = self.replay.refresh()
+        after = self.snapshot()
+        for identifier in {key for key in after if after[key] != before[key]} | set(events):
+            self.paint(identifier)
+            if {"raised", "opened"} & set(events.get(identifier, [])):
+                self.flash(identifier)
+        self.relayout()
+        self.app._draw_map()
+        if self.dialog.item:
+            self.dialog.refresh()
+        wind = self.replay.wind_kn
+        self.app.map_status_label.configure(
+            text=f"{self.stamp(self.replay.now)} · Exercise wind {wind:g} kn"
+                 + (" · storm: drones grounded" if self.replay.storm else " · drones available"))
 
     def group(self, identifier: str) -> str:
         """critical/high/medium for an open incident, else quiet, watching, closed or hidden (not raised yet)."""
@@ -441,6 +482,14 @@ class AlertBoard:
         parts.append(item["line_name"])
         card["status"].configure(text=clip(" · ".join(parts), self.meta_font, width - 50),
                                  fg=ui.INK if status in ("New", "Escalated") else ui.MUTED)
+        line = self.response_line(identifier)
+        if line:
+            text, warn = line
+            card["respond"].configure(text=clip(text, self.meta_font, width),
+                                      fg=STYLE["critical"][0] if warn else IN_TIME)
+            card["respond"].pack(fill="x", pady=(3, 0), after=card["bottom"])
+        else:
+            card["respond"].pack_forget()
         flags = badges(item, incident if not closed else None)
         for index, label in enumerate(card["flag_labels"]):
             if index < len(flags):
@@ -723,6 +772,10 @@ class AlertBoard:
             nearest = nearest_point(item["lat"], item["lon"], line_path(item["line_id"], app.scenario))
             if nearest:
                 points.append(nearest)
+            result = self.response(item["id"])
+            shown = result and (result["assigned"] or result["best"])
+            if shown and shown["meet"]:
+                points += [(shown["lat"], shown["lon"]), tuple(shown["meet"])]  # the responder's route too
             for zoom in range(min(maximum, 10), 4, -1):
                 xs, ys = zip(*(ui.geo_to_world(lat, lon, zoom) for lat, lon in points))
                 if max(xs) - min(xs) <= free - 140 * scaling and max(ys) - min(ys) <= height - 240 * scaling:
@@ -747,7 +800,9 @@ class AlertBoard:
         for item in self.items:
             self.cards[item["id"]]["item"] = item
             self.cards[item["id"]]["texts"].clear()
+        storm = self.replay.storm
         self.replay = Replay(self.items, self.app.scenario, self.app.alert["t"])
+        self.replay.storm = storm  # the wind is an exercise setting, not a decision
         self.replay.seek(self.app.position_s)
         self.follow_exercise()
         tools = self.app.tools
@@ -764,8 +819,8 @@ class AlertBoard:
         self.app.map_status_label.configure(text="Incidents restarted at this replay time · decisions reset")
 
     def snapshot(self) -> dict[str, tuple]:
-        return {item["id"]: (self.group(item["id"]), item["assessment"]["level"], item["title"])
-                for item in self.items}
+        return {item["id"]: (self.group(item["id"]), item["assessment"]["level"], item["title"],
+                             self.response_line(item["id"])) for item in self.items}
 
     def follow_exercise(self) -> None:
         """Put the exercise contact at its AIS fix for the replay time (it keeps its last fix in a gap)."""
@@ -904,6 +959,7 @@ class AlertBoard:
                 if self._label(x, y + 12, f"{selected['line_name']} · illustrative route",
                                STYLE[selected["assessment"]["level"]][0], ("sim-selected",), "n", occupied, force=False):
                     break
+        self.draw_response(occupied)
         if items:
             text = f"SIMULATED · {len(items)} fictional contact{'s' if len(items) != 1 else ''}"
             label = app.map.create_text(20, 40, text=text, anchor="w", fill=ui.INK, font=(SANS, 9, "bold"),
@@ -912,6 +968,56 @@ class AlertBoard:
             box = app.map.create_rectangle(left - 7, top - 3, right + 7, bottom + 3, fill=ui.BG, outline=ui.LINE,
                                            tags=("sim-badge",))
             app.map.tag_lower(box, label)
+
+    def draw_response(self, occupied) -> None:
+        """For the selected incident: asset bases, the vessel's expected path and the best asset's dashed route."""
+        app, ui = self.app, self.ui
+        result = self.response(self.selected) if self.selected else None
+        if not result:
+            return
+        item = self.by_id[self.selected]
+        width, height = app._map_size
+        px = ctk.ScalingTracker.get_widget_scaling(app.map)
+        tags = ("sim-response",)
+        shown = result["assigned"] or result["best"]
+        if shown and shown["meet"]:
+            meet_x, meet_y = app._project(*shown["meet"])
+            now_x, now_y = app._project(*self.replay.position(item)(self.replay.now))
+            colour = LATE if shown["in_time"] is False else IN_TIME
+            app.map.create_line(now_x, now_y, meet_x, meet_y, fill=STYLE[item["assessment"]["level"]][0],
+                                width=max(1, round(px)), dash=(2, 4), tags=tags)
+            base_x, base_y = app._project(shown["lat"], shown["lon"])
+            app.map.create_line(base_x, base_y, meet_x, meet_y, fill=ui.BG, width=round(5 * px), tags=tags)
+            app.map.create_line(base_x, base_y, meet_x, meet_y, fill=colour, width=round(2.5 * px),
+                                dash=(8, 5), tags=tags)
+            r = 6 * px
+            app.map.create_oval(meet_x - r, meet_y - r, meet_x + r, meet_y + r, outline=colour,
+                                width=round(2 * px), tags=tags)
+            self._label(meet_x + 10 * px, meet_y + 10 * px,
+                        f"{shown['id']} meets it in {responders.minutes(shown['eta_s'])} min",
+                        colour, tags, "w", occupied, force=True)
+        for row in result["rows"]:
+            if row["lat"] is None:
+                continue
+            x, y = app._project(row["lat"], row["lon"])
+            if not (0 <= x <= width and 0 <= y <= height):
+                continue
+            colour = (UNAVAILABLE if row["status"] == "unavailable" else
+                      LATE if row["in_time"] is False else IN_TIME)
+            r = (6 if row is shown else 4.5) * px
+            shape = RESPONSE_SHAPE.get(row["kind"], "circle")
+            outline = ui.INK if row is shown else ui.BG
+            if shape == "diamond":
+                app.map.create_polygon(x, y - r * 1.3, x + r * 1.3, y, x, y + r * 1.3, x - r * 1.3, y,
+                                       fill=colour, outline=outline, width=1, tags=tags)
+            elif shape == "square":
+                app.map.create_rectangle(x - r, y - r, x + r, y + r, fill=colour, outline=outline, width=1,
+                                         tags=tags)
+            elif shape == "ring":
+                app.map.create_oval(x - r, y - r, x + r, y + r, outline=colour, width=round(2 * px), tags=tags)
+            else:
+                app.map.create_oval(x - r, y - r, x + r, y + r, fill=colour, outline=outline, width=1, tags=tags)
+            self._label(x + r + 4 * px, y, row["id"], colour, tags, "w", occupied, force=row is shown)
 
     def _label(self, x, y, text, colour, tags, anchor, occupied, force=True) -> bool:
         """Draw a boxed map label unless it would overlap one already drawn."""
@@ -962,6 +1068,9 @@ class ReviewDialog:
         self.frame.pack_propagate(False)
         # Wrap lengths are screen pixels; the frame width is in CustomTkinter units (x2 on a 200% display).
         self.px = ctk.ScalingTracker.get_widget_scaling(self.frame)
+        self.id_font = tkfont.Font(root=app.root, family=MONO, size=10, weight="bold")
+        self.row_font = tkfont.Font(root=app.root, family=SANS, size=10)
+        self.name_font = tkfont.Font(root=app.root, family=SANS, size=9)
         head = tk.Frame(self.frame, bg=ui.CARD)
         head.pack(fill="x", padx=(20, 12), pady=(14, 0))
         self.level = tk.Label(head, text="", bg=ui.CARD, font=(SANS, 10, "bold"))
@@ -1151,6 +1260,7 @@ class ReviewDialog:
         for child in self.body.winfo_children():
             child.destroy()
         wrap = round((float(self.frame.cget("width")) - 110) * self.px)
+        self.fill_responders(wrap)
         self.fill_why(explain(item), wrap)
         self.heading("RECOMMENDED ACTION")
         tk.Label(self.body, text=item["recommendation"], bg=ui.CARD, fg=ui.INK, font=(SANS, 10), anchor="w",
@@ -1178,6 +1288,71 @@ class ReviewDialog:
         tk.Label(self.body, text=source + " Decisions are logged locally and not transmitted.", bg=ui.CARD,
                  fg=ui.MUTED, font=(SANS, 9), anchor="w", justify="left", wraplength=wrap + 40).pack(
             fill="x", padx=(6, 0), pady=(12, 6))
+
+    def fill_responders(self, wrap: int) -> None:
+        """Who can reach it: the storm switch, the card line, then every asset with minutes or a reason."""
+        ui, item, board = self.ui, self.item, self.board
+        head = tk.Frame(self.body, bg=ui.CARD)
+        head.pack(fill="x", padx=(6, 0), pady=(4, 6))
+        tk.Label(head, text="WHO CAN REACH IT", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 8, "bold")).pack(side="left")
+        storm = board.replay.storm
+        switch = ctk.CTkButton(
+            head, text=f"Storm {board.replay.fleet['wind']['storm_kn']} kn: {'ON' if storm else 'off'}",
+            command=board.toggle_storm, height=24, width=120, corner_radius=6,
+            font=ctk.CTkFont(SANS, 11, "bold" if storm else "normal"),
+            fg_color=STYLE["high"][1] if storm else ui.CARD, hover_color=ui.HOVER, border_width=1,
+            border_color=STYLE["high"][0] if storm else ui.LINE, text_color=STYLE["high"][0] if storm else ui.MUTED)
+        switch.pack(side="right", padx=(0, 6))
+        board.app.tools.style_button(switch, "Exercise wind: a storm grounds every drone (wind limit 25 kn)")
+        result = board.response(item["id"])
+        if result is None:
+            tk.Label(self.body, text="Worked out for open incidents at Medium or above.", bg=ui.CARD, fg=ui.MUTED,
+                     font=(SANS, 10), anchor="w").pack(fill="x", padx=(6, 0))
+            return
+        text, warn = responders.summary_line(result)
+        tk.Label(self.body, text=text, bg=ui.CARD, fg=STYLE["critical"][0] if warn else IN_TIME,
+                 font=(SANS, 11, "bold"), anchor="w", justify="left", wraplength=wrap + 40).pack(fill="x", padx=(6, 0))
+        if result["deadline_s"] is None:
+            when = "Not approaching a line: eyes-on times only"
+        elif result["at_line"]:
+            when = "Vessel is already at the line"
+        else:
+            when = (f"Earliest line ETA {board.stamp(result['deadline_s'])} "
+                    f"(in {responders.minutes(result['deadline_s'] - result['now'])} min)")
+        tk.Label(self.body, text=f"{when} · wind {result['wind_kn']:g} kn, exercise value", bg=ui.CARD,
+                 fg=ui.MUTED, font=(SANS, 9), anchor="w", justify="left", wraplength=wrap + 40).pack(
+            fill="x", padx=(6, 0), pady=(1, 4))
+        for row in result["rows"]:
+            unavailable = row["status"] == "unavailable"
+            colour = UNAVAILABLE if unavailable else LATE if row["in_time"] is False else IN_TIME
+            if unavailable:
+                verdict = row["reason"]
+            else:
+                verdict = f"{responders.minutes(row['eta_s'])} min"
+                if row["margin_s"] is not None:
+                    verdict += (f" · in time (+{responders.minutes(row['margin_s'])})" if row["in_time"]
+                                else f" · {responders.minutes(-row['margin_s'])} min late")
+                if not row["counts"]:
+                    verdict += " · look only"
+            line = tk.Frame(self.body, bg=ui.CARD)
+            line.pack(fill="x", padx=(6, 0), pady=1)
+            tk.Label(line, text=row["id"], width=5, anchor="w", bg=ui.CARD, fg=colour,
+                     font=(MONO, 10, "bold")).pack(side="left", anchor="n")
+            tk.Label(line, text=verdict, bg=ui.CARD, fg=ui.MUTED if unavailable else colour, font=self.row_font,
+                     anchor="e", justify="right").pack(side="right", anchor="n")
+            name = row["name"] if row["kind"] == "satellite" else f"{row['name']} · {row['base']}"
+            # The asset name gives way to its minutes and verdict.
+            room = wrap + 40 - self.id_font.measure("MPA1 ") - self.row_font.measure(verdict) - round(20 * self.px)
+            tk.Label(line, text=clip(name, self.name_font, max(40, room)), bg=ui.CARD,
+                     fg=ui.MUTED if unavailable else SECONDARY, font=self.name_font, anchor="w",
+                     justify="left").pack(side="left", fill="x", expand=True, padx=(4, 8))
+        note = tk.Frame(self.body, bg=ui.CARD)
+        note.pack(fill="x", padx=(6, 0), pady=(6, 0))
+        self.chip(note, "ASSUMPTION").pack(side="left", anchor="n")
+        tk.Label(note, text="Bases are public places, coordinates approximate. Speeds, readiness, ranges, drone "
+                            "sites and the patrol ship position are team assumptions. VHF and satellite only look.",
+                 bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9), anchor="w", justify="left", wraplength=wrap - 70).pack(
+            side="left", fill="x", expand=True, padx=(8, 0))
 
     def chip(self, parent, tag: str, width: int = 0) -> tk.Label:
         """A small data-label tag such as SIMULATED, REAL or ASSUMPTION."""

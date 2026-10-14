@@ -228,6 +228,12 @@ class Replay:
                                                                  level=LEVEL_NAMES[incident["level"]]))
         return events
 
+    def refresh(self) -> dict[str, list[str]]:
+        """Score the current replay time again (after the wind or an assignment changed); return its events."""
+        if self.now is None:
+            return {}
+        return self._step(self.now)
+
     def _apply(self, decision: dict) -> bool:
         item = next(item for item in self.items if item["id"] == decision["id"])
         try:
