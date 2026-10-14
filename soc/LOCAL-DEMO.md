@@ -96,8 +96,8 @@ is unchanged and TLS verification remains enabled.
    can use the same code while the lobby is open, for up to ten minutes.
 4. The host clicks **Start secure chat** after everyone joins. The roster
    becomes fixed, with up to 16 participants.
-5. Each person opens **Compare keys** beside every colleague, compares the full
-   code by voice/in person and clicks **The codes match** only if both agree.
+5. Each person opens **Compare keys** beside every colleague, reads their own
+   code aloud, types the code the colleague reads back and clicks **Check code**.
    Confirmation is automatic after all peers are checked. Codes differ between
    pairs; only the two codes within the same pair must match.
 6. Once everyone is verified, send a message. Use Ping on the right map toolbar:

@@ -193,7 +193,7 @@ def render(soc):
         heading, hint = '3  Secure chat is ready', 'Everyone verified. Messages and pings are encrypted between devices.'
     elif locked:
         heading = '2  Verify your teammates'
-        hint = 'Waiting for others to verify.' if cipher and cipher.verified else 'Choose Compare keys beside each teammate. Confirm only if both devices show the same code.'
+        hint = 'Waiting for others to verify.' if cipher and cipher.verified else 'Choose Compare keys beside each teammate and type the code they read to you.'
     elif room:
         heading, hint = '1  Bring your team together', 'Share the invite, then start once everyone has joined.' if host else 'You have joined. Your host will start the secure chat.'
     else:

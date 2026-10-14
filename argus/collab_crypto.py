@@ -5,8 +5,10 @@ binds routing metadata. Compare the full safety code over a trusted channel.
 """
 import base64
 import hashlib
+import hmac
 import json
 import math
+import unicodedata
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
@@ -14,6 +16,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 KINDS = {"chat": "chat", "ping": "ping", "contact": "contact.share", "evidence": "evidence.share"}
+# Line breaks, tabs and the two joiners that emoji and some writing systems need.
+ALLOWED_INVISIBLE = "\n\t‌‍"
 
 
 def safety_display(material):
@@ -62,8 +66,10 @@ def validate_payload(kind, payload):
     else:
         if set(payload) != {"text"} or not isinstance(payload["text"], str) or not 1 <= len(payload["text"].strip()) <= 4000:
             raise ValueError("Enter 1–4000 characters")
-        if any(ord(c) < 32 and c not in "\n\t" for c in payload["text"]):
-            raise ValueError("Control characters are not allowed")
+        # Controls, direction overrides and other invisible characters can make
+        # displayed text differ from what was actually sent.
+        if any(c not in ALLOWED_INVISIBLE and unicodedata.category(c) in ("Cc", "Cf", "Cs") for c in payload["text"]):
+            raise ValueError("Invisible or control characters are not allowed")
     if len(canonical(payload)) > 6000:
         raise ValueError("Message is too large")
     return payload
@@ -75,6 +81,7 @@ class RoomCipher:
         self.public_key = encode(self._private.public_key().public_bytes_raw())
         self.room_id = None
         self.verified = False
+        self.verified_peers = set()
         self.sent = 0
         self.received = {}
 
@@ -108,9 +115,25 @@ class RoomCipher:
         self.safety_code = next(iter(safety_codes.values()))  # Two-person UI compatibility.
         self.room_id, self.own_id, self._digest = room_id, own_id, digest
 
+    def verify_peer(self, user_id, typed):
+        """Check the code a peer read aloud; only the full matching code verifies that peer."""
+        if not self.room_id or user_id not in self.safety_codes:
+            raise ValueError("Wait for the host to start the encrypted session")
+        candidate = ''.join(typed.split()).replace('-', '').upper() if isinstance(typed, str) else ''
+        expected = self.safety_codes[user_id].replace(' ', '')
+        if not hmac.compare_digest(candidate.encode(), expected.encode()):
+            return False
+        self.verified_peers.add(user_id)
+        return True
+
+    def unverified_peers(self):
+        return set(self.channels) - self.verified_peers if self.room_id else set()
+
     def confirm(self):
         if not self.room_id:
             raise ValueError("Wait for the other analyst")
+        if self.unverified_peers():
+            raise ValueError("Type the code each teammate reads to you first")
         self.verified = True
 
     def encrypt(self, kind, payload):
