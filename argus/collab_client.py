@@ -32,6 +32,7 @@ def server_url(value, allow_loopback_http=False):
 class SOCClient:
     def __init__(self, url, *, allow_loopback_http=False, ca_file=None):
         self.url = server_url(url, allow_loopback_http)
+        self.ca_file = ca_file
         context = ssl.create_default_context(cafile=ca_file)
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         self.opener = build_opener(NoRedirect(), HTTPSHandler(context=context))
@@ -41,6 +42,7 @@ class SOCClient:
         self.cipher = None
         self.cursor = 0
         self.code = None
+        self.remember = False  # A remembered sign-in survives closing the app; see soc_session.
 
     def request(self, method, path, data=None):
         headers = {"Accept": "application/json"}
@@ -74,6 +76,15 @@ class SOCClient:
     def refresh_user(self):
         self.user = self.request("GET", "/v1/me")
         return self.user
+
+    def resume(self, token):
+        """Sign in with a remembered token; the server decides whether it is still valid."""
+        self.token = token
+        try:
+            return self.refresh_user()
+        except ClientError:
+            self.token = None
+            raise
 
     def create(self, group=None):
         self.leave()
