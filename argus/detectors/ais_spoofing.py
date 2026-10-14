@@ -263,6 +263,12 @@ def _centre_on_land(row: int, col: int) -> bool:
     return inside
 
 
+@lru_cache(maxsize=None)
+def _open_sea_cell(row: int, col: int) -> bool:
+    """No coast edge in the cell and its centre at sea: every point in it is at sea (``on_land`` is False)."""
+    return (row, col) not in _land_index()[0] and not _centre_on_land(row, col)
+
+
 def _side(px, py, qx, qy, rx, ry) -> bool:
     return (qx - px) * (ry - py) - (qy - py) * (rx - px) > 0
 
@@ -345,7 +351,8 @@ def land_events(fixes: list[dict]) -> list[dict]:
     """Check c): fixes well inside land. A run of them in a row is one event, reported at its deepest fix."""
     events, current = [], None
     for fix in fixes:
-        depth = inland_nm(fix["lat"], fix["lon"])
+        lat, lon = fix["lat"], fix["lon"]
+        depth = None if _open_sea_cell(_cell(lat), _cell(lon)) else inland_nm(lat, lon)
         if depth is None:
             current = None
         elif current is None:

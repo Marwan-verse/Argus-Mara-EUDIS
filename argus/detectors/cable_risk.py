@@ -142,12 +142,14 @@ def speed_and_course(fixes: list[dict], now: float) -> dict | None:
     recent = [f for f in fixes if f["t"] > now - RECENT_S and f.get("sog_kn") is not None]
     if len(base) < BASELINE_MIN_FIXES or not recent:
         return None
-    blocks = []
+    blocks, start = [], 0  # (median speed, first index, last index) of each RECENT_S stretch, in one pass
     for index, fix in enumerate(base):
-        block = [f for f in base[:index + 1] if f["t"] >= fix["t"] - RECENT_S]
-        blocks.append((median(f["sog_kn"] for f in block), block))
-    top = max(speed for speed, _ in blocks)
-    base_kn, block = next((speed, block) for speed, block in reversed(blocks) if speed >= top - 0.5)
+        while base[start]["t"] < fix["t"] - RECENT_S:
+            start += 1
+        blocks.append((median(f["sog_kn"] for f in base[start:index + 1]), start, index))
+    top = max(speed for speed, _, _ in blocks)
+    base_kn, first, last = next(item for item in reversed(blocks) if item[0] >= top - 0.5)
+    block = base[first:last + 1]
     now_kn = median(f["sog_kn"] for f in recent)
     if base_kn < BASELINE_MIN_KN:
         return None
@@ -319,7 +321,8 @@ def _behaviour(vessel: dict, fixes: list[dict], passes_fixes: list[dict], path: 
 
 
 def _line_finding(vessel: dict, cable: dict, fixes: list[dict], passes_fixes: list[dict], now: float,
-                  motion: dict | None) -> dict | None:
+                  motion_of) -> dict | None:
+    """The finding for one line, or None when the vessel is far from it; ``motion_of()`` gives ``speed_and_course``."""
     last = fixes[-1]
     section, depth_note = reach_section(cable)
     full = [list(point) for point in cable["path"]]
@@ -335,7 +338,7 @@ def _line_finding(vessel: dict, cable: dict, fixes: list[dict], passes_fixes: li
         if section:
             depth_note = f"only the line outside its {depth_note} is near"
     dist = [distance_to_path_nm(f["lat"], f["lon"], path)[0] for f in fixes]
-    obs, reasons = _behaviour(vessel, fixes, passes_fixes, path, dist, eta, now, motion)
+    obs, reasons = _behaviour(vessel, fixes, passes_fixes, path, dist, eta, now, motion_of())
     distance_nm, closest = distance_to_path_nm(last["lat"], last["lon"], path)
     name = cable.get("name", cable["id"])
     obs.update(distance_nm=round(distance_nm, 2), asset_class=_asset_class(cable.get("kind")),
@@ -364,6 +367,30 @@ def _line_finding(vessel: dict, cable: dict, fixes: list[dict], passes_fixes: li
             "label": vessel.get("label", "simulated"), "obs": obs}
 
 
+def out_of_reach(last: dict, cable: dict, now: float) -> bool:
+    """True when no finding is possible for this line: a cheap box test before any geometry.
+
+    A finding needs the vessel within NEAR_NM of the line or a projected crossing,
+    which is at most 1.2 x its speed over the 3 h horizon. Outside the line's
+    bounding box widened by that distance (plus 1 nm for the local approximations)
+    neither can happen. A dark vessel is never skipped: its worst-case ETA grows
+    with the time it has been dark.
+    """
+    if now - last["t"] > DARK_S:
+        return False
+    sog = last.get("sog_kn") or 0
+    margin_nm = max(NEAR_NM, EARLIEST_SPEED_FACTOR * sog * HORIZON_S / 3600) + 1.0
+    lats = [point[0] for point in cable["path"]]
+    lons = [point[1] for point in cable["path"]]
+    dlat = margin_nm / 60
+    far_lat = max(abs(min(lats) - dlat), abs(max(lats) + dlat))  # widest degrees of longitude per nm
+    if far_lat >= 89:
+        return False
+    dlon = margin_nm / (60 * math.cos(math.radians(far_lat)))
+    return not (min(lats) - dlat <= last["lat"] <= max(lats) + dlat
+                and min(lons) - dlon <= last["lon"] <= max(lons) + dlon)
+
+
 def cable_risk(vessel: dict, context: dict) -> list[dict]:
     """One ``cable_risk`` finding per line the vessel is near; none when it is far from every line."""
     track = vessel.get("track") or []
@@ -376,11 +403,17 @@ def cable_risk(vessel: dict, context: dict) -> list[dict]:
     fixes = [fix for fix in passes_fixes if fix["t"] >= now - WINDOW_S]
     if not fixes:
         return []
-    findings, motion = [], speed_and_course(fixes, now)
+    findings, cache = [], []
+
+    def motion_of():  # computed once, and only for a vessel near some line
+        if not cache:
+            cache.append(speed_and_course(fixes, now))
+        return cache[0]
+
     for cable in context.get("cables", []):
-        if len(cable.get("path") or []) < 2:
+        if len(cable.get("path") or []) < 2 or out_of_reach(fixes[-1], cable, now):
             continue
-        finding = _line_finding(vessel, cable, fixes, passes_fixes, now, motion)
+        finding = _line_finding(vessel, cable, fixes, passes_fixes, now, motion_of)
         if finding:
             findings.append(finding)
     return findings

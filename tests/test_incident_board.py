@@ -101,6 +101,12 @@ class ReplayTests(unittest.TestCase):
         self.by_id = {item["id"]: item for item in self.items}
         self.replay = Replay(self.items, self.scenario, self.start)
 
+    def test_each_step_reports_how_long_brain_scoring_took(self):
+        self.replay.seek(self.start)
+        contacts, milliseconds = self.replay.scored
+        self.assertGreater(contacts, 0)
+        self.assertGreaterEqual(milliseconds, 0)
+
     def open_ids(self):
         return {incident["id"] for incident in self.replay.tracker.state["open"].values()}
 

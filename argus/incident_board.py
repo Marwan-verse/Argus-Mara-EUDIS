@@ -31,6 +31,8 @@ instead of one row per alert. No tkinter here, so it is tested without a display
 
 from __future__ import annotations
 
+from time import perf_counter
+
 from argus import incidents, responders
 from argus.brain_board import reassess, rescore_exercise, rescore_story, update
 from argus.levels import LEVEL_NAMES, RANK
@@ -158,6 +160,7 @@ class Replay:
         self.decisions: list[dict] = []
         self.fleet = responders.load_fleet()
         self.storm = False
+        self.scored = (0, 0.0)  # (contacts Brain scored at the last step, milliseconds)
         self._reset()
 
     def _reset(self) -> None:
@@ -228,12 +231,16 @@ class Replay:
         self.log.setdefault(identifier, []).append((t, text))
 
     def _step(self, t: int) -> dict[str, list[str]]:
+        started = perf_counter()
         update(self.items, t - self.start_s)
         for item in self.items:
             if item.get("exercise"):
                 rescore_exercise(item, self.scenario, t)
             elif item.get("story"):
                 rescore_story(item, t)  # before its track starts: no findings, so no stale level
+        scored = sum(1 for item in self.items
+                     if item.get("exercise") or item.get("story") or item.get("eta_start_min") is not None)
+        self.scored = (scored, (perf_counter() - started) * 1000)
         self.now = t
         self._respond(t)
         events = self.tracker.step([item for item in self.items if t >= self.appear_s(item)], t)

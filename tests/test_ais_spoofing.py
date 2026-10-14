@@ -161,6 +161,14 @@ class LandTests(unittest.TestCase):
         self.assertGreater(spoof.inland_nm(54.23, -4.53), 1.0)
         self.assertIsNone(spoof.inland_nm(52.66, -8.63))  # Limerick: inland, but within 2 nm of the port
 
+    def test_open_sea_shortcut_agrees_with_the_full_land_test(self):
+        import random
+        rng = random.Random(3)
+        for _ in range(3000):
+            lat, lon = rng.uniform(50.0, 56.5), rng.uniform(-12.0, -4.0)
+            if spoof._open_sea_cell(spoof._cell(lat), spoof._cell(lon)):
+                self.assertFalse(spoof.on_land(lat, lon), (lat, lon))
+
     def test_fix_inland_is_one_event_per_run(self):
         track = straight(10, lat=53.40, lon=-8.30, speed=5)  # a run of fixes across central Ireland
         events = spoof.land_events(spoof.clean_track(track))

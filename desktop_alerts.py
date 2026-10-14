@@ -707,7 +707,8 @@ class AlertBoard:
             self.summary.configure(text=f"{open_count} open · {counts['Escalated']} escalated")
         self.app.alert_counts_label.configure(
             text=f"{counts['New']} new · {counts['Reviewed']} reviewed · {counts['Acknowledged']} acknowledged · "
-                 f"{counts['Escalated']} escalated · {counts['Rejected']} rejected")
+                 f"{counts['Escalated']} escalated · {counts['Rejected']} rejected\n"
+                 "Brain: {} contacts scored in {:.0f} ms at this replay step".format(*self.replay.scored))
 
     def set_filter(self, level: str | None) -> None:
         self.level_filter = None if level == self.level_filter else level

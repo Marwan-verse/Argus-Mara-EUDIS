@@ -236,6 +236,34 @@ class SeveralLines(unittest.TestCase):
         self.assertEqual(len(findings), 5)
 
 
+class FastSkip(unittest.TestCase):
+    """The bounding-box skip and the lazy speed/course are speed-ups only: findings never change."""
+
+    def test_out_of_reach_skips_only_far_vessels_and_never_dark_ones(self):
+        far = track(south_of(40), [(30, 6.0, 90)])
+        self.assertTrue(cable_risk.out_of_reach(far[-1], line(), far[-1]["t"]))
+        near = track(south_of(3), [(30, 6.0, 90)])
+        self.assertFalse(cable_risk.out_of_reach(near[-1], line(), near[-1]["t"]))
+        fast = track(south_of(40), [(5, 18.0, 0)])  # far, but could cross within the 3 h horizon
+        self.assertFalse(cable_risk.out_of_reach(fast[-1], line(), fast[-1]["t"]))
+        self.assertFalse(cable_risk.out_of_reach(far[-1], line(), far[-1]["t"] + 3600))  # dark for an hour
+
+    def test_skipping_changes_no_finding(self):
+        import random
+        from unittest.mock import patch
+        rng = random.Random(5)
+        cables = [line(), line("north", lat=LAT + 0.4, kind="gas"), line("short", west=-5.6, east=-5.4)]
+        for _ in range(60):
+            start = (LAT + rng.uniform(-1.2, 1.2), rng.uniform(-6.8, -4.2))
+            legs = [(rng.randint(20, 90), rng.uniform(4, 18), rng.uniform(0, 360)),
+                    (rng.randint(5, 60), rng.uniform(2, 12), rng.uniform(0, 360))]
+            fixes = track(start, legs)
+            for now in (fixes[-1]["t"], fixes[-1]["t"] + rng.choice([0, 900, 2400])):
+                fast = detect(fixes, cables, now=now)
+                with patch.object(cable_risk, "out_of_reach", return_value=False):
+                    self.assertEqual(fast, detect(fixes, cables, now=now))
+
+
 class Exercise(unittest.TestCase):
     def setUp(self):
         self.scenario = json.loads((ROOT / "demo/scenario.json").read_text(encoding="utf-8"))
