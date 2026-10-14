@@ -93,6 +93,44 @@ class AnchorDragWithoutGap(unittest.TestCase):
         self.assertGreater(early["eta_min"], late["eta_min"])
 
 
+class AnchorDragOnASteadyCourse(unittest.TestCase):
+    """Public reporting on Eagle S gives only "12 to 9 kn": a steady course must not hide the drag."""
+
+    def obs_and_level(self, slow_minutes, cable=None):
+        fixes = track(south_of(17), [(60, 12.0, 0), (slow_minutes, 9.0, 0)])
+        [finding] = detect(fixes, [cable or line()])
+        return finding, assess(finding["obs"])
+
+    def test_steady_drag_approaching_the_section_is_b1_and_high(self):
+        finding, level = self.obs_and_level(20)  # about 2 nm south of the line, still approaching
+        obs = finding["obs"]
+        self.assertTrue(obs["drag_signature"])
+        self.assertNotIn("course_change_deg", obs)
+        self.assertIn("B1", {factor["code"] for factor in level["factors"]})
+        self.assertLessEqual(obs["eta_min"], 30)
+        self.assertEqual(level["level"], "high")
+        self.assertIn("no turn needed", " ".join(finding["reasons"]))
+
+    def test_still_dragging_after_crossing_is_at_least_medium(self):
+        finding, level = self.obs_and_level(50)  # crossed, now about 2.5 nm north
+        self.assertTrue(finding["obs"]["drag_signature"])
+        self.assertGreater(finding["obs"]["distance_nm"], 2)
+        self.assertIn(level["level"], ("medium", "high", "critical"))
+
+    def test_a_short_slowdown_is_not_a_drag(self):
+        finding, _ = self.obs_and_level(10)
+        self.assertNotIn("drag_signature", finding["obs"])
+        self.assertTrue(finding["obs"]["slowdown_near_corridor"])
+
+    def test_slowing_to_enter_dublin_port_near_a_cable_landing_is_not_a_drag(self):
+        cable = {"id": "dublin-holyhead", "name": "Dublin–Holyhead (illustrative)", "kind": "telecom",
+                 "path": [[53.35, -6.05], [53.36, -5.70], [53.37, -5.35]]}
+        fixes = track((53.34, -5.80), [(45, 12.0, 270), (20, 8.0, 270)])  # inbound towards Dublin Bay
+        [finding] = cable_risk.detect(vessel(fixes), {"cables": [cable]})
+        self.assertNotIn("drag_signature", finding["obs"])
+        self.assertIn("Not scored as an anchor drag", " ".join(finding["reasons"]))
+
+
 class AnchorReachableSection(unittest.TestCase):
     def test_line_deeper_than_the_cutoff_is_not_a_feasible_method(self):
         fixes = track(south_of(17), [(60, 12.0, 0), (30, 9.0, yaw)])

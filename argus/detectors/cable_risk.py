@@ -4,7 +4,8 @@ For every line in ``context["cables"]`` this detector reads the last three
 hours of fixes up to ``context["now"]`` (six hours for passes, as rule B5 says)
 and fills the ``argus.levels`` keys for that line:
 
-* behaviour: anchor-drag pattern (B1: speed drop and course change), moving
+* behaviour: anchor-drag pattern (B1: speed drop and course change, or a
+  reduced speed held under way on a steady course away from ports), moving
   while reporting "at anchor" (B2), loitering (B4), repeated passes (B5), slow
   over the corridor (B6), anchored near the line (B7), bottom fishing (B10) and
   an unexplained slowdown (B11);
@@ -28,6 +29,7 @@ import math
 from statistics import median
 
 from argus.countdown import _cross_fraction, nm_between, step
+from argus.detectors.ais_spoofing import nearest_port_nm
 from argus.levels import CRITICAL_ASSETS
 from argus.prediction import (anchor_reachable_path, distance_to_path_nm, earliest_possible_contact_s,
                               v_max_kn)
@@ -52,6 +54,10 @@ TURN_S = 30 * 60  # course change looked for in these minutes
 DROP_PCT, TURN_DEG = 20, 20  # B1 and B11, as argus.levels scores them
 DRAG_NEAR_NM, DRAG_NEAR_ETA_MIN = 5.0, 120  # B1 counts only this close to the section
 DRAG_MIN_KN = 3.0  # B1 is a pattern under way (now and through the 30 min); slower is loitering (B4) or anchoring (B7)
+# B1 without a turn: an anchor dragged behind a ship on its normal course. Public reporting on Eagle S gives
+# only "12 to 9 kn"; any yaw is our assumption, so a steady course must not hide the pattern.
+DRAG_HOLD_S = 15 * 60  # the reduced speed, still under way, held this long
+PORT_EXCLUSION_NM = 5.0  # ships slow to enter or leave port, and cables land near ports: no steady-drag B1 here
 SLOWDOWN_NM = 5.0  # B11
 DRAG_ANCHOR_KN, DRAG_ANCHOR_NM, DRAG_ANCHOR_MOVED_NM = 0.5, 2.0, 0.2  # B2
 LOITER_KN, LOITER_NM, LOITER_HOURS = 3.0, 2.0, 1.0  # B4
@@ -152,7 +158,25 @@ def speed_and_course(fixes: list[dict], now: float) -> dict | None:
     spread = max((_angle(a, b) for a in turning for b in turning), default=0)  # yaw within the last 30 min
     return {"base_kn": base_kn, "now_kn": now_kn, "drop_pct": (base_kn - now_kn) / base_kn * 100,
             "turn_deg": max(off_course, spread), "base_course": course,
-            "turn_kn": median(f["sog_kn"] for f in window if f.get("sog_kn") is not None) if window else 0}
+            "turn_kn": median(f["sog_kn"] for f in window if f.get("sog_kn") is not None) if window else 0,
+            "slow_run_s": _slow_run_s(fixes, base_kn)}
+
+
+def _slow_run_s(fixes: list[dict], base_kn: float) -> float:
+    """How long the track has stayed reduced but under way, up to its last fix.
+
+    Reduced: at least DROP_PCT below the cruising speed; under way: above
+    DRAG_MIN_KN. A gap over GAP_S or one fix outside the band ends the run.
+    """
+    ceiling = base_kn * (1 - DROP_PCT / 100)
+    run_start = last = None
+    for fix in reversed(fixes):
+        sog = fix.get("sog_kn")
+        if sog is None or not DRAG_MIN_KN < sog <= ceiling or (last is not None and last["t"] - fix["t"] > GAP_S):
+            break
+        run_start = fix
+        last = fix
+    return 0 if run_start is None else fixes[-1]["t"] - run_start["t"]
 
 
 def _passes(fixes: list[dict], path: list) -> int:
@@ -219,17 +243,32 @@ def _behaviour(vessel: dict, fixes: list[dict], passes_fixes: list[dict], path: 
     if motion and motion["drop_pct"] >= DROP_PCT:
         close = last_nm <= DRAG_NEAR_NM or (eta is not None and eta <= DRAG_NEAR_ETA_MIN)
         under_way = min(motion["now_kn"], motion["turn_kn"]) > DRAG_MIN_KN  # yawed while under way, not circling
+        port_nm = nearest_port_nm(fixes[-1]["lat"], fixes[-1]["lon"])
+        near_port = port_nm is not None and port_nm <= PORT_EXCLUSION_NM
+        steady = close and under_way and motion["slow_run_s"] >= DRAG_HOLD_S and not near_port
         if close and motion["turn_deg"] >= TURN_DEG and under_way:
             obs.update(speed_drop_pct=round(motion["drop_pct"]), course_change_deg=round(motion["turn_deg"]))
             reasons.append(f"Speed fell {motion['drop_pct']:.0f}% ({motion['base_kn']:.1f} → {motion['now_kn']:.1f} kn) "
                            f"and course varied {motion['turn_deg']:.0f}° in {TURN_S // 60} min "
                            f"(rule: ≥{DROP_PCT}% and ≥{TURN_DEG}° while under way above {DRAG_MIN_KN:g} kn) "
                            f"{last_nm:.1f} nm from the line; cause unknown.")
+        elif steady:
+            obs.update(drag_signature=True, speed_drop_pct=round(motion["drop_pct"]))
+            if round(motion["turn_deg"]):
+                obs["course_change_deg"] = round(motion["turn_deg"])
+            reasons.append(f"Speed held {motion['drop_pct']:.0f}% below cruise ({motion['base_kn']:.1f} → "
+                           f"{motion['now_kn']:.1f} kn) for {motion['slow_run_s'] / 60:.0f} min while under way on a "
+                           f"steady course, {last_nm:.1f} nm from the line (rule: ≥{DROP_PCT}% for "
+                           f"≥{DRAG_HOLD_S // 60} min above {DRAG_MIN_KN:g} kn, no turn needed, not within "
+                           f"{PORT_EXCLUSION_NM:g} nm of a port); cause unknown.")
         elif last_nm <= SLOWDOWN_NM:
             obs["slowdown_near_corridor"] = True
             reasons.append(f"Speed fell {motion['drop_pct']:.0f}% ({motion['base_kn']:.1f} → {motion['now_kn']:.1f} kn) "
                            f"{last_nm:.1f} nm from the line (rule: ≥{DROP_PCT}% within {SLOWDOWN_NM:g} nm); "
                            "cause unknown.")
+            if near_port and close and under_way and motion["slow_run_s"] >= DRAG_HOLD_S:
+                reasons.append(f"Not scored as an anchor drag: {port_nm:.1f} nm from a port (within "
+                               f"{PORT_EXCLUSION_NM:g} nm ships slow to enter or leave).")
 
     last = fixes[-1]
     recent = [f for f in fixes if f["t"] >= now - RECENT_S]
