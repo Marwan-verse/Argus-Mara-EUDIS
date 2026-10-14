@@ -180,8 +180,12 @@ class DesktopAISWindowTests(unittest.TestCase):
             self.assertGreater(app.map.winfo_height(), root.winfo_height() * .8)
             self.assertTrue(app.alerts_panel.winfo_ismapped())
             self.assertLess(app.alerts_panel.winfo_x(), app.map.winfo_width() / 2)
-            self.assertEqual(len(app.alert_cards), len(app.alerts))
-            self.assertEqual(app.alert_cards[0][1].cget('text'), '--:--:--')
+            # The exercise incident is on the board and its card counts down on the replay clock.
+            board = app.alert_board
+            exercise = next(item for item in board.items if item.get('exercise'))
+            self.assertIn(board.group(exercise['id']), ('critical', 'high', 'medium'))
+            self.assertEqual(board.cards[exercise['id']]['eta'].cget('text'),
+                             f"ETA {board.ui.clock(app._remaining()[0])}")
             self.assertTrue(app.map_layers['World ports'].get())
             app.fit_ireland()
             represented_ports = set()
@@ -228,7 +232,7 @@ class DesktopAISWindowTests(unittest.TestCase):
             self.assertEqual(app.ais_tracker.table.get_children(), ())
             app.show_exercise()
             self.assertTrue(app.exercise_visible.get())
-            self.assertRegex(app.alert_cards[0][1].cget('text'), r'^\d\d:\d\d:\d\d$')
+            self.assertRegex(board.cards[exercise['id']]['eta'].cget('text'), r'^ETA \d\d:\d\d:\d\d$')
             app.hide_exercise()
             self.assertFalse(app.exercise_visible.get())
             root.update()

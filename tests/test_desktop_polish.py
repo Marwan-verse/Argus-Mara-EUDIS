@@ -25,14 +25,8 @@ class DesktopPolishTests(unittest.TestCase):
         try:
             root.update()
             tools = app.tools
-            identifier = app.alert['id']
-            details, _actions, button = tools.alert_details[identifier]
-            self.assertEqual(details.winfo_manager(), '')
-            tools.toggle_alert_details(identifier)
-            self.assertEqual(details.winfo_manager(), 'pack')
-            self.assertEqual(button.cget('text'), 'Hide details')
-            tools.toggle_alert_details(identifier)
-            self.assertEqual(details.winfo_manager(), '')
+            # The exercise incident card has no inline details; its review window holds them (desktop_alerts).
+            self.assertEqual(tools.alert_details, {})
             self.assertIsNone(app.approved)
 
             icon = app.toolbar_buttons['ship']
