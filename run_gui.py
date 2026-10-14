@@ -324,6 +324,9 @@ class ArgusApp:
             'DropdownMenu': {'fg_color': [CARD, CARD], 'hover_color': [HOVER, HOVER], 'text_color': [INK, INK]},
         }.items():
             ctk.ThemeManager.theme[name].update(values)
+        # Tk sizes point fonts by its own scaling (96 dpi by default), while CustomTkinter scales its
+        # widgets by the Windows display scale. Match them, or plain tk text is half size at 200%.
+        self.root.tk.call("tk", "scaling", 96 / 72 * ctk.ScalingTracker.get_window_scaling(self.root))
         self.root.geometry("1480x900")
         self.root.minsize(1100, 720)
         self.root.configure(fg_color=BG)
@@ -1477,7 +1480,8 @@ class ArgusApp:
         if not points:
             return
         center, lat_span, lon_span = geographic_extent(points)
-        width, height = self._map_size
+        # The live canvas size: before the first draw _map_size is still (0, 0) and every fit would be the world.
+        width, height = max(self._map_size[0], self.map.winfo_width()), max(self._map_size[1], self.map.winfo_height())
         maximum = MAX_IMAGERY_ZOOM if self.map_mode.get() == ONLINE_MAP else MAX_MAP_ZOOM
         for zoom in range(maximum, MIN_MAP_ZOOM - 1, -1):
             _, top = geo_to_world(center[0] + lat_span / 2, center[1], zoom)
@@ -1597,7 +1601,7 @@ class ArgusApp:
     def fit_ireland(self) -> None:
         if hasattr(self, 'ais_tracker'):
             self.ais_tracker.follow.set(False)
-        self._fit_points([(49, -18), (57.5, -4.5)])
+        self._fit_points([(50.8, -12.0), (55.6, -4.8)])  # Ireland, the Irish Sea and the near Atlantic
 
     def toggle_fullscreen(self, _event=None) -> str:
         self.root.attributes("-fullscreen", not self.root.attributes("-fullscreen"))

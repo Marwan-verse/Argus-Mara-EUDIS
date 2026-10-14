@@ -279,7 +279,14 @@ def build(app):
         text_color=ui.MUTED, font=ctk.CTkFont("Segoe UI", 10))
     app.map_attribution_label.pack(side="right", padx=12)
     app.root.bind("<F11>", app.toggle_fullscreen)
-    app.root.after(250, app.fit_ireland)
+    def fit_ireland_when_ready(tries=0):
+        # Fit Ireland only once the map has its real size; a slow start (many AIS ships) used to fit the world.
+        if (app.map.winfo_width() < 300 or app.map.winfo_height() < 300) and tries < 50:
+            app.root.after(100, fit_ireland_when_ready, tries + 1)
+            return
+        app.fit_ireland()
+
+    app.root.after(250, fit_ireland_when_ready)
     if os.environ.get("ARGUS_AIS_AUTOCONNECT", "1") != "0":
         app.root.after(350, app.ais_tracker.connect)
     app.tools.setup()

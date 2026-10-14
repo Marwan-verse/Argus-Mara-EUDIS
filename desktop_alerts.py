@@ -960,6 +960,8 @@ class ReviewDialog:
         self.frame = ctk.CTkFrame(app.chart_host, width=self.WIDTH, height=620, fg_color=ui.CARD,
                                   corner_radius=8, border_width=1, border_color=ui.LINE)
         self.frame.pack_propagate(False)
+        # Wrap lengths are screen pixels; the frame width is in CustomTkinter units (x2 on a 200% display).
+        self.px = ctk.ScalingTracker.get_widget_scaling(self.frame)
         head = tk.Frame(self.frame, bg=ui.CARD)
         head.pack(fill="x", padx=(20, 12), pady=(14, 0))
         self.level = tk.Label(head, text="", bg=ui.CARD, font=(SANS, 10, "bold"))
@@ -979,10 +981,10 @@ class ReviewDialog:
                              justify="left")
         self.meta.pack(fill="x", padx=20)
         self.title = tk.Label(self.frame, text="", bg=ui.CARD, fg=ui.INK, font=(SANS, 12), anchor="w",
-                              justify="left", wraplength=self.WIDTH - 50)
+                              justify="left", wraplength=round((self.WIDTH - 50) * self.px))
         self.title.pack(fill="x", padx=20, pady=(8, 0))
         self.flags = tk.Label(self.frame, text="", bg=ui.CARD, fg=STYLE["medium"][0], font=(SANS, 10, "bold"),
-                              anchor="w", justify="left", wraplength=self.WIDTH - 50)
+                              anchor="w", justify="left", wraplength=round((self.WIDTH - 50) * self.px))
         self.flags.pack(fill="x", padx=20, pady=(4, 0))
         self.scale = tk.Canvas(self.frame, height=44, bg=ui.CARD, highlightthickness=0)
         self.scale.pack(fill="x", padx=20, pady=(12, 0))
@@ -1148,7 +1150,7 @@ class ReviewDialog:
         ui, item, board = self.ui, self.item, self.board
         for child in self.body.winfo_children():
             child.destroy()
-        wrap = int(float(self.frame.cget("width"))) - 110
+        wrap = round((float(self.frame.cget("width")) - 110) * self.px)
         self.fill_why(explain(item), wrap)
         self.heading("RECOMMENDED ACTION")
         tk.Label(self.body, text=item["recommendation"], bg=ui.CARD, fg=ui.INK, font=(SANS, 10), anchor="w",
