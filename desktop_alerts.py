@@ -13,6 +13,9 @@ Each incident also shows who can reach it (``argus.responders``): one line on
 the card, every asset with minutes and reasons in the review window, and on the
 map the bases and a dashed line from the best asset to where it meets the
 vessel. The storm switch grounds the drones; the wind is an exercise value.
+Send and Recall (permission ``response.review``) record a simulated human
+decision: a sent asset is busy for every other incident, so one that relied
+on it can rise, and the review window warns before that happens.
 """
 from __future__ import annotations
 
@@ -355,22 +358,49 @@ class AlertBoard:
 
     def toggle_storm(self) -> None:
         """Switch the exercise wind between normal and storm and score the current replay time again."""
+        def action():
+            self.replay.storm = not self.replay.storm
+            return self.replay.refresh()
+        wind = self.replay.fleet["wind"]["normal_kn" if self.replay.storm else "storm_kn"]
+        self.rescore(action, f"Exercise wind {wind:g} kn"
+                     + (" · drones available" if self.replay.storm else " · storm: drones grounded"))
+
+    def send(self, identifier: str, asset_id: str) -> None:
+        """Send an asset to the incident: a simulated human decision, logged, never transmitted."""
+        if hasattr(self.app, 'require_tool') and not self.app.require_tool('response.review'):
+            return
+        item = self.by_id[identifier]
+        self.rescore(lambda: self.replay.send(item, asset_id), f"Sent {asset_id} to {item['name']} (simulated)")
+
+    def recall(self, identifier: str, asset_id: str) -> None:
+        if hasattr(self.app, 'require_tool') and not self.app.require_tool('response.review'):
+            return
+        item = self.by_id[identifier]
+        self.rescore(lambda: self.replay.recall(item, asset_id), f"Recalled {asset_id} from {item['name']}")
+
+    def rescore(self, action, text: str) -> None:
+        """Run a change that scores the board again at this replay time; repaint and announce what rose."""
         before = self.snapshot()
-        self.replay.storm = not self.replay.storm
-        events = self.replay.refresh()
+        try:
+            events = action()
+        except (KeyError, ValueError) as error:
+            self.app.map_status_label.configure(text=f"{self.stamp(self.replay.now)} · {error.args[0]}")
+            return
         after = self.snapshot()
         for identifier in {key for key in after if after[key] != before[key]} | set(events):
             self.paint(identifier)
-            if {"raised", "opened"} & set(events.get(identifier, [])):
+        news = []
+        for identifier, found in events.items():
+            if {"raised", "opened"} & set(found):
                 self.flash(identifier)
+                news.append(f"{self.by_id[identifier]['name']} now {LEVEL_NAMES[self.incident(identifier)['level']]}"
+                            + (": no responder in time" if (self.response(identifier) or {}).get("no_response_in_time")
+                               else ""))
         self.relayout()
         self.app._draw_map()
         if self.dialog.item:
             self.dialog.refresh()
-        wind = self.replay.wind_kn
-        self.app.map_status_label.configure(
-            text=f"{self.stamp(self.replay.now)} · Exercise wind {wind:g} kn"
-                 + (" · storm: drones grounded" if self.replay.storm else " · drones available"))
+        self.app.map_status_label.configure(text=" · ".join([self.stamp(self.replay.now), text, *news[:3]]))
 
     def group(self, identifier: str) -> str:
         """critical/high/medium for an open incident, else quiet, watching, closed or hidden (not raised yet)."""
@@ -401,8 +431,12 @@ class AlertBoard:
         item = self.by_id[identifier]
         if self.tracker.open_incident(item) is None:
             return
+        before = self.snapshot()
         self.replay.decide(item, status, text, reason, to)
         self.sync_exercise(item, status)
+        after = self.snapshot()
+        for other in {key for key in after if after[key] != before[key]} - {identifier}:
+            self.paint(other)  # a closed incident frees its assets for the others
         self.changed(identifier)
 
     def mark_reviewed(self, identifier: str) -> None:
@@ -993,8 +1027,9 @@ class AlertBoard:
             r = 6 * px
             app.map.create_oval(meet_x - r, meet_y - r, meet_x + r, meet_y + r, outline=colour,
                                 width=round(2 * px), tags=tags)
+            sent = "sent · " if shown["status"] == "assigned" else ""
             self._label(meet_x + 10 * px, meet_y + 10 * px,
-                        f"{shown['id']} meets it in {responders.minutes(shown['eta_s'])} min",
+                        f"{shown['id']} {sent}meets it in {responders.minutes(shown['eta_s'])} min",
                         colour, tags, "w", occupied, force=True)
         for row in result["rows"]:
             if row["lat"] is None:
@@ -1309,6 +1344,7 @@ class ReviewDialog:
             tk.Label(self.body, text="Worked out for open incidents at Medium or above.", bg=ui.CARD, fg=ui.MUTED,
                      font=(SANS, 10), anchor="w").pack(fill="x", padx=(6, 0))
             return
+        status_open = board.status(item["id"]) not in ("Rejected", "Watching")
         text, warn = responders.summary_line(result)
         tk.Label(self.body, text=text, bg=ui.CARD, fg=STYLE["critical"][0] if warn else IN_TIME,
                  font=(SANS, 11, "bold"), anchor="w", justify="left", wraplength=wrap + 40).pack(fill="x", padx=(6, 0))
@@ -1338,14 +1374,41 @@ class ReviewDialog:
             line.pack(fill="x", padx=(6, 0), pady=1)
             tk.Label(line, text=row["id"], width=5, anchor="w", bg=ui.CARD, fg=colour,
                      font=(MONO, 10, "bold")).pack(side="left", anchor="n")
+            action = None
+            if row["status"] == "assigned":
+                action = ("Recall", lambda asset=row["id"]: board.recall(item["id"], asset),
+                          "Take the asset back; it is free for the other incidents again")
+                verdict = "SENT · " + verdict
+            elif row["counts"] and not unavailable and status_open:
+                action = ("Send", lambda asset=row["id"]: board.send(item["id"], asset),
+                          "Send this asset (simulated decision, logged, not transmitted). "
+                          "It is then busy for every other incident")
+            button_width = 0
+            if action:
+                text_, command, tip = action
+                button = ctk.CTkButton(line, text=text_, command=command, width=58, height=22, corner_radius=5,
+                                       font=ctk.CTkFont(SANS, 11, "bold"), fg_color=ui.CARD, hover_color=ui.HOVER,
+                                       border_width=1, border_color=colour, text_color=colour)
+                button.pack(side="right", padx=(6, 0))
+                board.app.tools.style_button(button, tip)
+                button_width = round(64 * self.px)
             tk.Label(line, text=verdict, bg=ui.CARD, fg=ui.MUTED if unavailable else colour, font=self.row_font,
                      anchor="e", justify="right").pack(side="right", anchor="n")
             name = row["name"] if row["kind"] == "satellite" else f"{row['name']} · {row['base']}"
-            # The asset name gives way to its minutes and verdict.
-            room = wrap + 40 - self.id_font.measure("MPA1 ") - self.row_font.measure(verdict) - round(20 * self.px)
+            # The asset name gives way to its minutes, verdict and button.
+            room = (wrap + 40 - self.id_font.measure("MPA1 ") - self.row_font.measure(verdict) - button_width
+                    - round(20 * self.px))
             tk.Label(line, text=clip(name, self.name_font, max(40, room)), bg=ui.CARD,
                      fg=ui.MUTED if unavailable else SECONDARY, font=self.name_font, anchor="w",
                      justify="left").pack(side="left", fill="x", expand=True, padx=(4, 8))
+            if action and action[0] == "Send":
+                others = board.replay.conflicts(item, row["id"])
+                if others:
+                    names = ", ".join(other["name"] for other in others)
+                    tk.Label(self.body, text=f"⚠ Only {row['id']} reaches {names} in time: sending it here "
+                                             f"leaves {'them' if len(others) > 1 else 'it'} with no responder",
+                             bg=ui.CARD, fg=STYLE["medium"][0], font=(SANS, 9), anchor="w", justify="left",
+                             wraplength=wrap).pack(fill="x", padx=(round(52 * self.px), 0), pady=(0, 3))
         note = tk.Frame(self.body, bg=ui.CARD)
         note.pack(fill="x", padx=(6, 0), pady=(6, 0))
         self.chip(note, "ASSUMPTION").pack(side="left", anchor="n")

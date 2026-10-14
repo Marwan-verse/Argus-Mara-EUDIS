@@ -221,6 +221,24 @@ class DesktopAlertBoardTests(unittest.TestCase):
         board.deselect()
         self.assertFalse(self.map_tags('sim-response'))
 
+    def test_send_needs_response_review_and_shows_the_conflict_on_the_other_card(self):
+        board = self.board
+        board.open('A1')
+        with patch.object(self.app, 'require_tool', return_value=False) as check:
+            board.send('A1', 'D1')
+        check.assert_called_once_with('response.review')
+        self.assertEqual(board.replay.assignments, {})
+        board.send('A1', 'D1')
+        self.assertEqual(board.cards['A1']['respond'].cget('text'), 'Sent: Drone D1 · 31 min · in time (+30 min)')
+        self.assertTrue(board.cards['SIM-41']['respond'].cget('text').startswith(
+            'No responder in time · D1 assigned to INC-'))  # the narrow card may clip the number
+        self.assertEqual(board.by_id['SIM-41']['assessment']['level'], 'critical')
+        self.assertIn('SEA LARK now Critical: no responder in time', self.app.map_status_label.cget('text'))
+        self.assertIn('Sent Drone D1', board.history['A1'][-1][1])
+        board.recall('A1', 'D1')
+        self.assertEqual(board.by_id['SIM-41']['assessment']['level'], 'high')
+        self.assertEqual(board.cards['SIM-41']['respond'].cget('text'), 'Drone D1 · 42 min · in time (+3 min)')
+
     def test_incidents_follow_the_replay_clock_and_a_card_click_centres_the_map(self):
         app, board = self.app, self.board
         start = app.alert['t']

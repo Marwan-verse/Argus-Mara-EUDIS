@@ -139,6 +139,51 @@ class ReplayResponseTests(unittest.TestCase):
         self.assertEqual(heron["assessment"]["notes"].count(
             "Raised one level: no response asset can arrive before the earliest ETA."), 1)
 
+    def test_sending_d1_to_the_exercise_leaves_sea_lark_without_a_responder_and_recall_gives_it_back(self):
+        exercise, lark, skerry = self.by_id["A1"], self.by_id["SIM-41"], self.by_id["SIM-45"]
+        self.assertEqual([other["id"] for other in self.replay.conflicts(exercise, "D1")], ["SIM-41", "SIM-45"])
+        self.assertEqual((lark["assessment"]["level"], skerry["assessment"]["level"]), ("high", "medium"))
+        events = self.replay.send(exercise, "D1")
+        self.assertEqual(events, {"SIM-41": ["raised"], "SIM-45": ["raised"]})
+        self.assertEqual((lark["assessment"]["level"], skerry["assessment"]["level"]), ("critical", "high"))
+        line = responders.summary_line(self.replay.responses["SIM-41"])[0]
+        self.assertTrue(line.startswith("No responder in time · D1 assigned to INC-999000001-1"))
+        self.assertEqual(responders.summary_line(self.replay.responses["A1"])[0],
+                         "Sent: Drone D1 · 31 min · in time (+30 min)")
+        # GREY HERON had nobody in time before; the assignment is not blamed for it.
+        self.assertNotIn("assigned", responders.summary_line(self.replay.responses["SIM-06"])[0])
+        incident = self.replay.tracker.incident(exercise)
+        self.assertEqual(incident["responses"], [{"t": self.start, "action": "send", "asset": "D1"}])
+        self.assertIn("Sent Drone D1: eyes on in 31 min", self.replay.log["A1"][-1][1])
+        self.replay.recall(exercise, "D1")
+        self.assertEqual((lark["assessment"]["level"], skerry["assessment"]["level"]), ("high", "medium"))
+        self.assertEqual(self.replay.assignments, {})
+
+    def test_a_sent_asset_counts_down_from_dispatch_survives_a_rewind_and_is_freed_by_a_rejection(self):
+        exercise, lark = self.by_id["A1"], self.by_id["SIM-41"]
+        self.replay.send(exercise, "D1")
+        self.replay.seek(self.start + 5 * 60)
+        self.assertEqual(responders.minutes(self.replay.responses["A1"]["assigned"]["eta_s"]), 26)
+        self.replay.seek(self.start)  # rewind: the send at the alert time is replayed
+        self.assertIn("D1", self.replay.assignments)
+        self.assertEqual(lark["assessment"]["level"], "critical")
+        self.replay.decide(exercise, "Rejected", "Rejected", reason="False alarm")
+        self.assertEqual(self.replay.assignments, {})
+        self.assertEqual(lark["assessment"]["level"], "high")
+        self.assertEqual(self.replay.log["A1"][-1][1], "D1 released: incident closed")
+
+    def test_only_an_available_physical_asset_can_be_sent(self):
+        exercise = self.by_id["A1"]
+        with self.assertRaises(ValueError):
+            self.replay.send(exercise, "VHF")   # a hail is not a responder
+        with self.assertRaises(ValueError):
+            self.replay.send(exercise, "D3")    # out of range
+        self.replay.send(exercise, "D1")
+        with self.assertRaises(ValueError):
+            self.replay.send(self.by_id["SIM-41"], "D1")  # already assigned
+        with self.assertRaises(KeyError):
+            self.replay.recall(self.by_id["SIM-41"], "D1")  # not its asset
+
     def test_storm_grounds_every_drone_and_rewinding_keeps_the_setting(self):
         self.replay.storm = True
         self.replay.seek(self.start + 60)

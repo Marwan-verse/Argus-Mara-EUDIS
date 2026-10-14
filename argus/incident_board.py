@@ -19,6 +19,11 @@ instead of one row per alert. No tkinter here, so it is tested without a display
   earliest line ETA, ``no_response_in_time`` goes into the contact's
   observations and it is scored once more (observations, then responders, then
   one assessment; responders never depend on the level, so this never loops).
+* ``Replay.send`` records a simulated human decision to send a physical asset
+  to an incident. The asset is then busy for every other incident until
+  ``Replay.recall`` or until its incident is rejected (closed); the board is
+  scored again at once, so another incident that relied on it can rise.
+  Sends and recalls are decisions like a status change, so a rewind replays them.
 """
 
 from __future__ import annotations
@@ -228,6 +233,76 @@ class Replay:
                                                                  level=LEVEL_NAMES[incident["level"]]))
         return events
 
+    def conflicts(self, item: dict, asset_id: str) -> list[dict]:
+        """Other open incidents for which ``asset_id`` is the only physical asset arriving in time."""
+        found = []
+        for other in self.items:
+            result = self.responses.get(other["id"])
+            if other["id"] == item["id"] or not result or result["at_line"] or result["assigned"]:
+                continue
+            in_time = {row["id"] for row in result["rows"] if row["counts"] and row["in_time"]}
+            if in_time == {asset_id}:
+                found.append(other)
+        return found
+
+    def send(self, item: dict, asset_id: str) -> dict[str, list[str]]:
+        """Send a physical asset to the item's open incident (a human decision); score again and return events.
+
+        ``ValueError`` if the asset does not count as a responder or cannot go
+        (out of range, grounded, already assigned); ``KeyError`` without an open incident.
+        """
+        asset = next((asset for asset in self.fleet["assets"] if asset["id"] == asset_id), None)
+        if asset is None or not asset.get("counts"):
+            raise ValueError(f"{asset_id} is not a physical responder")
+        row = next((row for row in (self.responses.get(item["id"]) or {}).get("rows", []) if row["id"] == asset_id),
+                   None)
+        if row is None or row["status"] in ("unavailable", "assigned"):
+            raise ValueError(f"{asset_id} cannot be sent: {row['reason'] if row else 'no responder estimate'}")
+        verdict = ("" if row["margin_s"] is None else
+                   f", in time (+{responders.minutes(row['margin_s'])} min)" if row["in_time"]
+                   else f", {responders.minutes(-row['margin_s'])} min late")
+        who = asset["name"] if asset_id in asset["name"] else f"{asset_id} ({asset['name']})"
+        text = f"Sent {who}: eyes on in {responders.minutes(row['eta_s'])} min{verdict}"
+        self._record({"action": "send", "asset": asset_id, "id": item["id"], "text": text})
+        return self.refresh()
+
+    def recall(self, item: dict, asset_id: str) -> dict[str, list[str]]:
+        """Take an asset back from the item's incident; it is free for the others again. Score again."""
+        self._record({"action": "recall", "asset": asset_id, "id": item["id"],
+                      "text": f"Recalled {asset_id}; free for other incidents"})
+        return self.refresh()
+
+    def _record(self, decision: dict) -> None:
+        decision = {"t": self.now, "status": None, "reason": None, "to": None, **decision}
+        if not self._apply(decision):
+            raise KeyError(f"{decision['id']}: cannot {decision['action']} {decision['asset']}")
+        self.decisions.append(decision)
+
+    def _apply_response(self, item: dict, decision: dict) -> bool:
+        incident = self.tracker.open_incident(item)
+        asset, given = decision["asset"], self.assignments.get(decision["asset"])
+        if decision["action"] == "send":
+            if incident is None or given is not None:
+                return False
+            self.assignments[asset] = {"incident": incident["id"], "item": item["id"], "t": decision["t"]}
+        else:
+            if given is None or given["item"] != item["id"]:
+                return False
+            del self.assignments[asset]
+        if incident is not None:
+            incident.setdefault("responses", []).append(
+                {"t": decision["t"], "action": decision["action"], "asset": asset})
+        self._note(item["id"], decision["t"], decision["text"])
+        return True
+
+    def _release(self, item: dict, t: int) -> list[str]:
+        """Free the assets of a closed incident."""
+        freed = [asset for asset, given in self.assignments.items() if given["item"] == item["id"]]
+        for asset in freed:
+            del self.assignments[asset]
+            self._note(item["id"], t, f"{asset} released: incident closed")
+        return freed
+
     def refresh(self) -> dict[str, list[str]]:
         """Score the current replay time again (after the wind or an assignment changed); return its events."""
         if self.now is None:
@@ -236,6 +311,8 @@ class Replay:
 
     def _apply(self, decision: dict) -> bool:
         item = next(item for item in self.items if item["id"] == decision["id"])
+        if decision.get("action"):
+            return self._apply_response(item, decision)
         try:
             self.tracker.decide(item, decision["status"], decision["reason"])
         except (KeyError, ValueError):
@@ -245,6 +322,8 @@ class Replay:
         else:
             self.recipients.pop(decision["id"], None)
         self._note(decision["id"], decision["t"], decision["text"])
+        if decision["status"] == "Rejected":
+            self._release(item, decision["t"])
         return True
 
     def seek(self, t: float) -> tuple[dict[str, list[str]], bool]:
@@ -267,16 +346,27 @@ class Replay:
         self.decisions = [decision for decision in self.decisions if decision["t"] <= t]
         pending = sorted(self.decisions, key=lambda decision: decision["t"])
         origin = min(0, t)
+        applied = False
         for moment in [*range(origin, t, self.step_s), t]:
             self._step(moment)
+            applied = False
             while pending and pending[0]["t"] <= moment:
-                self._apply(pending.pop(0))
+                applied = self._apply(pending.pop(0)) or applied
+        if applied and self.assignments_changed_at(t):
+            self.refresh()  # a send or recall at the last moment changes who reaches whom now
         return {}, rewound
+
+    def assignments_changed_at(self, t: int) -> bool:
+        return any(decision.get("action") or decision["status"] == "Rejected"
+                   for decision in self.decisions if decision["t"] == t)
 
     def decide(self, item: dict, status: str, text: str, reason: str | None = None, to: str | None = None) -> dict:
         """Record a human decision at the current replay time (``KeyError`` with no open incident)."""
         decision = {"t": self.now, "id": item["id"], "status": status, "reason": reason, "to": to, "text": text}
+        held = set(self.assignments)
         if not self._apply(decision):
             raise KeyError(f"{item['id']} has no open incident for {status}")
         self.decisions.append(decision)
+        if held != set(self.assignments):
+            self.refresh()  # a closed incident freed its assets for the others
         return self.tracker.incident(item)

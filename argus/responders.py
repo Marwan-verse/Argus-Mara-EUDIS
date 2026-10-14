@@ -105,7 +105,10 @@ def assess_asset(asset: dict, position, now: float, deadline_s=None, wind_kn: fl
     """
     owner = (busy or {}).get(asset["id"])
     if owner is not None and owner != incident_id:
-        return _row(asset, status="unavailable", reason=f"assigned to {owner}")
+        # Busy elsewhere; keep whether it would have arrived in time, so only a real conflict is blamed.
+        free = assess_asset(asset, position, now, deadline_s, wind_kn)
+        return _row(asset, status="unavailable", reason=f"assigned to {owner}",
+                    would_be_in_time=bool(free["in_time"]))
     if asset["kind"] == "drone" and wind_kn > asset.get("max_wind_kn", float("inf")):
         return _row(asset, status="unavailable",
                     reason=f"wind {wind_kn:g} kn above the {asset['max_wind_kn']:g} kn drone limit")
@@ -157,7 +160,7 @@ def assess_fleet(fleet: dict, position, now: float, deadline_s=None, wind_kn: fl
     in_time = [row for row in physical if row["in_time"]]
     best = (in_time or physical or [None])[0]
     assigned = next((row for row in physical if row["status"] == "assigned"), None)
-    blocked = [row for row in rows if row["counts"] and (row["reason"] or "").startswith("assigned to")]
+    blocked = [row for row in rows if row["counts"] and row.get("would_be_in_time")]
     return {"now": int(now), "deadline_s": None if deadline_s is None else int(deadline_s), "at_line": at_line,
             "wind_kn": wind_kn, "rows": rows, "best": best, "assigned": assigned,
             "blocked_by": [f"{row['id']} {row['reason']}" for row in blocked],
@@ -175,10 +178,10 @@ def summary_line(result: dict) -> tuple[str, bool]:
     shown = assigned or best
     if result["no_response_in_time"] and not (assigned and assigned["in_time"]):
         text = "No responder in time"
+        if result["blocked_by"]:  # first, so a narrow card still shows why
+            text += f" · {result['blocked_by'][0]}"
         if shown:
             text += f" · best {shown['id']} {minutes(shown['eta_s'])} min, {minutes(-shown['margin_s'])} min late"
-        if result["blocked_by"]:
-            text += f" · {result['blocked_by'][0]}"
         return text, True
     if shown is None:
         return "No physical responder can reach", True
