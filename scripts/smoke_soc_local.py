@@ -26,6 +26,8 @@ def main():
         assert a.cipher.safety_codes[b.user['id']] == b.cipher.safety_codes[a.user['id']]
         # Programmatic comparison is valid only in this synthetic, locally
         # controlled smoke check. Real analysts compare through a trusted channel.
+        assert a.cipher.verify_peer(b.user['id'], b.cipher.safety_codes[a.user['id']])
+        assert b.cipher.verify_peer(a.user['id'], a.cipher.safety_codes[b.user['id']])
         a.confirm()
         b.confirm()
         a.poll()
