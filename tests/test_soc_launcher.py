@@ -40,6 +40,22 @@ class LocalStartupTests(unittest.TestCase):
             launcher.prepare_credentials(Path(directory))
             self.assertEqual(target.read_text(), original)
 
+    def test_existing_credentials_gain_only_the_missing_mykhailo_password(self):
+        old_lines = ['ARGUS_DEMO_MARWAN_PASSWORD=old-marwan-secret-1', 'ARGUS_DEMO_IGOR_PASSWORD=old-igor-secret-22',
+                     'ARGUS_DEMO_ADMIN_PASSWORD=old-admin-secret-333']
+        for ending in ('\n', ''):  # Also a hand-made file without a final line break.
+            with tempfile.TemporaryDirectory() as directory:
+                target = Path(directory, 'demo.env')
+                target.write_text('\n'.join(old_lines) + ending)
+                launcher.prepare_credentials(Path(directory))
+                lines = target.read_text().splitlines()
+                self.assertEqual(lines[:3], old_lines)
+                self.assertEqual([line.split('=', 1)[0] for line in lines[3:]], ['ARGUS_DEMO_MYKHAILO_PASSWORD'])
+                self.assertGreaterEqual(len(lines[3].split('=', 1)[1]), 14)
+                updated = target.read_text()
+                launcher.prepare_credentials(Path(directory))
+                self.assertEqual(target.read_text(), updated)
+
     def test_ready_stack_uses_verified_https_and_existing_compose(self):
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(launcher, 'ROOT', Path(directory)), \

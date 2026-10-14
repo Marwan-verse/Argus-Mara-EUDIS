@@ -43,16 +43,26 @@ def run_command(command, *, timeout=30):
 
 
 def prepare_credentials(directory):
-    """Never overwrite existing credentials or include them in logs/arguments."""
+    """Never overwrite existing credentials or include them in logs/arguments.
+
+    An existing file only gains passwords for accounts it lacks, such as
+    Mykhailo's in a file made when the first sample account was Marwan.
+    """
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / "demo.env"
     try:
-        descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        descriptor = os.open(target, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
-        return target
-    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-        for account in ("MARWAN", "IGOR", "ADMIN"):
-            stream.write(f"ARGUS_DEMO_{account}_PASSWORD={secrets.token_urlsafe(24)}\n")
+        descriptor = os.open(target, os.O_RDWR | os.O_APPEND)
+    with os.fdopen(descriptor, "r+", encoding="utf-8") as stream:
+        stream.seek(0)
+        existing = stream.read()
+        present = {line.split("=", 1)[0] for line in existing.splitlines() if "=" in line}
+        if existing and not existing.endswith("\n"):
+            stream.write("\n")
+        for account in ("MYKHAILO", "IGOR", "ADMIN"):
+            if f"ARGUS_DEMO_{account}_PASSWORD" not in present:
+                stream.write(f"ARGUS_DEMO_{account}_PASSWORD={secrets.token_urlsafe(24)}\n")
     return target
 
 

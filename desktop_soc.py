@@ -165,7 +165,7 @@ def login_screen(root, initial_url, on_login, *, allow_loopback_http=False,
             fields["url"].insert(0, url)
             try:
                 open_second_client(url, ca_file)
-                status.configure(text="Local server ready. Sign in separately in each window as Marwan / Igor. "
+                status.configure(text="Local server ready. Sign in separately in each window as Mykhailo / Igor. "
                                       "Passwords: data/soc-local/demo.env")
                 # Exactly two windows per launch screen, including this one.
                 local_button.pack_forget()

@@ -27,7 +27,7 @@ command can finish. Closing clients leaves shared containers running and preserv
 accounts/certificates. Use the stop command below when the server is no longer needed.
 
 If `data/soc-local/demo.env` is absent, startup creates random passwords for
-`Marwan`, `Igor` and `admin` in that ignored private file. Open it locally to read
+`Mykhailo`, `Igor` and `admin` in that ignored private file. Open it locally to read
 them; passwords are never logged or passed as process arguments. Existing files
 and account passwords are preserved. Preserve the file with the account volume:
 recreating the file does not reset accounts already in Docker.
@@ -55,18 +55,20 @@ changes when needed; relay recreation closes existing rooms.
 Create the private `data/soc-local/demo.env` from the repository root:
 
 ```text
-ARGUS_DEMO_MARWAN_PASSWORD=<local Marwan test password>
+ARGUS_DEMO_MYKHAILO_PASSWORD=<local Mykhailo test password>
 ARGUS_DEMO_IGOR_PASSWORD=<local Igor test password>
 ARGUS_DEMO_ADMIN_PASSWORD=<separate long administrator password>
 ```
 
-The file is already prepared on Ihor's PC with the requested credentials. It is
-ignored by Git and excluded from the Docker build context. The admin password
+The file is already prepared on Ihor's PC with the requested credentials. A file
+made when the first sample account was `Marwan` gains a `Mykhailo` password on
+the next start; the old `marwan` account stays in an existing account volume and
+can be ignored. The file is ignored by Git and excluded from the Docker build context. The admin password
 must have at least 14 characters. Short passwords are permitted only by local
 demo seeding; normal account creation still requires at least 14 characters.
 Do not publish this file or reuse sample passwords on other services.
 
-`Marwan` belongs to `intelligence` and `user`; `Igor` belongs only to `user`.
+`Mykhailo` belongs to `intelligence` and `user`; `Igor` belongs only to `user`.
 Logins are case-insensitive and passwords are case-sensitive. Neither account
 is an administrator. A separate `admin` account manages users and groups.
 
@@ -89,8 +91,8 @@ is unchanged and TLS verification remains enabled.
 
 ## 4. Test communication
 
-1. Sign in as `Marwan` in the first window and `Igor` in the second.
-2. Open **SOC session**. Marwan chooses **Team session (all groups)** and
+1. Sign in as `Mykhailo` in the first window and `Igor` in the second.
+2. Open **SOC session**. Mykhailo chooses **Team session (all groups)** and
    **Create a session**.
 3. Igor enters the invitation and clicks **Join session**. Additional users
    can use the same code while the lobby is open, for up to ten minutes.

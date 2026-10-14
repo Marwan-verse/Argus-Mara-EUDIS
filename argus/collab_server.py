@@ -528,7 +528,7 @@ def main():
             parser.error('Demo seeding requires ARGUS_SOC_LOCAL_DEMO=1 and a localhost origin')
         store = Store(config.database)
         try:
-            for username, env_key, groups in (('Marwan', 'ARGUS_DEMO_MARWAN_PASSWORD', ['intelligence', 'user']),
+            for username, env_key, groups in (('Mykhailo', 'ARGUS_DEMO_MYKHAILO_PASSWORD', ['intelligence', 'user']),
                                                ('Igor', 'ARGUS_DEMO_IGOR_PASSWORD', ['user'])):
                 secret = os.environ.get(env_key, '')
                 if not 4 <= len(secret) <= 128:
