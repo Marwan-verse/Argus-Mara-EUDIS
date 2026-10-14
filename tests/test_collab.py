@@ -282,6 +282,18 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         # ...but people already signed in keep working.
         self.assertEqual((await self.api("GET", "/v1/me", self.bob))[0], 200)
 
+    async def test_remembered_token_resumes_until_revoked(self):
+        url = str(self.server.make_url("")).rstrip("/")
+        token = self.tokens[self.bob["id"]]
+        client = SOCClient(url, allow_loopback_http=True)
+        self.assertEqual((await asyncio.to_thread(client.resume, token))["username"], "bob")
+        self.relay.store.logout(token)
+        expired = SOCClient(url, allow_loopback_http=True)
+        with self.assertRaises(ClientError) as refused:
+            await asyncio.to_thread(expired.resume, token)
+        self.assertEqual(refused.exception.status, 401)
+        self.assertIsNone(expired.token)
+
     async def test_http_cannot_spoof_https_outside_proxy_network(self):
         self.relay.config.allow_loopback_http = False
         self.assertEqual((await self.api('GET', '/v1/me', self.bob, headers={'X-Forwarded-Proto': 'https'}))[0], 426)

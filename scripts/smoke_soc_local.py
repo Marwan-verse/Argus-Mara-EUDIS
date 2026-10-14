@@ -16,7 +16,7 @@ def main():
     clients = [SOCClient(args.url, ca_file=args.ca) for _ in range(2)]
     try:
         a, b = clients
-        a.login('Marwan', values['ARGUS_DEMO_MARWAN_PASSWORD'])
+        a.login('Mykhailo', values['ARGUS_DEMO_MYKHAILO_PASSWORD'])
         b.login('Igor', values['ARGUS_DEMO_IGOR_PASSWORD'])
         assert 'evidence.share' in a.user['permissions'] and 'evidence.share' not in b.user['permissions']
         room = a.create()  # Team session: accounts need not share a group.
