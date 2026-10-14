@@ -135,6 +135,7 @@ account and certificate volumes.
 | Certificate error | Rerun startup; check the CA file and use exactly `https://localhost:8443` |
 | Port 8443 occupied | Stop the other local server or consistently change Compose, origin and client address |
 | Sign-in fails | Check password case and demo.env; seeding never resets existing accounts |
+| The app opens without the sign-in screen | A saved sign-in was used; press **Sign out** in Team communication to return to the screen with **Start local server** |
 | Cannot join | Check Team/private scope, membership, expiry, roster lock and capacity |
 | Send disabled | The host must start secure chat and everyone must finish peer verification |
 | History expires or someone leaves | Start a new room; retention is limited to 256 messages and 256 KiB of ciphertext per room |

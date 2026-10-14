@@ -1,4 +1,5 @@
-"""HTTPS SOC client. Tokens, passwords and ephemeral keys stay in memory."""
+"""HTTPS SOC client. Passwords and ephemeral keys stay in memory; only a token the
+user chose to remember goes to the OS keychain (see soc_session)."""
 import json
 import ssl
 from urllib.error import HTTPError

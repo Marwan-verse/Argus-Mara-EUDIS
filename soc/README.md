@@ -89,6 +89,17 @@ demo directly, using public/fictional files.
 Do not use the offline entrypoint for private data. Hiding a local tool cannot
 protect public files already installed on a device.
 
+**Stay signed in on this computer (up to 8 hours)** is ticked by default. The app
+then keeps the server's sign-in token, never the password, in the operating
+system's keychain (macOS Keychain, Windows Credential Manager) and uses it on the
+next launch until the 8-hour token expires or is revoked; it then asks for the
+password with the address and username filled in. Closing the app keeps the token
+but leaves any open session. **Sign out** in Team communication revokes the token
+and removes it from the computer. Encryption keys are never saved, so after a
+restart you create or join a new session and compare codes again. Without a
+usable keychain nothing is remembered. The second window of the local two-window
+demo (`--soc-client`) never reads or saves a sign-in.
+
 1. Sign in as administrator; open **SOC session → Administration**. Create two
    distinct accounts with unique passwords (14–128 characters).
 2. Choose a Team session, or a private group session. Create it and privately share
