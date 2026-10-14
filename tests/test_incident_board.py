@@ -130,6 +130,53 @@ class ReplayTests(unittest.TestCase):
         self.assertTrue(incident["suggest_close"])
         self.assertEqual(self.replay.log["SIM-48"][-1], (self.start + 65 * 60, "Quiet 30 min below Medium: close?"))
 
+    def levels(self, identifier, minutes):
+        """The story's level at each replay minute (T+minute)."""
+        found = []
+        for minute in minutes:
+            self.replay.seek(minute * 60)
+            found.append(self.by_id[identifier]["assessment"]["level"])
+        return found
+
+    def test_anchor_drag_story_is_found_by_brain_from_its_track(self):
+        drag = self.by_id["SIM-50"]
+        self.assertEqual(self.levels("SIM-50", (74, 90, 116, 117, 125, 145)),
+                         ["none", "none", "none", "high", "critical", "high"])
+        # T+145: inside the EWIC corridor, scored from its own track by the registered detectors.
+        self.assertEqual(drag["cable_id"], "ewic")
+        self.assertTrue(drag["observations"]["in_corridor"])
+        self.assertNotIn("alert_board_simulated", drag["detectors"])
+        self.replay.seek(125 * 60)
+        obs = drag["observations"]
+        self.assertGreaterEqual(obs["speed_drop_pct"], 20)
+        self.assertLessEqual(obs["eta_min"], 30)
+        self.assertNotIn("ais_gap_min", obs)  # no AIS gap: the legacy rule could not see it
+        # Critical because no physical responder reaches it before the earliest ETA.
+        self.assertTrue(self.replay.responses["SIM-50"]["no_response_in_time"])
+        self.assertEqual(self.replay.tracker.incident(drag)["cable_id"], "ewic")
+        self.assertTrue(self.replay.present(drag))
+        self.assertFalse((self.replay.seek(70 * 60), self.replay.present(drag))[1])  # its track starts at T+75
+
+    def test_holding_story_loiters_then_anchors_next_to_the_cluster(self):
+        self.assertEqual(self.levels("SIM-51", (90, 125)), ["low", "medium"])
+        hold = self.by_id["SIM-51"]
+        self.assertGreaterEqual(hold["observations"]["loiter_hours"], 1.0)
+        self.replay.seek(155 * 60)
+        self.assertEqual(hold["assessment"]["level"], "high")
+        self.assertTrue(hold["observations"]["anchored_near_cable"])
+        self.assertEqual(hold["cable_id"], "north-dublin")
+        codes = {factor["code"] for factor in hold["assessment"]["factors"]}
+        self.assertTrue({"B4", "B7"} <= codes)
+
+    def test_innocent_stories_stay_at_low_or_below(self):
+        for identifier in ("SIM-52", "SIM-53"):
+            item = self.by_id[identifier]
+            for minute in range(90, 176, 5):
+                self.replay.seek(minute * 60)
+                if self.replay.present(item):
+                    self.assertLessEqual(RANK[item["assessment"]["level"]], RANK["low"], (identifier, minute))
+        self.assertIsNone(self.replay.tracker.incident(self.by_id["SIM-53"]))
+
     def test_rewind_rebuilds_and_keeps_only_earlier_decisions(self):
         self.replay.seek(self.start)
         self.replay.decide(self.by_id["SIM-01"], "Escalated", "Escalated to MRCC", to="Irish Coast Guard (MRCC)")

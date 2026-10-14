@@ -11,6 +11,9 @@ instead of one row per alert. No tkinter here, so it is tested without a display
   their board ID (``SIM-41``), so incident IDs read ``INC-999000001-1`` and
   ``INC-SIM-41-1``.
 * Status changes go through ``argus.incidents.set_status`` only.
+* Story contacts (``brain_board.STORY_ITEMS``) appear when their fictional
+  track starts and are scored at every replay step by the registered
+  detectors on that track, like the exercise vessel.
 * ``Replay`` runs the board on the exercise replay clock: forwards in steps,
   and backwards by rebuilding from the start and re-applying the analyst's
   earlier decisions (``argus.incidents`` itself never goes back in time).
@@ -29,7 +32,7 @@ instead of one row per alert. No tkinter here, so it is tested without a display
 from __future__ import annotations
 
 from argus import incidents, responders
-from argus.brain_board import reassess, rescore_exercise, update
+from argus.brain_board import reassess, rescore_exercise, rescore_story, update
 from argus.levels import LEVEL_NAMES, RANK
 from argus.prediction import position_at
 
@@ -171,10 +174,13 @@ class Replay:
         return wind["storm_kn"] if self.storm else wind["normal_kn"]
 
     def position(self, item: dict):
-        """Position function of the item: its scenario track (dark gaps predicted), else dead reckoning."""
-        if item.get("exercise"):
-            vessel = next(v for v in self.scenario["vessels"] if v["mmsi"] == item["alert"]["mmsi"])
-            track, first = vessel["track"], vessel["track"][0]
+        """Position function of the item: its timed track (dark gaps predicted), else dead reckoning."""
+        if item.get("exercise") or item.get("story"):
+            if item.get("story"):
+                track = item["story"]["track"]
+            else:
+                track = next(v for v in self.scenario["vessels"] if v["mmsi"] == item["alert"]["mmsi"])["track"]
+            first = track[0]
 
             def at(t):
                 fix = position_at(track, t)
@@ -211,6 +217,8 @@ class Replay:
     def appear_s(self, item: dict) -> float:
         if item.get("exercise"):
             return float("-inf")
+        if item.get("story"):
+            return item["story"]["start_s"]
         return self.start_s - item.get("raised_min_ago", 0) * 60
 
     def present(self, item: dict) -> bool:
@@ -224,6 +232,8 @@ class Replay:
         for item in self.items:
             if item.get("exercise"):
                 rescore_exercise(item, self.scenario, t)
+            elif item.get("story"):
+                rescore_story(item, t)  # before its track starts: no findings, so no stale level
         self.now = t
         self._respond(t)
         events = self.tracker.step([item for item in self.items if t >= self.appear_s(item)], t)

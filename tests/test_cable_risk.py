@@ -75,7 +75,7 @@ class AnchorDragWithoutGap(unittest.TestCase):
         self.assertEqual(finding["related"]["cable_id"], "test-line")
         self.assertEqual(finding["label"], "simulated")
         self.assertIn("cause unknown", finding["reasons"][0])
-        self.assertIn("rule: ≥20% and ≥20°", " ".join(finding["reasons"]))
+        self.assertIn("rule: ≥20% and ≥20° while under way", " ".join(finding["reasons"]))
         codes = {factor["code"] for factor in assess(obs)["factors"]}
         self.assertIn("B1", codes)
 
@@ -121,8 +121,10 @@ class AnchorReachableSection(unittest.TestCase):
 class LineBehaviour(unittest.TestCase):
     def test_loitering_an_hour_beside_the_line_is_b4(self):
         fixes = track(south_of(1.5), [(80, 1.0, lambda m: m * 9)])
+        fixes = track(south_of(6.5), [(30, 10.0, 0)]) + [{**fix, "t": fix["t"] + 1800} for fix in fixes]  # arrives, then circles
         obs = detect(fixes, [line()])[0]["obs"]
         self.assertGreaterEqual(obs["loiter_hours"], 1.0)
+        self.assertNotIn("speed_drop_pct", obs)  # circling slowly is loitering, not an anchor drag under way
         self.assertIn("B4", {factor["code"] for factor in assess(obs)["factors"]})
 
     def test_three_passes_in_six_hours_is_b5(self):

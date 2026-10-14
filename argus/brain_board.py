@@ -12,6 +12,15 @@ identity in two places (SIM-45), a small craft with an inland fix (SIM-46) and
 a single GPS glitch that must not count as spoofing (SIM-47). One more slows
 towards a line, crosses it and moves away (SIM-48), so its incident goes quiet.
 
+Four more are stories on the exercise replay clock (SIM-50 to SIM-53): fictional
+AIS tracks, one fix a minute, that Brain itself scores at every replay step
+with the registered detectors (``argus.assemble.DETECTORS``) against the
+illustrative routes, like the exercise vessel. Nothing about them is written by
+hand except the track: an anchor-drag approach to EWIC without an AIS gap
+(SIM-50), a ship holding beside the North Dublin cable cluster and then
+anchoring (SIM-51), and two innocent ones, a ship at anchor in Dublin Bay
+outside every corridor (SIM-52) and a fast ferry crossing the lines (SIM-53).
+
 ``update`` is a pure function of the board time, so a replay can move the
 board forwards or backwards; ``rescore_exercise`` re-scores the exercise
 vessel at a replay time.
@@ -21,6 +30,8 @@ contacts. Nothing here reads live AIS or sends anything.
 """
 
 from __future__ import annotations
+
+import math
 
 from argus import alert_board
 from argus.alert_board import LINES, _item, sort_key
@@ -129,6 +140,88 @@ PASSING_ITEMS = [
      {"distance_nm": 3.0}, "Crossed Greenlink at steady speed and is moving away"),
 ]
 
+# Illustrative routes as detector lines. Their depth is unknown, so cable_risk assumes an anchor
+# reaches the seabed along the whole route and says so in its findings.
+STORY_LINES = [{"id": line_id, "name": name, "kind": kind, "label": "illustrative",
+                "path": [list(point) for point in path], "anchor_reachable": None, "min_depth_m": None}
+               for line_id, (name, kind, path) in LINES.items()]
+
+
+def _on_line(line_id: str, lon: float) -> float:
+    """Latitude of an illustrative route at a longitude (routes run east-west)."""
+    path = LINES[line_id][2]
+    for (lat0, lon0), (lat1, lon1) in zip(path, path[1:]):
+        if min(lon0, lon1) <= lon <= max(lon0, lon1):
+            return lat0 + (lat1 - lat0) * (lon - lon0) / (lon1 - lon0)
+    raise ValueError(f"{lon} is outside {line_id}")
+
+
+def _timed_track(start_t: int, start: tuple[float, float], legs) -> list[dict]:
+    """Fixes once a minute from replay time ``start_t``; legs are (minutes, SOG kn, COG or COG(minute), nav status)."""
+    (lat, lon), t, fixes = start, start_t, []
+    for minutes, sog, cog, status in legs:
+        for minute in range(minutes):
+            course = (cog(minute) if callable(cog) else cog) % 360
+            fixes.append({"t": t, "lat": round(lat, 5), "lon": round(lon, 5), "sog_kn": sog,
+                          "cog_deg": round(course, 1), **({"nav_status": status} if status else {})})
+            lat, lon = step(lat, lon, course, sog / 60)
+            t += 60
+    return fixes
+
+
+def _yaw(course: float):
+    """An unsteady course: +/-15 degrees about ``course``."""
+    return lambda minute: course + 15 * math.sin(minute / 2)
+
+
+def _drag_story() -> list[dict]:
+    """North across the Dublin–Holyhead route at 12 kn, then 9 kn with a yawing course onto EWIC; no AIS gap."""
+    start = (_on_line("dublin-holyhead", -5.27) - 7 / 60, -5.27)
+    return _timed_track(75 * 60, start, [(37, 12.0, 5, None), (6, 9.0, 5, None), (25, 9.0, _yaw(5), None),
+                                         (15, 6.0, _yaw(5), None), (60, 12.0, 90, None)])
+
+
+def _hold_story() -> list[dict]:
+    """Arrives, circles at 0.8 kn 1.5 nm from the North Dublin cluster for 75 min, then anchors 0.8 nm from it."""
+    spot = (_on_line("north-dublin", -5.0) + 1.5 / 60, -5.0)
+    return _timed_track(50 * 60, step(*spot, 45, 2.5), [
+        (15, 10.0, 225, None), (75, 0.8, lambda minute: minute * 6, None), (10, 4.0, 180, None),
+        (90, 0.1, 180, "at anchor")])
+
+
+def _anchorage_story() -> list[dict]:
+    """At anchor in south Dublin Bay, about 3 nm from the nearest route, swinging on its anchor."""
+    return _timed_track(80 * 60, (53.30, -6.06),
+                        [(150, 0.1, lambda minute: 200 + 20 * math.sin(minute / 9), "at anchor")])
+
+
+def _ferry_story() -> list[dict]:
+    """A fast ferry crossing the lines towards the Isle of Man at a steady 19 kn."""
+    return _timed_track(95 * 60, (53.33, -6.00), [(70, 19.0, 60, None)])
+
+
+# Stories on the replay clock: (alert_board._item row, AIS class, track builder). The row's position,
+# course and speed are replaced by the track at each replay time; observations come only from detectors.
+STORY_ITEMS = [
+    (("SIM-50", "VESNA DRIFT", "General cargo", 190, "ewic", 0, 0, 0, 0, 0, "line",
+      "Slowing and yawing across EWIC without an AIS gap",
+      "Hail on VHF 16 and ask the master to confirm both anchors are secured; send the nearest drone for eyes on.",
+      {}), "A", _drag_story),
+    (("SIM-51", "HOLM SENTINEL", "General cargo", 165, "north-dublin", 0, 0, 0, 0, 0, "line",
+      "Holding beside the North Dublin cable cluster, then anchoring next to it",
+      "Ask the master why the ship is holding there and to anchor clear of the charted cables.",
+      {}), "A", _hold_story),
+    (("SIM-52", "LAMBAY ROSE", "Bulk carrier", 210, "dublin-holyhead", 0, 0, 0, 0, 0, "line",
+      "At anchor in Dublin Bay, outside every cable corridor",
+      "Normal anchorage use; no action.",
+      {}), "A", _anchorage_story),
+    (("SIM-53", "SKERRIES DART", "Passenger ferry", 98, "north-dublin", 0, 0, 0, 0, 0, "line",
+      "Fast ferry crossing the cable corridors at a steady speed",
+      "Normal transit; no action.",
+      {}), "A", _ferry_story),
+]
+STORY_TRAIL_S = 3 * 3600  # the map trail shows the window the detectors read
+
 # Board-only detectors whose reasons are already the item's title; other detectors' reasons become notes.
 QUIET_DETECTORS = frozenset({"alert_board_simulated", "legacy_cable_v1"})
 DETECTOR_NOTE_REASONS = 4
@@ -191,8 +284,38 @@ def _rescore(item: dict, result: dict) -> None:
                 findings=[_finding_summary(f) for f in result["findings"]])
 
 
+def story_vessel(item: dict) -> dict:
+    """The fictional AIS vessel behind a story item, as the detectors read it."""
+    return {**_vessel(item, item.get("ais_class", "A")), "track": item["story"]["track"]}
+
+
+def rescore_story(item: dict, now: float) -> None:
+    """Score a story on its track up to replay time ``now`` with the registered detectors; move it on the map."""
+    track = item["story"]["track"]
+    _rescore(item, assess_vessel(story_vessel(item), {"now": int(now), "cables": STORY_LINES}))
+    seen = [fix for fix in track if fix["t"] <= now]
+    if seen:
+        last = seen[-1]
+        item.update(lat=last["lat"], lon=last["lon"], cog_deg=last["cog_deg"], sog_kn=last["sog_kn"],
+                    track=[(fix["lat"], fix["lon"]) for fix in seen if fix["t"] >= now - STORY_TRAIL_S][:-1])
+    if item.get("cable_id") in LINES:
+        item["line_id"], item["line_name"] = item["cable_id"], LINES[item["cable_id"]][0]
+    # The story's title only once Brain sees behaviour; before that the card says what it does see.
+    if item["assessment"]["groups"]["B"]:
+        item["title"] = item["story"]["title"]
+    else:
+        distance = item["observations"].get("distance_nm")
+        where = f"{distance:.1f} nm from {item['line_name']}" if distance is not None else "far from every line"
+        doing = ("At anchor" if seen and last.get("nav_status") == "at anchor"
+                 else f"Under way at {last['sog_kn']:.0f} kn" if seen else "Not seen yet")
+        item["title"] = f"{doing}, {where}: no behaviour cue"
+
+
 def build_board(scenario: dict | None = None, alerts: list | None = None) -> list[dict]:
-    """Same items as ``alert_board.build_board`` plus eight extras, scored through ``argus.assemble``."""
+    """Same items as ``alert_board.build_board`` plus twelve extras, scored through ``argus.assemble``.
+
+    Story items are scored at the end of their track here; a replay scores them at its own time.
+    """
     items = alert_board.build_board(scenario, alerts)
     other_lines, tracks = {}, {}
     for row, ais_class, others in EXTRA_ITEMS:
@@ -209,9 +332,15 @@ def build_board(scenario: dict | None = None, alerts: list | None = None) -> lis
                            "after": ({"asset_class": item["observations"]["asset_class"], **observations_then},
                                      title_then)}
         items.append(item)
+    for row, ais_class, make_track in STORY_ITEMS:
+        track = make_track()
+        items.append({**_item(*row), "ais_class": ais_class, "source": "track",
+                      "story": {"track": track, "start_s": track[0]["t"], "title": row[11]}})
     context = context_from_scenario(scenario) if scenario else {}
     for item in items:
-        if item.get("exercise"):
+        if item.get("story"):
+            rescore_story(item, item["story"]["track"][-1]["t"])
+        elif item.get("exercise"):
             vessel = next(v for v in scenario["vessels"] if v["mmsi"] == item["alert"]["mmsi"])
             _rescore(item, assess_vessel(vessel, context))
         else:

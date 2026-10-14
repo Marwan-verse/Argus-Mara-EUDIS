@@ -100,10 +100,34 @@ def threatened_line(item: dict) -> dict:
             "others": others}
 
 
+# Where a contact's observations come from: (short card tag, review-window tag, what it means).
+SOURCES = {
+    "story": ("BRAIN", "BRAIN · FROM TRACK",
+              "Brain · from track: the registered detectors scored this fictional AIS track at the replay time"),
+    "exercise": ("EXERCISE", "EXERCISE · FROM TRACK",
+                 "Exercise · from track: the registered detectors scored the exercise vessel's AIS track"),
+    "sim": ("SIM", "SIM · HAND-WRITTEN",
+            "SIM · hand-written observations: the board's observations for this contact were written by hand"),
+}
+
+
+def source(item: dict) -> dict:
+    """Where the contact's observations come from, for the card, the map label and the review window."""
+    key = "story" if item.get("story") else "exercise" if item.get("exercise") else "sim"
+    tag, long_tag, text = SOURCES[key]
+    return {"key": key, "tag": tag, "long_tag": long_tag, "text": text,
+            "short": "from track" if key != "sim" else "hand-written"}
+
+
 def labels(item: dict) -> list[tuple[str, str]]:
     """Data labels for the review window: (tag, what it covers)."""
-    found = []
-    if item.get("exercise"):
+    found = [("SOURCE", source(item)["text"])]
+    if item.get("story"):
+        found.append(("SIMULATED", "Vessel and AIS track are fictional; no observation is written by hand"))
+        found.append(("ILLUSTRATIVE", "The cable route is drawn for illustration"))
+        found.append(("ASSUMPTION", "Route depth unknown: an anchor is assumed to reach the seabed along the whole "
+                                    "route; AIS ship type and class are assumed for this fictional contact"))
+    elif item.get("exercise"):
         found.append(("EXERCISE", "Fictional exercise vessel and track from the demo files"))
         found.append(("ILLUSTRATIVE", "The cable is fictional"))
     else:
@@ -123,4 +147,4 @@ def explain(item: dict) -> dict:
     """Everything the review window shows under "Why this level"."""
     return {"basis": item["assessment"]["basis"], "groups": groups(item), "rules": rules(item),
             "findings": findings(item), "small_vessel": small_vessel(item), "line": threatened_line(item),
-            "labels": labels(item)}
+            "labels": labels(item), "source": source(item)}

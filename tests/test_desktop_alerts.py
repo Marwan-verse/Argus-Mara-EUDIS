@@ -55,14 +55,15 @@ class DesktopAlertBoardTests(unittest.TestCase):
         ranks = [RANK[board.by_id[key]['assessment']['level']] for key in order]
         self.assertEqual(ranks, sorted(ranks, reverse=True))
         # SIM-06, SIM-44 and SIM-48 are raised one level: no responder reaches them before their line ETA.
+        # Stories SIM-50 to SIM-52 are watched at T+90 (SIM-53 starts at T+95).
         self.assertEqual([board.tiles[f'{level}-count'].cget('text') for level in ('critical', 'high', 'medium', 'low')],
-                         ['6', '6', '10', '27'])
+                         ['6', '6', '10', '30'])
         self.assertEqual(board.cards['SIM-01']['stripe'].cget('bg'), STYLE['critical'][0])
         self.assertIn('In corridor', board.cards['SIM-01']['eta'].cget('text'))
         self.assertIn('22 new', app.alert_counts_label.cget('text'))
         self.assertEqual(board.summary.cget('text'), '22 open · 0 escalated')
         self.assertEqual(self.flags('SIM-45'), ['AIS spoofing?'])
-        self.assertEqual(len(self.map_tags('sim-alert:')), len(board.items))
+        self.assertEqual(len(self.map_tags('sim-alert:')), len(board.items) - 1)  # SIM-53 starts at T+95
         badge = next(item for item in app.map.find_withtag('sim-badge') if app.map.type(item) == 'text')
         self.assertIn('SIMULATED', app.map.itemcget(badge, 'text'))
         board.set_filter('critical')
@@ -72,14 +73,14 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertIsNone(board.level_filter)
         board.set_filter('low')
         self.assertIn('SIM-40', self.packed_cards())
-        self.assertEqual(len(self.packed_cards()), 27)
+        self.assertEqual(len(self.packed_cards()), 30)  # with stories SIM-50 to SIM-52
         self.assertEqual(self.flags('SIM-40'), ['Small craft · capped Low'])
         board.set_filter(None)
         board.toggle_watching()
-        self.assertEqual(len(self.packed_cards()), len(board.items))
+        self.assertEqual(len(self.packed_cards()), len(board.items) - 1)  # SIM-53 is not raised until T+95
         board.sort_mode.set('Time to asset')
         board.relayout(top=True)
-        self.assertEqual(len(self.packed_cards()), len(board.items))
+        self.assertEqual(len(self.packed_cards()), len(board.items) - 1)
 
     def test_review_escalate_withdraw_and_reject_go_through_incidents(self):
         app, board, dialog = self.app, self.board, self.board.dialog

@@ -5,7 +5,9 @@ Brain (``argus.brain_board``: the assembler's detectors, the small-vessel rule
 and the AIS spoofing detector) and folds the scores into ``argus.incidents``
 (``argus.incident_board``). A contact at Medium or above is one updatable
 incident card; Low and None contacts are watched, not incidents. Each is marked
-EXERCISE or SIM in its card, in its review window and on the map. Acknowledge,
+by its source in its card, in its review window and on the map: EXERCISE, BRAIN
+(a fictional story track that the detectors score at the replay time, "from
+track") or SIM (hand-written simulated observations). Acknowledge,
 escalate and reject go through ``argus.incidents.set_status`` and stay in this
 session; nothing is transmitted.
 
@@ -29,7 +31,7 @@ import customtkinter as ctk
 from argus import responders
 from argus.alert_board import line_path, sort_key
 from argus.brain_board import build_board, update
-from argus.explain import explain
+from argus.explain import explain, source
 from argus.incident_board import OPEN_RANK, Replay
 from argus.incidents import QUIET_CLOSE_S, REASONS, STATUSES
 from argus.levels import LEVEL_NAMES, RANK
@@ -52,7 +54,7 @@ MARKER_SIZE = {"critical": 1.7, "high": 1.5, "medium": 1.25, "low": 1.0}
 # Data-label tags in the review window as (text colour, background).
 CHIP = {"SIMULATED": ("#c3ced6", "#2a3542"), "EXERCISE": ("#e1b164", "#34301f"), "REAL": ("#47c7da", "#173339"),
         "ASSUMPTION": ("#d8b25c", "#34301f"), "ILLUSTRATIVE": ("#a8b6c2", "#1c2a36"),
-        "RULE OUTCOME": ("#a8b6c2", "#1c2a36")}
+        "RULE OUTCOME": ("#a8b6c2", "#1c2a36"), "SOURCE": ("#47c7da", "#173339")}
 DETECTOR_REASONS = 4
 # Responder colours: arrives before the earliest line ETA, arrives after it, cannot go.
 IN_TIME, LATE, UNAVAILABLE = "#47c7da", "#ec8a3c", "#7d8b97"
@@ -75,9 +77,9 @@ def age_text(minutes: float) -> str:
 
 
 def countdown(item: dict) -> str | None:
-    """mm:ss to the asset for a contact with a simulated ETA, else None."""
+    """mm:ss to the asset for a contact with a simulated ETA or a story ETA from its track, else None."""
     eta = item["observations"].get("eta_min")
-    if eta is None or item.get("eta_start_min") is None:
+    if eta is None or (item.get("eta_start_min") is None and not item.get("story")):
         return None
     seconds = max(0, int(eta * 60))
     return f"{seconds // 60:02d}:{seconds % 60:02d}"
@@ -294,9 +296,9 @@ class AlertBoard:
         top.pack(fill="x")
         name = tk.Label(top, text=item["name"], bg=ui.CARD, fg=ui.INK, font=self.name_font, anchor="w")
         name.pack(side="left")
-        tag = tk.Label(top, text="EXERCISE" if item.get("exercise") else "SIM", bg=ui.CARD, fg=ui.MUTED,
-                       font=(SANS, 7, "bold"))
+        tag = tk.Label(top, text=source(item)["tag"], bg=ui.CARD, fg=ui.MUTED, font=(SANS, 7, "bold"))
         tag.pack(side="right")
+        self.app.tools.attach_tooltip(tag, source(item)["text"])
         eta = tk.Label(top, bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9))
         eta.pack(side="right", padx=(0, 8))
         reason = tk.Label(body, text="", bg=ui.CARD, fg=SECONDARY, font=self.reason_font, anchor="w")
@@ -511,6 +513,7 @@ class AlertBoard:
             parts = [f"Rejected · {incident['status_reason']}"]
         else:
             parts = [status]
+        parts.append(source(item)["short"])  # with the BRAIN/SIM tag: "Brain · from track" or "SIM · hand-written"
         if incident and not closed and RANK[incident["peak_level"]] > RANK[incident["level"]]:
             parts.append(f"peak {LEVEL_NAMES[incident['peak_level']]}")
         parts.append(item["line_name"])
@@ -566,7 +569,7 @@ class AlertBoard:
                 texts["eta"] = (eta, ticking)
                 # The name gives way to the timer and the SIM/EXERCISE tag on a narrow panel.
                 room = (self.wrap + 30 - (self.timer_font if ticking else self.meta_font).measure(eta) - 16
-                        - self.tag_font.measure("EXERCISE" if item.get("exercise") else "SIM"))
+                        - self.tag_font.measure(source(item)["tag"]))
                 card["name"].configure(text=clip(item["name"], self.name_font, max(60, room)))
 
     def hover(self, identifier: str, inside: bool) -> None:
@@ -887,8 +890,9 @@ class AlertBoard:
         news = [f"{self.by_id[i]['name']} " + ("incident opened" if "opened" in found else
                 "review again" if "review_again" in found else "quiet: close?" if "quiet" in found
                 else f"now {LEVEL_NAMES[self.incident(i)['level']]}") for i, found in events.items()]
-        if rewound or touched or self.replay.assignments:
-            self.app._draw_map()  # sent assets move with the replay clock
+        moving = any(item.get("story") and self.replay.present(item) for item in self.items)
+        if rewound or touched or self.replay.assignments or moving:
+            self.app._draw_map()  # sent assets and story vessels move with the replay clock
         if news:
             self.app.map_status_label.configure(text=f"{self.stamp(self.replay.now)} · " + " · ".join(news[:4]))
         if self.dialog.item and (rewound or self.dialog.item["id"] in touched):
@@ -974,7 +978,7 @@ class AlertBoard:
             if item["id"] == self.selected:
                 app.map.create_oval(x - 18, y - 18, x + 18, y + 18, outline=ui.INK, width=2, tags=tags)
             if level in ("critical", "high") or item["id"] == self.selected:
-                tag = "EXERCISE" if item.get("exercise") else "SIM"
+                tag = source(item)["tag"]
                 labels.append((item["id"] != self.selected, -item["assessment"]["rank"], -item["assessment"]["score"],
                                f"{item['name']} · {tag}", x, y, colour, tags))
         # The selected contact labels first, then critical and high; a label that would overlap is left out.
@@ -1233,7 +1237,7 @@ class ReviewDialog:
             level += f"  ·  PEAK {LEVEL_NAMES[incident['peak_level']].upper()}"
         self.level.configure(text=level, fg=STYLE[assessment["level"]][0])
         self.score.configure(text=f"Score {assessment['score']}" + (f"  ·  {incident['id']}" if incident else ""))
-        self.tag.configure(text="EXERCISE" if item.get("exercise") else "SIMULATED")
+        self.tag.configure(text=source(item)["long_tag"])
         self.name.configure(text=item["name"])
         meta = [item["vessel_type"]]
         if item.get("length_m"):

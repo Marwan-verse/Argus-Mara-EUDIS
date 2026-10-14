@@ -63,8 +63,17 @@ class ExplainTests(unittest.TestCase):
 
     def test_data_labels_show_simulated_real_and_assumptions(self):
         tags = self.tags(explain(self.by_id["SIM-46"]))
-        self.assertEqual(tags, ["SIMULATED", "ILLUSTRATIVE", "ASSUMPTION", "ASSUMPTION", "REAL", "RULE OUTCOME"])
-        self.assertEqual(self.tags(explain(self.by_id["A1"])), ["EXERCISE", "ILLUSTRATIVE", "RULE OUTCOME"])
+        self.assertEqual(tags, ["SOURCE", "SIMULATED", "ILLUSTRATIVE", "ASSUMPTION", "ASSUMPTION", "REAL",
+                                "RULE OUTCOME"])
+        self.assertEqual(self.tags(explain(self.by_id["A1"])), ["SOURCE", "EXERCISE", "ILLUSTRATIVE", "RULE OUTCOME"])
+
+    def test_source_tells_brain_from_track_and_hand_written_apart(self):
+        story, sim = explain(self.by_id["SIM-50"]), explain(self.by_id["SIM-01"])
+        self.assertEqual((story["source"]["tag"], story["source"]["short"]), ("BRAIN", "from track"))
+        self.assertTrue(story["labels"][0][1].startswith("Brain · from track"))
+        self.assertEqual((sim["source"]["tag"], sim["source"]["short"]), ("SIM", "hand-written"))
+        self.assertTrue(sim["labels"][0][1].startswith("SIM · hand-written observations"))
+        self.assertEqual([f["detector"] for f in story["findings"]], ["cable_risk"])
         self.assertNotIn("REAL", self.tags(explain(self.by_id["SIM-47"])))  # glitch: no on-land check reason
 
 

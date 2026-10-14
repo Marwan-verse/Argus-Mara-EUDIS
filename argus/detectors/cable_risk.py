@@ -27,7 +27,7 @@ from __future__ import annotations
 import math
 from statistics import median
 
-from argus.countdown import _cross_fraction, nm_between, project_to_cable
+from argus.countdown import _cross_fraction, nm_between, step
 from argus.levels import CRITICAL_ASSETS
 from argus.prediction import (anchor_reachable_path, distance_to_path_nm, earliest_possible_contact_s,
                               v_max_kn)
@@ -42,6 +42,8 @@ DARK_S = 10 * 60  # no fix for this long: the vessel is dark
 NEAR_ETA_MIN, NEAR_NM = 360, 5.0  # a finding only for lines this close (P3 in argus.levels)
 CORRIDOR_NM = 1.0
 EARLIEST_SPEED_FACTOR = 1.2  # same as argus.brain's earliest ETA
+HORIZON_S, LEG_S = 3 * 3600, 15 * 60  # same horizon as argus.countdown.project_to_cable, in 15 min legs
+ETA_MIN_KN = 2.0  # slower, a projected course is noise (a drifting or circling ship): distance and corridor speak
 BASELINE_GAP_S = 30 * 60  # baseline speed and course: fixes older than this...
 BASELINE_MIN_FIXES = 5  # ...at least this many of them
 BASELINE_MIN_KN = 5.0  # a slowdown needs a vessel that was under way
@@ -49,6 +51,7 @@ RECENT_S = 10 * 60  # current speed: median of these minutes
 TURN_S = 30 * 60  # course change looked for in these minutes
 DROP_PCT, TURN_DEG = 20, 20  # B1 and B11, as argus.levels scores them
 DRAG_NEAR_NM, DRAG_NEAR_ETA_MIN = 5.0, 120  # B1 counts only this close to the section
+DRAG_MIN_KN = 3.0  # B1 is a pattern under way (now and through the 30 min); slower is loitering (B4) or anchoring (B7)
 SLOWDOWN_NM = 5.0  # B11
 DRAG_ANCHOR_KN, DRAG_ANCHOR_NM, DRAG_ANCHOR_MOVED_NM = 0.5, 2.0, 0.2  # B2
 LOITER_KN, LOITER_NM, LOITER_HOURS = 3.0, 2.0, 1.0  # B4
@@ -143,11 +146,13 @@ def speed_and_course(fixes: list[dict], now: float) -> dict | None:
     if base_kn < BASELINE_MIN_KN:
         return None
     course = _mean_course([f["cog_deg"] for f in block if f.get("cog_deg") is not None] or [0])
-    turning = [f["cog_deg"] for f in fixes if f["t"] > now - TURN_S and f.get("cog_deg") is not None]
+    window = [f for f in fixes if f["t"] > now - TURN_S and f.get("cog_deg") is not None]
+    turning = [f["cog_deg"] for f in window]
     off_course = max((_angle(c, course) for c in turning), default=0)
     spread = max((_angle(a, b) for a in turning for b in turning), default=0)  # yaw within the last 30 min
     return {"base_kn": base_kn, "now_kn": now_kn, "drop_pct": (base_kn - now_kn) / base_kn * 100,
-            "turn_deg": max(off_course, spread), "base_course": course}
+            "turn_deg": max(off_course, spread), "base_course": course,
+            "turn_kn": median(f["sog_kn"] for f in window if f.get("sog_kn") is not None) if window else 0}
 
 
 def _passes(fixes: list[dict], path: list) -> int:
@@ -157,6 +162,25 @@ def _passes(fixes: list[dict], path: list) -> int:
         if any(_cross_fraction(p, q, s, e) is not None for s, e in zip(path, path[1:])):
             count += 1
     return count
+
+
+def crossing_s(lat: float, lon: float, course_deg: float, sog_kn: float, path: list,
+               horizon_s: int = HORIZON_S, leg_s: int = LEG_S) -> int | None:
+    """Seconds to the first crossing of ``path`` at constant course and speed within the horizon, else None.
+
+    The same estimate as ``argus.countdown.project_to_cable`` on its local approximation, in 15 min legs
+    instead of 60 s steps (they agree within about 15 s over 3 h), so ten lines a replay step stay cheap.
+    """
+    here = (lat, lon)
+    for start in range(0, horizon_s, leg_s):
+        span = min(leg_s, horizon_s - start)
+        end = step(*here, course_deg, sog_kn * span / 3600)
+        fractions = [fraction for a, b in zip(path, path[1:])
+                     if (fraction := _cross_fraction(here, end, a, b)) is not None]
+        if fractions:
+            return int(start + min(fractions) * span)
+        here = end
+    return None
 
 
 def eta_to(last: dict, path: list, now: float, track: list[dict]) -> tuple[float | None, str | None]:
@@ -170,12 +194,12 @@ def eta_to(last: dict, path: list, now: float, track: list[dict]) -> tuple[float
         return max(0.0, seconds / 60), (f"dark {since // 60:.0f} min: worst case straight line at assumed "
                                         f"v_max {v_max:.0f} kn from the last fix")
     sog, cog = last.get("sog_kn"), last.get("cog_deg")
-    if not sog or cog is None:
+    if not sog or sog < ETA_MIN_KN or cog is None:
         return None, None
-    earliest_s, _ = project_to_cable(last["lat"], last["lon"], cog, sog * EARLIEST_SPEED_FACTOR, path)
+    earliest_s = crossing_s(last["lat"], last["lon"], cog, sog * EARLIEST_SPEED_FACTOR, path)
     if earliest_s is None:
         return None, None
-    expected_s, _ = project_to_cable(last["lat"], last["lon"], cog, sog, path)
+    expected_s = crossing_s(last["lat"], last["lon"], cog, sog, path)
     expected = f"{(expected_s - since) / 60:.0f} min" if expected_s is not None else "beyond 3 h"
     return max(0.0, (earliest_s - since) / 60), (f"constant course {cog:.0f}° at {EARLIEST_SPEED_FACTOR}× "
                                                  f"{sog:.1f} kn (expected at observed speed: {expected})")
@@ -194,11 +218,13 @@ def _behaviour(vessel: dict, fixes: list[dict], passes_fixes: list[dict], path: 
 
     if motion and motion["drop_pct"] >= DROP_PCT:
         close = last_nm <= DRAG_NEAR_NM or (eta is not None and eta <= DRAG_NEAR_ETA_MIN)
-        if close and motion["turn_deg"] >= TURN_DEG:
+        under_way = min(motion["now_kn"], motion["turn_kn"]) > DRAG_MIN_KN  # yawed while under way, not circling
+        if close and motion["turn_deg"] >= TURN_DEG and under_way:
             obs.update(speed_drop_pct=round(motion["drop_pct"]), course_change_deg=round(motion["turn_deg"]))
             reasons.append(f"Speed fell {motion['drop_pct']:.0f}% ({motion['base_kn']:.1f} → {motion['now_kn']:.1f} kn) "
                            f"and course varied {motion['turn_deg']:.0f}° in {TURN_S // 60} min "
-                           f"(rule: ≥{DROP_PCT}% and ≥{TURN_DEG}°) {last_nm:.1f} nm from the line; cause unknown.")
+                           f"(rule: ≥{DROP_PCT}% and ≥{TURN_DEG}° while under way above {DRAG_MIN_KN:g} kn) "
+                           f"{last_nm:.1f} nm from the line; cause unknown.")
         elif last_nm <= SLOWDOWN_NM:
             obs["slowdown_near_corridor"] = True
             reasons.append(f"Speed fell {motion['drop_pct']:.0f}% ({motion['base_kn']:.1f} → {motion['now_kn']:.1f} kn) "
@@ -229,7 +255,8 @@ def _behaviour(vessel: dict, fixes: list[dict], passes_fixes: list[dict], path: 
         reasons.append(f"Crossed the line {passes}× in {PASSES_WINDOW_S // 3600} h (rule: ≥{PASSES_MIN}); "
                        "cause unknown.")
 
-    slow_min = _minutes(fixes, lambda f: (f.get("sog_kn") or 0) <= SLOW_KN and within(CORRIDOR_NM)(f))
+    slow_min = _minutes(fixes, lambda f: (f.get("sog_kn") or 0) <= SLOW_KN and within(CORRIDOR_NM)(f)
+                        and not _at_anchor(f, vessel))  # at anchor is B7
     if slow_min >= SLOW_MIN:
         obs["slow_over_corridor_min"] = round(slow_min)
         reasons.append(f"{slow_min:.0f} min at {SLOW_KN:g} kn or less inside the {CORRIDOR_NM:g} nm corridor "
