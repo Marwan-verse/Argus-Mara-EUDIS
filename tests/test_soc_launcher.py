@@ -1,4 +1,5 @@
 """Local startup boundaries, process isolation and native mode selection."""
+import gc
 import os
 import sys
 from pathlib import Path
@@ -12,7 +13,11 @@ from unittest.mock import Mock, patch
 import customtkinter as ctk
 
 from argus import soc_launcher as launcher
+from argus.collab_client import ClientError
 from desktop_soc import login_screen
+
+SAVED = {'url': 'https://soc.example.invalid', 'token': 'synthetic-token-' + 'x' * 27,
+         'username': 'marwan', 'ca_file': None}
 
 
 class LocalStartupTests(unittest.TestCase):
@@ -93,6 +98,10 @@ class LocalStartupTests(unittest.TestCase):
 
 class StartupScreenTests(unittest.TestCase):
     def setUp(self):
+        # Collect earlier tests' Tk objects here, on the main thread. If a background
+        # sign-in job collects them instead, a Font.__del__ waits forever on its
+        # destroyed interpreter.
+        gc.collect()
         try:
             self.root = ctk.CTk()
         except tk.TclError as error:
@@ -116,12 +125,78 @@ class StartupScreenTests(unittest.TestCase):
                     return found
         return walk(self.root)
 
+    def widgets(self, kind):
+        def walk(widget):
+            for child in widget.winfo_children():
+                if isinstance(child, kind):
+                    yield child
+                yield from walk(child)
+        return list(walk(self.root))
+
     def pump_until(self, predicate):
         deadline = time.monotonic() + 3
         while not predicate() and time.monotonic() < deadline:
             self.root.update()
             time.sleep(.02)
         self.assertTrue(predicate())
+
+    def sign_in_with_box(self, ticked):
+        logged_in = Mock()
+        with patch('desktop_soc.soc_session.load', return_value=None), \
+                patch('desktop_soc.soc_session.save', return_value=True) as save, \
+                patch('desktop_soc.soc_session.forget') as forget, \
+                patch('desktop_soc.SOCClient') as client:
+            login_screen(self.root, SAVED['url'], logged_in, remember=True)
+            self.pump_until(lambda: self.button('Sign in').cget('state') == 'normal')
+            url, username, password = self.widgets(ctk.CTkEntry)
+            username.insert(0, 'marwan')
+            password.insert(0, 'synthetic-password-42')
+            if not ticked:
+                self.widgets(ctk.CTkCheckBox)[0].deselect()
+            self.button('Sign in').invoke()
+            self.pump_until(lambda: logged_in.called)
+        client.return_value.login.assert_called_once_with('marwan', 'synthetic-password-42')
+        return client.return_value, save, forget
+
+    def test_saved_sign_in_opens_the_app_without_a_password(self):
+        logged_in = Mock()
+        with patch('desktop_soc.soc_session.load', return_value=SAVED), patch('desktop_soc.SOCClient') as client:
+            login_screen(self.root, '', logged_in, remember=True)
+            self.pump_until(lambda: logged_in.called)
+        client.assert_called_once_with(SAVED['url'], allow_loopback_http=False, ca_file=None)
+        client.return_value.resume.assert_called_once_with(SAVED['token'])
+        client.return_value.login.assert_not_called()
+        self.assertIs(logged_in.call_args.args[0], client.return_value)
+        self.assertIs(client.return_value.remember, True)
+
+    def test_expired_saved_sign_in_is_forgotten_and_asks_for_the_password(self):
+        logged_in = Mock()
+        with patch('desktop_soc.soc_session.load', return_value=SAVED), \
+                patch('desktop_soc.soc_session.forget') as forget, patch('desktop_soc.SOCClient') as client:
+            client.return_value.resume.side_effect = ClientError('Sign in required', 401)
+            login_screen(self.root, '', logged_in, remember=True)
+            self.pump_until(lambda: forget.called and self.button('Sign in').cget('state') == 'normal')
+        logged_in.assert_not_called()
+        url, username, password = self.widgets(ctk.CTkEntry)
+        self.assertEqual((url.get(), username.get(), password.get()), (SAVED['url'], 'marwan', ''))
+
+    def test_ticked_box_saves_the_sign_in(self):
+        client, save, forget = self.sign_in_with_box(ticked=True)
+        save.assert_called_once_with(client)
+        forget.assert_not_called()
+        self.assertIs(client.remember, True)
+
+    def test_unticked_box_forgets_any_saved_sign_in(self):
+        client, save, forget = self.sign_in_with_box(ticked=False)
+        save.assert_not_called()
+        forget.assert_called_once()
+
+    def test_second_demo_window_never_uses_a_saved_sign_in(self):
+        with patch('desktop_soc.soc_session.load', return_value=SAVED) as load:
+            login_screen(self.root, launcher.LOCAL_URL, Mock())
+            self.root.update()
+        load.assert_not_called()
+        self.assertEqual(self.widgets(ctk.CTkCheckBox), [])
 
     def test_offline_does_not_start_docker_or_authenticate(self):
         offline = Mock()
