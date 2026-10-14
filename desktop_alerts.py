@@ -887,8 +887,8 @@ class AlertBoard:
         news = [f"{self.by_id[i]['name']} " + ("incident opened" if "opened" in found else
                 "review again" if "review_again" in found else "quiet: close?" if "quiet" in found
                 else f"now {LEVEL_NAMES[self.incident(i)['level']]}") for i, found in events.items()]
-        if rewound or touched:
-            self.app._draw_map()
+        if rewound or touched or self.replay.assignments:
+            self.app._draw_map()  # sent assets move with the replay clock
         if news:
             self.app.map_status_label.configure(text=f"{self.stamp(self.replay.now)} · " + " · ".join(news[:4]))
         if self.dialog.item and (rewound or self.dialog.item["id"] in touched):
@@ -994,6 +994,7 @@ class AlertBoard:
                                STYLE[selected["assessment"]["level"]][0], ("sim-selected",), "n", occupied, force=False):
                     break
         self.draw_response(occupied)
+        self.draw_assigned(occupied)
         if items:
             text = f"SIMULATED · {len(items)} fictional contact{'s' if len(items) != 1 else ''}"
             label = app.map.create_text(20, 40, text=text, anchor="w", fill=ui.INK, font=(SANS, 9, "bold"),
@@ -1053,6 +1054,33 @@ class AlertBoard:
             else:
                 app.map.create_oval(x - r, y - r, x + r, y + r, fill=colour, outline=outline, width=1, tags=tags)
             self._label(x + r + 4 * px, y, row["id"], colour, tags, "w", occupied, force=row is shown)
+
+    def draw_assigned(self, occupied) -> None:
+        """Every sent asset at the replay time: preparing at its base, en route to the meeting point, on scene."""
+        app, ui = self.app, self.ui
+        px = ctk.ScalingTracker.get_widget_scaling(app.map)
+        for asset_id in self.replay.assignments:
+            where = self.replay.asset_track(asset_id, self.replay.now)
+            if where is None:
+                continue
+            tags = ("sim-asset", f"sim-asset:{asset_id}")
+            x, y = app._project(where["lat"], where["lon"])
+            if where["phase"] == "en route":
+                meet_x, meet_y = app._project(*where["meet"])
+                app.map.create_line(x, y, meet_x, meet_y, fill=IN_TIME, width=round(2 * px), dash=(6, 4), tags=tags)
+            r = 8 * px
+            shape = RESPONSE_SHAPE.get(where["asset"]["kind"], "circle")
+            if shape == "diamond":
+                app.map.create_polygon(x, y - r * 1.3, x + r * 1.3, y, x, y + r * 1.3, x - r * 1.3, y,
+                                       fill=IN_TIME, outline=ui.INK, width=2, tags=tags)
+            elif shape == "square":
+                app.map.create_rectangle(x - r, y - r, x + r, y + r, fill=IN_TIME, outline=ui.INK, width=2, tags=tags)
+            else:
+                app.map.create_oval(x - r, y - r, x + r, y + r, fill=IN_TIME, outline=ui.INK, width=2, tags=tags)
+            phase = {"preparing": f"preparing · {where['minutes_left']} min",
+                     "en route": f"en route · {where['minutes_left']} min",
+                     "on scene": f"on scene · {where['item']['name']}"}[where["phase"]]
+            self._label(x + r + 6 * px, y - r, f"{asset_id} {phase}", IN_TIME, tags, "w", occupied, force=True)
 
     def _label(self, x, y, text, colour, tags, anchor, occupied, force=True) -> bool:
         """Draw a boxed map label unless it would overlap one already drawn."""
@@ -1295,8 +1323,8 @@ class ReviewDialog:
         for child in self.body.winfo_children():
             child.destroy()
         wrap = round((float(self.frame.cget("width")) - 110) * self.px)
-        self.fill_responders(wrap)
         self.fill_why(explain(item), wrap)
+        self.fill_responders(wrap)
         self.heading("RECOMMENDED ACTION")
         tk.Label(self.body, text=item["recommendation"], bg=ui.CARD, fg=ui.INK, font=(SANS, 10), anchor="w",
                  justify="left", wraplength=wrap + 40).pack(fill="x", padx=(6, 0))
@@ -1327,8 +1355,8 @@ class ReviewDialog:
     def fill_responders(self, wrap: int) -> None:
         """Who can reach it: the storm switch, the card line, then every asset with minutes or a reason."""
         ui, item, board = self.ui, self.item, self.board
-        head = tk.Frame(self.body, bg=ui.CARD)
-        head.pack(fill="x", padx=(6, 0), pady=(4, 6))
+        head = self.responders_head = tk.Frame(self.body, bg=ui.CARD)
+        head.pack(fill="x", padx=(6, 0), pady=(16, 6))
         tk.Label(head, text="WHO CAN REACH IT", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 8, "bold")).pack(side="left")
         storm = board.replay.storm
         switch = ctk.CTkButton(
@@ -1351,7 +1379,7 @@ class ReviewDialog:
         if result["deadline_s"] is None:
             when = "Not approaching a line: eyes-on times only"
         elif result["at_line"]:
-            when = "Vessel is already at the line"
+            when = result["at_line_text"].capitalize()
         else:
             when = (f"Earliest line ETA {board.stamp(result['deadline_s'])} "
                     f"(in {responders.minutes(result['deadline_s'] - result['now'])} min)")
@@ -1516,6 +1544,18 @@ class ReviewDialog:
         self.choice.set(RECIPIENTS[0] if mode == "escalate" else REASONS[0])
         self.fill_actions()
         self.fill_form()
+        if mode == "escalate":
+            self.show_responders()
+
+    def show_responders(self) -> None:
+        """Scroll the review window to "Who can reach it", so escalating comes with sending an asset."""
+        head = getattr(self, "responders_head", None)
+        canvas = getattr(self.body, "_parent_canvas", None)
+        if head is None or canvas is None or not head.winfo_exists():
+            return
+        self.body.update_idletasks()
+        total = max(1, self.body.winfo_height())
+        canvas.yview_moveto(max(0.0, (head.winfo_y() - 4) / total))
 
     def fill_form(self) -> None:
         ui = self.ui

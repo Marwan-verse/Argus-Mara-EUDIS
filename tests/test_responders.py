@@ -172,6 +172,27 @@ class ReplayResponseTests(unittest.TestCase):
         self.assertEqual(lark["assessment"]["level"], "high")
         self.assertEqual(self.replay.log["A1"][-1][1], "D1 released: incident closed")
 
+    def test_a_sent_asset_prepares_flies_to_the_meeting_point_then_stays_with_the_vessel(self):
+        exercise = self.by_id["A1"]
+        self.replay.send(exercise, "D1")  # 7 min readiness, eyes on in 31 min
+        preparing = self.replay.asset_track("D1", self.start + 4 * 60)
+        self.assertEqual((preparing["phase"], preparing["minutes_left"]), ("preparing", 3))
+        self.assertEqual((preparing["lat"], preparing["lon"]), (53.39, -6.07))
+        en_route = self.replay.asset_track("D1", self.start + 15 * 60)
+        self.assertEqual((en_route["phase"], en_route["minutes_left"]), ("en route", 16))
+        meet = self.replay.assignments["D1"]["meet"]
+        self.assertTrue(min(53.39, meet[0]) <= en_route["lat"] <= max(53.39, meet[0]))
+        on_scene = self.replay.asset_track("D1", self.start + 40 * 60)
+        self.assertEqual(on_scene["phase"], "on scene")
+        self.assertEqual((on_scene["lat"], on_scene["lon"]), self.replay.position(exercise)(self.start + 40 * 60))
+        self.assertIsNone(self.replay.asset_track("D2", self.start))
+
+    def test_once_the_earliest_eta_has_passed_the_card_says_so_not_that_the_vessel_is_at_the_line(self):
+        self.replay.send(self.by_id["A1"], "D1")
+        self.replay.seek(self.start + 65 * 60)  # earliest line ETA was at +61 min; the vessel is not in the corridor
+        line = responders.summary_line(self.replay.responses["A1"])[0]
+        self.assertTrue(line.endswith("earliest line ETA passed"), line)
+
     def test_only_an_available_physical_asset_can_be_sent(self):
         exercise = self.by_id["A1"]
         with self.assertRaises(ValueError):

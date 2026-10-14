@@ -146,11 +146,14 @@ def assess_asset(asset: dict, position, now: float, deadline_s=None, wind_kn: fl
 
 
 def assess_fleet(fleet: dict, position, now: float, deadline_s=None, wind_kn: float = 0,
-                 busy: dict | None = None, incident_id: str | None = None, dispatched: dict | None = None) -> dict:
+                 busy: dict | None = None, incident_id: str | None = None, dispatched: dict | None = None,
+                 at_line_text: str = "vessel already at the line") -> dict:
     """Every asset's answer for one vessel, the best physical responder and the ``no_response_in_time`` flag.
 
     ``deadline_s`` is the replay time of the earliest possible line contact
-    (None when the vessel is not approaching a line).
+    (None when the vessel is not approaching a line). ``at_line_text`` says why
+    nobody can be in time once that moment has come: the vessel is in the
+    corridor, or only its earliest possible ETA has passed.
     """
     rows = [assess_asset(asset, position, now, deadline_s, wind_kn, busy, incident_id,
                          (dispatched or {}).get(asset["id"])) for asset in fleet["assets"]]
@@ -162,6 +165,7 @@ def assess_fleet(fleet: dict, position, now: float, deadline_s=None, wind_kn: fl
     assigned = next((row for row in physical if row["status"] == "assigned"), None)
     blocked = [row for row in rows if row["counts"] and row.get("would_be_in_time")]
     return {"now": int(now), "deadline_s": None if deadline_s is None else int(deadline_s), "at_line": at_line,
+            "at_line_text": at_line_text,
             "wind_kn": wind_kn, "rows": rows, "best": best, "assigned": assigned,
             "blocked_by": [f"{row['id']} {row['reason']}" for row in blocked],
             "no_response_in_time": deadline_s is not None and not at_line and not in_time,
@@ -188,7 +192,7 @@ def summary_line(result: dict) -> tuple[str, bool]:
     who = f"{KIND_SHORT[shown['kind']]} {shown['id']}" if shown["kind"] == "drone" else shown["id"]
     head = f"{'Sent: ' if assigned else ''}{who} · {minutes(shown['eta_s'])} min"
     if result["at_line"]:
-        return f"{head} · vessel already at the line", False
+        return f"{head} · {result.get('at_line_text', 'vessel already at the line')}", False
     if shown["margin_s"] is None:
         return f"{head} · eyes on", False
     return f"{head} · in time (+{minutes(shown['margin_s'])} min)", False

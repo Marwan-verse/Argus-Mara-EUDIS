@@ -58,6 +58,24 @@ and measured performance claims are pending validation.
 | 3:20–3:45 | Open the fictional Space review and export the decision record. |
 | 3:45–4:00 | State what operational validation is still needed. |
 
+### Who can reach it: the responder demo (about 2 minutes)
+
+Run it in the desktop app (`RUN-GUI-WINDOWS.bat`) with the replay at the exercise
+alert, T+01:30. Every contact is fictional; bases are public places, and every speed,
+readiness time, range and drone site is a labelled assumption (D58).
+
+| Click | What the judges see | Say |
+|---|---|---|
+| Open the Incidents panel. | Each card has a responder line: blue means someone arrives before the earliest line ETA, red "No responder in time" means nobody does, and the level is raised one step. | "For every incident we work out who can get eyes on the ship before it can reach the cable." |
+| Click the CORMORANT STAR card. Scroll to **Who can reach it** under *Why this level* (or press **Escalate**, which scrolls there). | Drone D1 from Howth, 31 min, in time by 30 min; every other asset with minutes, too late, or why it cannot go. The map shows the bases and a dashed route to the meeting point. | "We intercept a moving ship, even with AIS off: we aim where it will be, not where it was." |
+| Point at the amber warning under D1. | "Only D1 reaches SEA LARK, AMBER SKERRY in time." | "Assets are shared. Before you send one, you see who you leave uncovered." |
+| Press **Send** on D1. | SEA LARK turns Critical and AMBER SKERRY High; their cards say "No responder in time · D1 assigned to INC-…". The status line names them. | "The system shows the cost of a decision. A human still makes it." |
+| Press **Recall** on D1, then **Send** on D2 (Wicklow Head, in time by 28 min). Press Play. | Everyone is covered again. On the map D2 shows *preparing*, then *en route*, then *on scene* with the ship. | "That is the better allocation, and you can watch it play out on the replay clock." |
+| Optional: press **Storm 30 kn**. | Every drone greys out ("wind 30 kn above the 25 kn drone limit"); a helicopter becomes the best option and more incidents turn Critical. | "In bad weather coverage shrinks, and the board says so honestly." |
+
+Reset with the ↻ button in the Incidents panel. Send, Recall and Escalate are simulated
+decisions written to the incident log; nothing is transmitted.
+
 ## 3.5 Hard questions to rehearse
 
 1. **"Commercial AIS cable-watch services already exist (NKT, Sentinel Proactive, UltramapGlobal, Gatehouse). Why you?"**

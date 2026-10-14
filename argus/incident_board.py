@@ -188,8 +188,10 @@ class Replay:
         incident = self.tracker.open_incident(item)
         busy = {asset: given["incident"] for asset, given in self.assignments.items()}
         dispatched = {asset: given["t"] for asset, given in self.assignments.items()}
+        at_line = ("vessel already at the line" if item["observations"].get("in_corridor")
+                   else "earliest line ETA passed")
         return responders.assess_fleet(self.fleet, self.position(item), t, deadline_s(item, t), self.wind_kn,
-                                       busy, incident["id"] if incident else None, dispatched)
+                                       busy, incident["id"] if incident else None, dispatched, at_line)
 
     def _respond(self, t: int) -> None:
         """Responders for every present contact at Medium or above; flag and re-score those nobody reaches in time."""
@@ -263,7 +265,8 @@ class Replay:
                    else f", {responders.minutes(-row['margin_s'])} min late")
         who = asset["name"] if asset_id in asset["name"] else f"{asset_id} ({asset['name']})"
         text = f"Sent {who}: eyes on in {responders.minutes(row['eta_s'])} min{verdict}"
-        self._record({"action": "send", "asset": asset_id, "id": item["id"], "text": text})
+        self._record({"action": "send", "asset": asset_id, "id": item["id"], "text": text, "meet": row["meet"],
+                      "ready_t": self.now + int(asset["readiness_min"] * 60), "arrive_t": self.now + row["eta_s"]})
         return self.refresh()
 
     def recall(self, item: dict, asset_id: str) -> dict[str, list[str]]:
@@ -284,7 +287,9 @@ class Replay:
         if decision["action"] == "send":
             if incident is None or given is not None:
                 return False
-            self.assignments[asset] = {"incident": incident["id"], "item": item["id"], "t": decision["t"]}
+            self.assignments[asset] = {"incident": incident["id"], "item": item["id"], "t": decision["t"],
+                                       "meet": decision.get("meet"), "ready_t": decision.get("ready_t"),
+                                       "arrive_t": decision.get("arrive_t")}
         else:
             if given is None or given["item"] != item["id"]:
                 return False
@@ -294,6 +299,31 @@ class Replay:
                 {"t": decision["t"], "action": decision["action"], "asset": asset})
         self._note(item["id"], decision["t"], decision["text"])
         return True
+
+    def asset_track(self, asset_id: str, t: float) -> dict | None:
+        """Where a sent asset is at replay time t, for the map animation.
+
+        Preparing at its base until its readiness time, then on a straight line
+        to the meeting point, then with the vessel. Phase, position and the
+        minutes to the next phase; None if the asset is not assigned.
+        """
+        given = self.assignments.get(asset_id)
+        asset = next((asset for asset in self.fleet["assets"] if asset["id"] == asset_id), None)
+        if given is None or asset is None or given.get("meet") is None:
+            return None
+        item = next(item for item in self.items if item["id"] == given["item"])
+        base, meet = (asset["lat"], asset["lon"]), given["meet"]
+        if t < given["ready_t"]:
+            phase, here, left = "preparing", base, given["ready_t"] - t
+        elif t < given["arrive_t"]:
+            span = max(1, given["arrive_t"] - given["ready_t"])
+            fraction = (t - given["ready_t"]) / span
+            here = (base[0] + (meet[0] - base[0]) * fraction, base[1] + (meet[1] - base[1]) * fraction)
+            phase, left = "en route", given["arrive_t"] - t
+        else:
+            phase, here, left = "on scene", self.position(item)(t), 0
+        return {"asset": asset, "item": item, "phase": phase, "lat": here[0], "lon": here[1],
+                "meet": meet, "minutes_left": responders.minutes(left)}
 
     def _release(self, item: dict, t: int) -> list[str]:
         """Free the assets of a closed incident."""
