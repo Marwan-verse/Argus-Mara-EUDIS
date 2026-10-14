@@ -96,6 +96,17 @@ class Relay:
             raise web.HTTPTooManyRequests(text="Try again later", headers={"Retry-After": str(max(1, int(expires-now)))})
         self.rates[key] = count + 1, expires
 
+    def client_address(self, request):
+        """The client's IP address; behind the trusted HTTPS proxy, the one it reports."""
+        try:
+            peer = ipaddress.ip_address(request.remote)
+            if self.config.proxy_network and peer in ipaddress.ip_network(self.config.proxy_network):
+                # Caddy puts the address that connected to it last; earlier entries come from the client.
+                return str(ipaddress.ip_address(request.headers.get("X-Forwarded-For", "").split(",")[-1].strip()))
+            return str(peer)
+        except ValueError:
+            return str(request.remote)
+
     async def hash_work(self, function, *args):
         if self.pending_hashes >= 8:
             raise web.HTTPServiceUnavailable(text="Authentication busy; retry shortly")
@@ -192,18 +203,23 @@ async def security(request, handler):
     if origin and origin != config.origin:
         raise web.HTTPForbidden(text="Origin denied")
     if request.path != "/healthz":
-        relay.limit(("global",), 6000)
-        relay.limit(("peer", request.remote), 6000)
+        client = request["client"] = relay.client_address(request)
+        user = token = None
         if request.path != "/v1/login":
-            token = request.headers.get("Authorization", "")
-            if not token.startswith("Bearer ") or not 20 <= len(token[7:]) <= 128:
-                raise web.HTTPUnauthorized(text="Sign in required")
-            token = token[7:]
-            user = relay.store.authenticate(token)
-            if not user:
-                raise web.HTTPUnauthorized(text="Sign in required")
+            header = request.headers.get("Authorization", "")
+            if header.startswith("Bearer ") and 20 <= len(header[7:]) <= 128:
+                token = header[7:]
+                user = relay.store.authenticate(token)
+        if user:
             relay.limit(("user", user["id"]), 240)
             request["user"], request["token"] = user, token
+        else:
+            # Requests without a valid sign-in have their own limits, per address
+            # first, so a flood of them cannot use up signed-in people's limits.
+            relay.limit(("anonymous", client), 120)
+            relay.limit(("anonymous",), 6000)
+            if request.path != "/v1/login":
+                raise web.HTTPUnauthorized(text="Sign in required")
     try:
         response = await handler(request)
     except ValueError as error:
@@ -225,9 +241,11 @@ async def login(request):
     candidate = data.get("password")
     if not isinstance(candidate, str) or not 1 <= len(candidate) <= 128:
         raise web.HTTPUnauthorized(text="Invalid username or password")
-    relay.limit(("login-global",), 60)
-    relay.limit(("login-peer", request.remote), 20)
-    relay.limit(("login-name", username), 8, 300)
+    # Per address first, so a blocked address does not use up the overall limit.
+    # Wrong passwords from one address never lock the account for other addresses.
+    relay.limit(("login-address", request["client"]), 20)
+    relay.limit(("login-name", request["client"], username), 8, 300)
+    relay.limit(("login-global",), 600)
     row = relay.store.credential(username)
     valid = await relay.hash_work(relay.store.verify, row["password_hash"] if row else relay.store.dummy_hash, candidate)
     # Re-read after hash work: an administrator may revoke an account meanwhile.

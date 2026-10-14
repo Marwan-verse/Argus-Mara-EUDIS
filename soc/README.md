@@ -42,7 +42,10 @@ Only Caddy publishes ports. **Do not expose relay:8080 through an unencrypted
 route.** TLS ends at Caddy; the backend connection stays inside the host's private
 Docker network. If that connection crosses an untrusted network, add TLS there.
 The relay trusts the HTTPS proxy header only from the configured private subnet
-(`172.30.65.0/24`) and rejects other plain HTTP requests. If this subnet conflicts
+(`172.30.65.0/24`) and rejects other plain HTTP requests. Sign-in and request
+limits apply per client address, taken from the last `X-Forwarded-For` entry only
+when the request comes from that subnet, so one address cannot block everyone.
+Requests without a valid sign-in have separate limits from signed-in users. If this subnet conflicts
 with your host's networks, change both Compose IPAM and `ARGUS_SOC_PROXY_NETWORK`.
 Run one relay process/replica. Restarting closes rooms and requires fresh invitations
 and keys; accounts persist. This configuration is for a small team, not a public service.

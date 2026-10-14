@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import ssl
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -242,6 +243,44 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         for _ in range(6):
             await self.api("POST", "/v1/login", data={"username": "bob", "password": "wrong"})
         self.assertEqual((await self.api("POST", "/v1/login", data={"username": "bob", "password": SECRET}))[0], 429)
+
+    async def login_from(self, address, username, password):
+        return (await self.api("POST", "/v1/login", data={"username": username, "password": password},
+                               headers={"X-Forwarded-For": address}))[0]
+
+    async def test_one_address_cannot_block_sign_in_for_other_people(self):
+        # As in Docker: every request arrives from Caddy, which reports the client's address last.
+        self.relay.config.proxy_network = "127.0.0.1/32"
+        attacker, colleague = "203.0.113.9, 198.51.100.7", "192.0.2.44"
+        for index in range(20):
+            self.assertEqual(await self.login_from(attacker, f"guess{index:02d}", "wrong"), 401)
+        self.assertEqual(await self.login_from(attacker, "bob", SECRET), 429)
+        self.assertEqual(await self.login_from(colleague, "bob", SECRET), 200)
+        # The client-written entry before Caddy's does not give the attacker a fresh address.
+        self.assertEqual(await self.login_from("198.51.100.7", "bob", SECRET), 429)
+
+    async def test_wrong_passwords_from_elsewhere_do_not_lock_out_the_account(self):
+        self.relay.config.proxy_network = "127.0.0.1/32"
+        for _ in range(8):
+            self.assertEqual(await self.login_from("198.51.100.7", "bob", "wrong"), 401)
+        self.assertEqual(await self.login_from("198.51.100.7", "bob", SECRET), 429)
+        self.assertEqual(await self.login_from("192.0.2.44", "bob", SECRET), 200)
+
+    async def test_forwarded_address_is_ignored_unless_it_comes_from_the_proxy(self):
+        for index in range(20):
+            self.assertEqual(await self.login_from(f"198.51.100.{index}", f"guess{index:02d}", "wrong"), 401)
+        self.assertEqual(await self.login_from("192.0.2.44", "bob", SECRET), 429)
+
+    async def test_requests_without_sign_in_cannot_use_up_signed_in_limits(self):
+        statuses = [(await self.api("GET", "/v1/me"))[0] for _ in range(121)]
+        self.assertEqual((statuses.count(401), statuses[-1]), (120, 429))
+        self.assertEqual((await self.api("GET", "/v1/me", self.bob))[0], 200)
+        # A flood from many addresses can exhaust the overall budget for requests without a sign-in...
+        self.relay.rates[("anonymous",)] = (6000, time.monotonic() + 60)
+        self.relay.config.proxy_network = "127.0.0.1/32"
+        self.assertEqual((await self.api("GET", "/v1/me", headers={"X-Forwarded-For": "192.0.2.44"}))[0], 429)
+        # ...but people already signed in keep working.
+        self.assertEqual((await self.api("GET", "/v1/me", self.bob))[0], 200)
 
     async def test_http_cannot_spoof_https_outside_proxy_network(self):
         self.relay.config.allow_loopback_http = False
