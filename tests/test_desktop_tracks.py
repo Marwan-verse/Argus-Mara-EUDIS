@@ -81,6 +81,11 @@ class ReceivedTrackTests(unittest.TestCase):
 
 class SelectedPathWindowTests(unittest.TestCase):
     def test_selection_destination_gaps_toggle_filter_and_clear(self):
+        # Retention is relative to the receive time, independent of the test date.
+        clock_patch = patch('desktop_ais.datetime', wraps=datetime)
+        clock = clock_patch.start()
+        self.addCleanup(clock_patch.stop)
+        clock.now.return_value = START + timedelta(seconds=1001)
         import customtkinter as ctk
         from run_gui import ArgusApp, load_demo
         try:

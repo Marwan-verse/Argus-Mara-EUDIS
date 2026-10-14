@@ -143,7 +143,12 @@ class DesktopToolsWindowTests(unittest.TestCase):
             self.assertEqual(tools.alert_width, 360)
             tools.start_resize('details', 100)
             tools.resize('details', 50)
-            self.assertEqual(tools.detail_width, 455)
+            # Small displays cap the requested width to preserve usable map space.
+            self.assertGreater(tools.detail_width, 405)
+            self.assertLessEqual(tools.detail_width, 455)
+            scaling = ctk.ScalingTracker.get_widget_scaling(app.chart_frame)
+            self.assertGreaterEqual(app.chart_host.winfo_width() / scaling - tools.detail_width, 294)
+            resized_detail_width = tools.detail_width
             tools.toggle_alerts()
             self.assertFalse(app.alerts_panel.winfo_ismapped())
             tools.toggle_alerts()
@@ -164,7 +169,7 @@ class DesktopToolsWindowTests(unittest.TestCase):
                 tools.save()
                 saved = json.loads(tools.settings_path.read_text())
                 self.assertIn('My harbour', saved['views'])
-                self.assertEqual(saved['detail_width'], 455)
+                self.assertEqual(saved['detail_width'], resized_detail_width)
                 self.assertNotIn('alerts', saved)
                 tools.settings_path = None
             root.update()

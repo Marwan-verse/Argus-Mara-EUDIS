@@ -4,6 +4,43 @@ This guide runs the demonstration on your own PC. For a public server, use
 [README.md](README.md). Local HTTPS is available at `https://localhost:8443`;
 short sample passwords must not be used on an internet-accessible server.
 
+## Automatic startup from the application
+
+Run `python run_gui.py` (or `RUN-GUI-WINDOWS.bat`). The initial screen offers:
+
+- **Sign in**: connect one client to the entered shared HTTPS server. Participant
+  devices do not need Docker; it runs on the server host.
+- **Start local server + two sign-in windows**: start Docker Desktop if needed,
+  build/start the existing local Compose stack, seed missing sample accounts,
+  copy the public CA certificate and wait for a verified HTTPS health response.
+  The current window stays at sign-in and one additional window opens. Each
+  participant signs in separately; room creation and peer verification still apply.
+- **Continue offline · one window · no Docker**: open the public/fictional demo
+  without starting Docker or authenticating. `python run_gui.py --offline` skips
+  the startup screen for feature development.
+
+Docker must already be installed. The first build needs internet to download
+images/packages; later launches reuse its cache. Progress and errors appear on
+the sign-in screen. Failed startup opens no second window and allows retry or
+offline use. Closing the screen cancels subsequent steps; an executing Docker
+command can finish. Closing clients leaves shared containers running and preserves
+accounts/certificates. Use the stop command below when the server is no longer needed.
+
+If `data/soc-local/demo.env` is absent, startup creates random passwords for
+`Marwan`, `Igor` and `admin` in that ignored private file. Open it locally to read
+them; passwords are never logged or passed as process arguments. Existing files
+and account passwords are preserved. Preserve the file with the account volume:
+recreating the file does not reset accounts already in Docker.
+
+This local option is for **two windows on one PC**. For **two physical devices**,
+deploy the shared HTTPS server using [README.md](README.md) and Sign in on both.
+
+The implementation follows Docker's [Desktop start command](https://docs.docker.com/reference/cli/docker/desktop/start/)
+and [Compose up command](https://docs.docker.com/reference/cli/docker/compose/up/).
+Windows/macOS installations without the Desktop CLI use the installed application
+as a fallback. `compose up -d --build` reuses a running stack and applies source
+changes when needed; relay recreation closes existing rooms.
+
 ## 1. Prepare Docker
 
 1. Install [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/)

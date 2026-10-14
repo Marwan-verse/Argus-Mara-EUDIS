@@ -166,7 +166,7 @@ class DesktopAISWindowTests(unittest.TestCase):
         root.attributes("-alpha", 0)
         callback_errors = []
         root.report_callback_exception = lambda *error: callback_errors.append(error)
-        with patch.dict('os.environ', {'ARGUS_UI_PREFERENCES': ''}):
+        with patch.dict('os.environ', {'ARGUS_AIS_AUTOCONNECT': '0', 'ARGUS_UI_PREFERENCES': ''}):
             app = ArgusApp(root, *load_demo())
         app.ais_tracker.cache_path = None
         try:

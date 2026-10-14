@@ -4,7 +4,9 @@
 sessions for 2–16 participants, encrypted chat/contact exchange and sharing of its existing map Ping.
 Start `RUN-SOC-WINDOWS.bat` or `sh RUN-SOC-MAC-LINUX.command` to require login.
 See [SOC deployment, groups and encryption](soc/README.md). The regular offline
-demo remains available without private credentials or a server.
+demo remains available without private credentials or a server. `python run_gui.py`
+shows sign-in with **Continue offline** (one window, no Docker) and **Start local
+server + two sign-in windows**. See [automatic local startup](soc/LOCAL-DEMO.md).
 
 > *"Ireland can crew two ships. Argus Mara gives them a hundred eyes."*
 
@@ -38,7 +40,9 @@ create a virtual environment, run `python -m pip install -r requirements.txt`, t
 Windows, include **Tcl/Tk and IDLE** in the Python installer. Use
 `python run_gui.py --check` to validate the local inputs without opening a window.
 CustomTkinter styles the native dashboard and Pillow displays NASA JPEG imagery; the
-same two JSON files drive the replay. The application starts no web server.
+same two JSON files drive the replay. Choose **Continue offline** or use
+`python run_gui.py --offline` for a single session without Docker. The local
+two-window option starts the separate SOC Docker stack when selected.
 The map is draggable and zoomable. Use the mouse wheel or scroll vertically with
 two fingers on a trackpad over the map to zoom around the pointer; the `+` and `−`
 buttons also remain available. **Offline coastline** covers the world without
