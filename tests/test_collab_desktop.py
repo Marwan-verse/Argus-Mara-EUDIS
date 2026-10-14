@@ -113,6 +113,37 @@ class DesktopSOCTests(unittest.TestCase):
         self.assertTrue(soc.start_button.winfo_manager())
         self.assertEqual(soc.group.get(), 'Team session (all groups)')
 
+    def test_typed_code_verifies_peer_and_wrong_code_does_not(self):
+        from argus.collab_crypto import RoomCipher
+        own, peer = RoomCipher(), RoomCipher()
+        members = [{'user_id': 'own', 'username': 'analyst', 'public_key': own.public_key},
+                   {'user_id': 'peer', 'username': 'colleague', 'public_key': peer.public_key}]
+        own.establish('room', 'own', members)
+        peer.establish('room', 'peer', members)
+        self.client.cipher = own
+        self.client.room.update(room_id='room', confirmed=[])
+        self.client.confirm = Mock()
+        self.app.soc.open()
+        self.app.soc.window.withdraw()
+        self.pump()
+        soc = self.app.soc
+        soc.compare_peer('peer')
+        read_aloud = peer.safety_codes['own']
+        soc.verify_entry.insert(0, ('B' if read_aloud[0] == 'A' else 'A') + read_aloud[1:])
+        soc.verify_check()
+        self.assertIn('codes differ', soc.verify_problem.cget('text'))
+        self.assertNotIn('peer', soc.verified_peers)
+        self.assertEqual(own.verified_peers, set())
+        self.client.confirm.assert_not_called()
+        soc.verify_entry.delete(0, 'end')
+        soc.verify_entry.insert(0, read_aloud)
+        soc.verify_check()
+        self.pump()
+        self.assertIn('peer', soc.verified_peers)
+        self.assertEqual(own.verified_peers, {'peer'})
+        self.client.confirm.assert_called_once()
+        self.assertFalse(soc.verify_window.winfo_exists())
+
     def test_empty_draft_and_enter_do_not_submit(self):
         self.app.soc.open()
         self.app.soc.window.withdraw()

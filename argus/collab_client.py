@@ -102,6 +102,8 @@ class SOCClient:
     def confirm(self):
         if not self.cipher or not self.cipher.room_id:
             raise ClientError('Wait for the host to start the encrypted session')
+        if self.cipher.unverified_peers():
+            raise ClientError('Type the code each teammate reads to you first')
         self.request("POST", f"/v1/rooms/{self.room['room_id']}/confirm", {})
         self.cipher.confirm()
 

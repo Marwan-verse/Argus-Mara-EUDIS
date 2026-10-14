@@ -93,10 +93,12 @@ protect public files already installed on a device.
    distinct authenticated participants while the lobby is open. Private rooms
    additionally require membership of their selected group.
 3. Once everyone joins, the host presses **Start secure chat**. The code stops working and the roster becomes immutable.
-4. Use **Compare keys** beside each peer. Compare the entire code by voice or
-   in person and press **The codes match** only if both devices agree. Codes
-   differ between pairs. Once all your peers have been checked, your confirmation
-   is submitted automatically. Everyone must finish verification before sending.
+4. Use **Compare keys** beside each peer. Read your code aloud by voice or in
+   person, type the code the peer reads to you and press **Check code**. Only the
+   complete matching code verifies that peer; a different code means leave the
+   session. Codes differ between pairs. Once all your peers have been checked,
+   your confirmation is submitted automatically. Everyone must finish
+   verification before sending.
 5. Send text, share the selected AIS contact, or use the existing map Ping.
    Received pings last 15 seconds; they are analyst annotations, not sensor alerts.
 
@@ -149,8 +151,10 @@ depends on `cryptography`. Account authentication uses HTTPS and Argon2id:
 - The 128-bit safety value is displayed using 26 readable base32 symbols instead
   of 32 hex symbols. All 128 bits remain; no security bits are truncated. It binds
   the shared secret and transcript. Compare it
-  **outside the relay** to detect substituted keys. Confirming without comparing
-  does not authenticate the peer against a malicious relay.
+  **outside the relay** to detect substituted keys. Each person types the code
+  the peer reads aloud; the endpoint refuses to confirm until every peer's typed
+  code matches. The displayed code cannot be copied. Typing one's own code instead
+  of listening still defeats the check against a malicious relay.
 - AES-GCM authenticates version, room, sender, recipient, kind and counter. Nonces combine
   the directional four-byte prefix and eight-byte increasing counter. Fresh
   keys and separate directions prevent nonce reuse.

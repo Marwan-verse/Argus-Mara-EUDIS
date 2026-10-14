@@ -316,35 +316,47 @@ class DesktopSOC:
         from desktop_soc_view import label, button, BG, CARD, MUTED
         dialog = ctk.CTkToplevel(self.window)
         dialog.title('Verify ' + member['username'])
-        dialog.geometry('610x340')
+        dialog.geometry('610x470')
         dialog.resizable(False, False)
         dialog.configure(fg_color=CARD)
         dialog.transient(self.window)
         dialog.grab_set()
         label(dialog, 'Compare with ' + member['username'], 21, True).pack(padx=24, pady=(22, 8))
-        label(dialog, 'Ask them to open Compare keys beside your name. Both codes must match exactly. Compare by voice or in person.',
+        label(dialog, f"Read your code aloud to {member['username']}, then type the code they read to you. "
+                      'Compare by voice or in person, not through this application.',
               wraplength=545, justify='left', text_color=MUTED).pack(padx=24, pady=8)
-        code = cipher.safety_codes[user_id]
-        label(dialog, code, font=ctk.CTkFont('Consolas', 19, 'bold')).pack(padx=20, pady=18)
-        def copy():
-            dialog.clipboard_clear()
-            dialog.clipboard_append(code)
-        button(dialog, 'Copy verification code', copy).pack(pady=4)
+        # The code is shown for reading aloud and is deliberately not copyable:
+        # only a code typed from the peer's own screen proves both keys agree.
+        label(dialog, 'Your code', text_color=MUTED).pack(padx=24, pady=(8, 0))
+        label(dialog, cipher.safety_codes[user_id], font=ctk.CTkFont('Consolas', 19, 'bold')).pack(padx=20, pady=(2, 12))
+        label(dialog, f"Code {member['username']} reads to you", text_color=MUTED).pack(padx=24)
+        entry = ctk.CTkEntry(dialog, width=420, height=38, font=ctk.CTkFont('Consolas', 17),
+                             placeholder_text='XXXXX XXXXX XXXXX XXXXX XXXXX X')
+        entry.pack(padx=24, pady=(2, 4))
+        problem = label(dialog, '', text_color='#ff7b72', wraplength=545, justify='left')
+        problem.pack(padx=24, pady=4)
         row = ctk.CTkFrame(dialog, fg_color='transparent')
-        row.pack(fill='x', padx=24, pady=18)
-        def match():
+        row.pack(fill='x', padx=24, pady=12)
+        def check(_=None):
             current = self.client.cipher
             if current is not cipher or not self.client.room or self.client.room['room_id'] != room_id:
                 dialog.destroy()
                 self.status('Session changed. Verify the new session instead.')
+                return
+            if not cipher.verify_peer(user_id, entry.get()):
+                problem.configure(text='The codes differ. Check the code again together. If it still differs, '
+                                       'do not chat: someone may be intercepting. Leave the session.')
                 return
             self.verified_peers.add(user_id)
             dialog.destroy()
             self.render()
             if set(cipher.safety_codes) <= self.verified_peers:
                 self.task(self.client.confirm, self.confirmed)
+        entry.bind('<Return>', check)
         button(row, 'Cancel', dialog.destroy, width=130).pack(side='left')
-        button(row, 'The codes match', match, True, width=220).pack(side='right')
+        button(row, 'Check code', check, True, width=220).pack(side='right')
+        self.verify_window, self.verify_entry, self.verify_problem, self.verify_check = dialog, entry, problem, check
+        entry.focus_set()
 
     def render(self):
         from desktop_soc_view import render
