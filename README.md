@@ -432,7 +432,8 @@ sort to time to the asset or newest. Click a row or a map marker to open its rev
 window: the score scale, the indicators behind the level, the time to the asset, the
 recommended action and the log. **Acknowledge**, **Escalate** (duty officer, line
 operator, Irish Coast Guard (MRCC) or Naval Service operations) and **Reject** (with a
-reason) are recorded for the session only; nothing is sent. Countdowns run live, so
+reason) are recorded in a signed decision log on this computer (the shield button: change
+one letter in the file and Verify signatures names the record); nothing is sent. Countdowns run live, so
 GREY HERON rises from High to Critical after about 3.5 minutes; ↻ restarts the
 simulation. Map markers use the level colours, carry **SIM** labels and sit under a
 **SIMULATED** corner badge; **Sim alerts** in the legend hides them. On a trackpad,

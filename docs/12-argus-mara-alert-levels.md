@@ -138,9 +138,10 @@ make the loiter rule noisy without a list of expected vessels.
 | Map | Markers are coloured by level; Critical ones pulse. High and Critical names carry a **SIM** label, the selected vessel shows its track and its line (marked "illustrative route"), and a **SIMULATED** badge sits in the corner. **Sim alerts** in the legend or Map layers hides them. |
 | Exercise | The fictional exercise alert is on the same list with the same rules. **Open replay** starts the existing countdown replay with its response options. |
 | Restart | The ↻ button restarts the simulation: countdowns and decisions reset. |
+| Decision log | The shield button opens the **signed decision log**: who decided what, on which alert and when, newest first. Every decision, responder sent or recalled and restart is a record signed with this computer's Ed25519 key that also holds the hash of the record before it. **Verify signatures** checks them all: a changed record turns red (CHANGED AFTER SIGNING), the next one amber (LINK BROKEN). The **seal** of the last record changes if records are removed from the end, so note it down. **Show the file** opens `data/desktop/decision-log.jsonl` for the tamper demo. `python -m argus.decision_log verify` checks the file from a terminal. |
 
-Decisions are recorded only for the current session on this computer. Nothing is sent
-to anyone, and a human decides every action.
+The review states belong to the current session. The signed decision log stays on this
+computer. Nothing is sent to anyone, and a human decides every action.
 
 ## The simulated board
 
