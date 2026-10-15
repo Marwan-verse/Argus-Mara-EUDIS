@@ -207,6 +207,31 @@ class StartupScreenTests(unittest.TestCase):
         save.assert_not_called()
         forget.assert_called_once()
 
+    def test_create_account_requests_approval_and_checks_the_repeat(self):
+        with patch('desktop_soc.SOCClient') as client:
+            login_screen(self.root, SAVED['url'], Mock())
+            self.button('Create account').invoke()
+            self.root.update()
+            username, secret, repeat = self.widgets(ctk.CTkEntry)[3:]
+            self.assertEqual(username.get(), '')
+            username.insert(0, 'newcomer')
+            secret.insert(0, 'synthetic-password-42')
+            repeat.insert(0, 'synthetic-password-43')
+            self.button('Request account').invoke()
+            self.root.update()
+            client.return_value.signup.assert_not_called()
+            self.assertEqual((secret.get(), repeat.get()), ('', ''))
+            secret.insert(0, 'synthetic-password-42')
+            repeat.insert(0, 'synthetic-password-42')
+            self.button('Request account').invoke()
+            self.pump_until(lambda: 'requested' in self.status_text())
+        client.return_value.signup.assert_called_once_with('newcomer', 'synthetic-password-42')
+        self.assertEqual(self.widgets(ctk.CTkEntry)[1].get(), 'newcomer')
+        self.assertIn('administrator approves', self.status_text())
+
+    def status_text(self):
+        return ' '.join(label.cget('text') for label in self.widgets(ctk.CTkLabel))
+
     def test_second_demo_window_never_uses_a_saved_sign_in(self):
         with patch('desktop_soc.soc_session.load', return_value=SAVED) as load:
             login_screen(self.root, launcher.LOCAL_URL, Mock())

@@ -69,7 +69,7 @@ class Store:
         return {"id": row["id"], "username": row["username"], "admin": bool(row["admin"]),
                 "groups": groups, "permissions": sorted(perms)}
 
-    def create_user(self, username, hashed, groups, admin=False, actor=None):
+    def create_user(self, username, hashed, groups, admin=False, actor=None, action="user.create"):
         username = name(username)
         self.validate_groups(groups)
         user_id = secrets.token_hex(16)
@@ -78,7 +78,7 @@ class Store:
                 self.db.execute("INSERT INTO users(id,username,password_hash,admin) VALUES (?,?,?,?)", (user_id, username, hashed, int(admin)))
                 for group in groups:
                     self.db.execute("INSERT INTO memberships VALUES (?,?)", (user_id, group))
-                self.audit(actor, "user.create", username)
+                self.audit(actor, action, username)
         except sqlite3.IntegrityError:
             raise ValueError("Username already exists") from None
         return self.user(user_id)
@@ -89,6 +89,11 @@ class Store:
         existing = {r[0] for r in self.db.execute("SELECT name FROM groups")}
         if not set(groups) <= existing:
             raise ValueError("Unknown group")
+
+    def pending_count(self):
+        """Active non-administrator accounts without a group, such as requested ones awaiting approval."""
+        return self.db.execute("SELECT COUNT(*) FROM users u WHERE u.admin=0 AND u.disabled=0 AND NOT EXISTS "
+                               "(SELECT 1 FROM memberships m WHERE m.user_id=u.id)").fetchone()[0]
 
     def credential(self, username):
         return self.db.execute("SELECT id,password_hash,disabled FROM users WHERE username=?", (username,)).fetchone()

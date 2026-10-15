@@ -12,7 +12,7 @@ See [SOC security boundaries and handoff](../soc/README.md). Existing map pings
 are shared annotations; no user-created threat alert or remote response is added.
 Both demo JSON contracts remain unchanged. The browser frontend is unchanged.
 
-**Manual vessel reports (D65, 15 October):** `argus/vessel_reports.py` validates
+**Manual vessel reports (D67, 15 October):** `argus/vessel_reports.py` validates
 structured analyst reports and groups an in-memory inbox by vessel identity and
 provenance. `desktop_reports.py` provides the mandatory category/reason form and
 review window; `desktop_alerts.py` shows reported vessels separately from replay

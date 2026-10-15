@@ -282,6 +282,40 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         # ...but people already signed in keep working.
         self.assertEqual((await self.api("GET", "/v1/me", self.bob))[0], 200)
 
+    async def test_requested_account_waits_for_an_administrator(self):
+        url = str(self.server.make_url("")).rstrip("/")
+        client = SOCClient(url, allow_loopback_http=True)
+        self.assertTrue((await asyncio.to_thread(client.signup, "newcomer", SECRET))["pending"])
+        stored = self.relay.store.credential("newcomer")
+        self.assertNotEqual(stored["password_hash"], SECRET)
+        with self.assertRaises(ClientError) as waiting:
+            await asyncio.to_thread(client.login, "newcomer", SECRET)
+        self.assertEqual(waiting.exception.status, 403)
+        self.assertIn("administrator", str(waiting.exception))
+        self.assertIsNone(client.token)
+        for username, password in (("newcomer", SECRET), ("bob", SECRET), ("x", SECRET), ("shortpass", "too-short")):
+            self.assertEqual((await self.api("POST", "/v1/signup", data={"username": username, "password": password}))[0], 400)
+        # Approval is the existing administrator update: add the account to a group.
+        self.assertEqual((await self.api("PUT", f"/v1/admin/users/{stored['id']}", self.alice,
+                                         {"groups": ["user"], "disabled": False}))[0], 200)
+        user = await asyncio.to_thread(client.login, "newcomer", SECRET)
+        self.assertIn("chat", user["permissions"])
+        self.assertFalse(user["admin"])
+
+    async def test_account_requests_are_limited_per_address_and_while_waiting(self):
+        statuses = [(await self.api("POST", "/v1/signup", data={"username": f"visitor{index}", "password": SECRET}))[0]
+                    for index in range(4)]
+        self.assertEqual(statuses, [200, 200, 200, 429])
+        hashed = self.relay.store.hasher.hash(SECRET)
+        for index in range(17):
+            self.relay.store.create_user(f"waiting{index:02d}", hashed, [])
+        self.relay.config.proxy_network = "127.0.0.1/32"
+        status, refused = await self.api("POST", "/v1/signup", data={"username": "another", "password": SECRET},
+                                         headers={"X-Forwarded-For": "192.0.2.44"})
+        self.assertEqual(status, 503)
+        self.assertIn("waiting for approval", refused["error"])
+        self.assertIsNone(self.relay.store.credential("another"))
+
     async def test_remembered_token_resumes_until_revoked(self):
         url = str(self.server.make_url("")).rstrip("/")
         token = self.tokens[self.bob["id"]]

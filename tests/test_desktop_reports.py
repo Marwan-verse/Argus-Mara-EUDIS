@@ -82,6 +82,11 @@ class DesktopReportTests(unittest.TestCase):
         self.assertEqual(len(self.app.vessel_reports.entries), 2)
         self.assertEqual(len(self.app.vessel_reports.grouped()), 1)
         client.send.assert_called_once()
+        self.app.soc.open()
+        self.root.update()
+        chat = self.app.soc.chat.get('1.0', 'end')
+        self.assertIn('Vessel report', chat)
+        self.assertIn("A colleague's separate observation.", chat)
         self.assertIsNone(self.app.approved)
 
     def test_failed_send_preserves_draft_and_manual_retry_uses_same_id(self):

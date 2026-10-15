@@ -15,9 +15,10 @@ apply the chosen group's restrictions.
 Invitations are eight symbols displayed as `ABCD-EFGH`, with **Copy invite** and
 an expiry countdown. Authenticated join attempts remain limited per account and
 globally. Verification is a separate **Compare keys** dialog for each peer: the
-26-symbol code represents all 128 verification bits. Read your code aloud, type
-the code the peer reads to you through a trusted channel and press **Check code**;
-only the complete matching code verifies that peer. Your confirmation is submitted
+26-symbol code represents all 128 verification bits. Opening the dialog copies
+your code, labelled with both names; send it through a trusted channel or read it
+aloud, then paste or type the peer's code and press **Check code**. Only the
+complete matching code verifies that peer, and one's own pasted code is refused. Your confirmation is submitted
 once all your peers have been checked. No chat is enabled before everyone finishes.
 
 Messages send with Enter; Shift+Enter adds a line. Empty messages are rejected,
@@ -154,9 +155,9 @@ TLS verification stays enabled and the CA private key is not exported.
 3. Igor pastes the code and clicks **Join**. Both clients should show both names.
 4. Mykhailo clicks **Start secure chat**. The invitation
    stops working and the roster becomes immutable.
-5. Choose **Compare keys** beside your teammate. Each reads the Mykhailo↔Igor
-   code aloud and the other types it. On separate devices do this by voice or in
-   person; if **Check code** reports a difference, leave and investigate.
+5. Choose **Compare keys** beside your teammate. Each sends the copied
+   Mykhailo↔Igor code to the other (another app, or aloud) and pastes or types the
+   one received. If **Check code** reports a difference, leave and investigate.
 6. Both users press **Check code** in their dialog. Wait for **Secure chat
    is ready**. Your confirmation is submitted after all your peers are checked;
    Send stays disabled until everyone has finished.
@@ -182,8 +183,8 @@ account, assign `user`, and open a third client. Join with the same invitation
 **before** the host locks the roster. Repeat for up to 16 different accounts.
 
 Every participant uses **Compare keys** for each peer. Codes differ between pairs;
-only the two displays for the same pair should match. For each peer, type the
-code they read aloud and press **Check code**. Confirmation follows
+only the two displays for the same pair should match. For each peer, paste or
+type the code they send you and press **Check code**. Confirmation follows
 automatically after the last peer.
 Adding someone after locking requires a new session.
 

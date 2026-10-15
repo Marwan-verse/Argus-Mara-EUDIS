@@ -38,7 +38,11 @@ curl --fail https://soc.your-domain.example/healthz
 ```
 
 Bootstrap prompts for a password twice without echoing it. There is no default
-password or public registration, and only the first administrator can be bootstrapped.
+password, and only the first administrator can be bootstrapped. Anyone who can
+reach the server can request an account with **Create account** on the sign-in
+screen. It has no group, so it cannot sign in until an administrator adds it to
+one; Administration lists the accounts waiting. Requests are limited to 3 per 10
+minutes per address, 30 per 10 minutes overall and 20 waiting at once.
 Back up the private `accounts` volume: it contains Argon2id password hashes,
 hashed bearer tokens, memberships and administrative audit metadata. Communication
 plaintext and encryption keys are never saved there.
@@ -106,16 +110,18 @@ usable keychain nothing is remembered. The second window of the local two-window
 demo (`--soc-client`) never reads or saves a sign-in.
 
 1. Sign in as administrator; open **SOC session → Administration**. Create two
-   distinct accounts with unique passwords (14–128 characters).
+   distinct accounts with unique passwords (14–128 characters), or approve
+   requested ones: select the account, tick a group and press **Update selected**.
 2. Choose a Team session, or a private group session. Create it and privately share
    its random 8-character invitation (ten-minute expiry). It admits up to 16
    distinct authenticated participants while the lobby is open. Private rooms
    additionally require membership of their selected group.
 3. Once everyone joins, the host presses **Start secure chat**. The code stops working and the roster becomes immutable.
-4. Use **Compare keys** beside each peer. Read your code aloud by voice or in
-   person, type the code the peer reads to you and press **Check code**. Only the
-   complete matching code verifies that peer; a different code means leave the
-   session. Codes differ between pairs. Once all your peers have been checked,
+4. Use **Compare keys** beside each peer. Opening it copies your code, labelled
+   with both names, to the clipboard. Send it to the peer through another app or
+   read it aloud, then **Paste** or type the code the peer sends you and press
+   **Check code**. Only the complete matching code verifies that peer; a different
+   code means leave the session. Codes differ between pairs. Once all your peers have been checked,
    your confirmation is submitted automatically. Everyone must finish
    verification before sending.
 5. Send text, share the selected AIS contact, or use the existing map Ping.
@@ -197,10 +203,12 @@ depends on `cryptography`. Account authentication uses HTTPS and Argon2id:
 - The 128-bit safety value is displayed using 26 readable base32 symbols instead
   of 32 hex symbols. All 128 bits remain; no security bits are truncated. It binds
   the shared secret and transcript. Compare it
-  **outside the relay** to detect substituted keys. Each person types the code
-  the peer reads aloud; the endpoint refuses to confirm until every peer's typed
-  code matches. The displayed code cannot be copied. Typing one's own code instead
-  of listening still defeats the check against a malicious relay.
+  **outside the relay** to detect substituted keys. Each person enters the code
+  the peer sends through another channel (copied text or read aloud); the
+  endpoint refuses to confirm until every peer's code matches. Copied codes name
+  their sender and recipient, so pasting your own code back is refused, but
+  deliberately typing your own code still defeats the check against a malicious
+  relay. Never send codes through the SOC chat itself.
 - AES-GCM authenticates version, room, sender, recipient, kind and counter. Nonces combine
   the directional four-byte prefix and eight-byte increasing counter. Fresh
   keys and separate directions prevent nonce reuse.

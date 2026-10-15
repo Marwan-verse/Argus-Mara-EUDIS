@@ -1,11 +1,18 @@
 """Guided native SOC workspace: connect, verify peers, then communicate."""
+import json
+import math
 import time
 import tkinter as tk
 
 import customtkinter as ctk
 
+from argus.map_view import coordinates
+
 BG, CARD, CONTROL = '#0b1118', '#141e28', '#1c2a36'
 INK, MUTED, ACCENT, LINE = '#e4ebf0', '#a8b6c2', '#47c7da', '#2c3d4c'
+# Name colours for teammates in the chat; your own name uses ACCENT.
+PEOPLE = ('#e3b341', '#7ee0a1', '#f0a07a', '#b6a6f2', '#7cc7f2', '#f28fb0')
+GROUP_SECONDS = 300  # Consecutive messages from one person within this time share one name line.
 
 
 def label(parent, text='', size=13, bold=False, **kwargs):
@@ -212,13 +219,103 @@ def render(soc):
         soc.evidence_button.pack(side='left')
     else:
         soc.evidence_button.pack_forget()
-    chat_signature = tuple(soc.history)
+    chat_signature = tuple(id(entry) for entry in soc.history)
     if chat_signature != soc._chat_signature:
         bottom = soc.chat.yview()[1] >= .98
         position = soc.chat.yview()[0]
-        soc.chat.configure(state='normal')
-        soc.chat.delete('1.0', 'end')
-        soc.chat.insert('1.0', '\n\n'.join(soc.history))
-        soc.chat.configure(state='disabled')
+        draw_chat(soc)
         soc.chat.see('end') if bottom else soc.chat.yview_moveto(position)
         soc._chat_signature = chat_signature
+
+
+def person_colour(name):
+    return PEOPLE[sum(map(ord, name.lower())) % len(PEOPLE)]
+
+
+def place(lat, lon):
+    """A shared position, or None unless both numbers are real coordinates."""
+    if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in (lat, lon)):
+        return None
+    return (lat, lon) if abs(lat) <= 90 and abs(lon) <= 180 else None
+
+
+def contact_summary(text):
+    """One readable line for a shared AIS contact and its position; other text is returned unchanged."""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return text, None
+    if not isinstance(data, dict):
+        return text, None
+    parts = [str(data.get('name') or 'Unnamed vessel')]
+    if data.get('mmsi'):
+        parts.append(f"MMSI {data['mmsi']}")
+    point = place(data.get('lat'), data.get('lon'))
+    if point:
+        parts.append(coordinates(*point))
+    for key, unit in (('sog_kn', ' kn'), ('cog_deg', '°')):
+        value = data.get(key)
+        if not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value):
+            parts.append(f"{value:.1f}{unit}" if unit == ' kn' else f"{value:.0f}{unit}")
+    received = str(data.get('received_utc') or '')
+    if len(received) >= 16 and received[10] == 'T':
+        parts.append(f"fix {received[11:16]} UTC")
+    if data.get('label'):
+        parts.append(str(data['label']))
+    return ' · '.join(parts), point
+
+
+def draw_chat(soc):
+    """Messages grouped by person, like a team chat: name and UTC time once, then each message."""
+    inner = soc.chat._textbox  # CustomTkinter refuses fonts in tag_config; its inner Text accepts them.
+    scale = ctk.ScalingTracker.get_widget_scaling(soc.chat)
+    size = lambda pixels: -round(pixels * scale)  # Negative sizes are pixels, scaled as CustomTkinter does.
+    inner.tag_configure('name', font=('Segoe UI', size(13), 'bold'))
+    inner.tag_configure('gap', spacing1=round(14 * scale))  # Space above each person's name line.
+    inner.tag_configure('time', font=('Segoe UI', size(11)), foreground=MUTED)
+    inner.tag_configure('kind', font=('Segoe UI', size(11), 'bold'), foreground=MUTED, spacing1=round(3 * scale))
+    inner.tag_configure('mono', font=('Consolas', size(13)))
+    inner.tag_configure('quote', lmargin1=round(12 * scale), lmargin2=round(12 * scale), foreground='#c3ced7')
+    inner.tag_configure('link', foreground=ACCENT, underline=True)
+    inner.tag_configure('empty', foreground=MUTED)
+    soc.chat.configure(state='normal')
+    soc.chat.delete('1.0', 'end')
+    if not soc.history:
+        soc.chat.insert('end', 'No messages yet. Messages, map pings and shared contacts appear here, '
+                               'encrypted between the participants.', 'empty')
+    previous = None
+    for index, entry in enumerate(soc.history):
+        sender = entry['sender']
+        if not previous or previous['sender'] != sender or entry['at'] - previous['at'] > GROUP_SECONDS:
+            tag = 'person:' + ('you' if entry['own'] else sender.lower())
+            inner.tag_configure(tag, foreground=ACCENT if entry['own'] else person_colour(sender))
+            spacing = ('gap',) if previous else ()
+            soc.chat.insert('end', sender, ('name', tag) + spacing)
+            soc.chat.insert('end', '  ' + time.strftime('%H:%M UTC', time.gmtime(entry['at'])) + '\n', ('time',) + spacing)
+        kind, point = entry['kind'], entry.get('point')
+        if kind == 'chat':
+            soc.chat.insert('end', entry['text'] + '\n')
+        elif kind == 'ping':
+            soc.chat.insert('end', 'Ping  ', 'kind')
+            soc.chat.insert('end', coordinates(*point), 'mono')
+        elif kind == 'contact':
+            summary, point = contact_summary(entry['text'])
+            soc.chat.insert('end', 'Contact  ', 'kind')
+            soc.chat.insert('end', summary)
+        elif kind == 'report':
+            soc.chat.insert('end', 'Vessel report\n', 'kind')
+            soc.chat.insert('end', entry['text'] + '\n', 'quote')
+        else:
+            soc.chat.insert('end', 'Evidence summary\n', 'kind')
+            soc.chat.insert('end', entry['text'] + '\n', 'quote')
+        if kind in ('ping', 'contact'):
+            if point:
+                link = f'show:{index}'
+                soc.chat.insert('end', '   ')
+                soc.chat.insert('end', 'Show on map', ('link', link))
+                inner.tag_bind(link, '<Button-1>', lambda _event, where=point: soc.show_point(where))
+                inner.tag_bind(link, '<Enter>', lambda _event: inner.configure(cursor='hand2'))
+                inner.tag_bind(link, '<Leave>', lambda _event: inner.configure(cursor=''))
+            soc.chat.insert('end', '\n')
+        previous = entry
+    soc.chat.configure(state='disabled')

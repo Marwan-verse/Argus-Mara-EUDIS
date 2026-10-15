@@ -24,6 +24,8 @@ from argus.collab_store import Store, name, password
 SERVICE = web.AppKey("soc", object)
 KINDS = {"chat": "chat", "ping": "ping", "contact": "contact.share", "evidence": "evidence.share",
          "report": "contact.share"}
+PUBLIC_PATHS = {"/v1/login", "/v1/signup"}  # Everything else needs a signed-in token.
+PENDING_LIMIT = 20  # Requested accounts waiting for an administrator at once.
 
 
 @dataclass
@@ -206,7 +208,7 @@ async def security(request, handler):
     if request.path != "/healthz":
         client = request["client"] = relay.client_address(request)
         user = token = None
-        if request.path != "/v1/login":
+        if request.path not in PUBLIC_PATHS:
             header = request.headers.get("Authorization", "")
             if header.startswith("Bearer ") and 20 <= len(header[7:]) <= 128:
                 token = header[7:]
@@ -219,7 +221,7 @@ async def security(request, handler):
             # first, so a flood of them cannot use up signed-in people's limits.
             relay.limit(("anonymous", client), 120)
             relay.limit(("anonymous",), 6000)
-            if request.path != "/v1/login":
+            if request.path not in PUBLIC_PATHS:
                 raise web.HTTPUnauthorized(text="Sign in required")
     try:
         response = await handler(request)
@@ -253,8 +255,28 @@ async def login(request):
     current = relay.store.credential(username)
     if not valid or not current or current["disabled"] or current["password_hash"] != row["password_hash"]:
         raise web.HTTPUnauthorized(text="Invalid username or password")
+    user = relay.store.user(current["id"])
+    if not user["groups"] and not user["admin"]:
+        raise web.HTTPForbidden(text="Your account is waiting for an administrator to add you to a group")
     token, expires = relay.store.issue_token(current["id"], relay.config.token_ttl)
-    return json_response({"token": token, "expires": expires, "user": relay.store.user(current["id"])})
+    return json_response({"token": token, "expires": expires, "user": user})
+
+
+async def signup(request):
+    """Request an account. It has no group, so it cannot sign in until an administrator adds one."""
+    relay = request.app[SERVICE]
+    data = await body(request)
+    username = name(data.get("username"))
+    secret = password(data.get("password"))
+    relay.limit(("signup-address", request["client"]), 3, 600)
+    relay.limit(("signup-global",), 30, 600)
+    if relay.store.pending_count() >= PENDING_LIMIT:
+        raise web.HTTPServiceUnavailable(text="Too many accounts are waiting for approval; ask an administrator")
+    if relay.store.credential(username):
+        raise ValueError("Username already exists")
+    hashed = await relay.hash_work(relay.store.hasher.hash, secret)
+    relay.store.create_user(username, hashed, [], action="user.signup")
+    return json_response({"ok": True, "username": username, "pending": True})
 
 
 async def me(request):
@@ -483,6 +505,7 @@ def create_app(config):
         return json_response({"ready": True, "service": "argus-soc", "protocol": 2})
     app.router.add_get("/healthz", health)
     app.router.add_post("/v1/login", login)
+    app.router.add_post("/v1/signup", signup)
     app.router.add_get("/v1/me", me)
     app.router.add_post("/v1/logout", logout)
     app.router.add_post("/v1/rooms", create_room)
