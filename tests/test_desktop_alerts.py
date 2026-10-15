@@ -167,6 +167,7 @@ class DesktopAlertBoardTests(unittest.TestCase):
         path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
         window.verify()
         self.assertIn('Record 1: the signature does not match', window.result.cget('text'))
+        self.assertIn('Escalated  · CHANGED AFTER SIGNING', window.text.get('1.0', 'end'))
         window.window.destroy()
 
     def test_exercise_incident_shares_review_status_and_map_click_opens_it(self):

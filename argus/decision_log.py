@@ -53,6 +53,7 @@ class Verification:
     key: str = ""  # Fingerprint of the key that signed the log.
     seal: str = ""  # Short hash of the last line.
     problems: list = field(default_factory=list)
+    bad: dict = field(default_factory=dict)  # Record number: "changed" (its signature) or "link" (its place in the chain).
 
     def summary(self):
         if not self.ok:
@@ -130,6 +131,11 @@ class DecisionLog:
             os.fsync(stream.fileno())
         return line
 
+    def seal(self):
+        """Short hash of the last line; it changes if records are removed from the end."""
+        lines = self.lines()
+        return grouped(line_hash(lines[-1]), 2) if lines else ""
+
     def verify(self):
         return verify_lines(self.lines(), expected_key=self.public_key() if self.key_path.exists() else None)
 
@@ -162,11 +168,14 @@ def verify_lines(lines, expected_key=None):
             public.verify(base64.b64decode(record["sig"]), canonical(unsigned))
         except (KeyError, TypeError, ValueError, InvalidSignature):
             result.problems.append(f"Record {index}: the signature does not match. The record was changed after signing.")
+            result.bad[index] = "changed"
             continue
         if record.get("seq") != index:
             result.problems.append(f"Record {index}: its number is {record.get('seq')}. Records were removed or reordered.")
+            result.bad[index] = "link"
         elif index and record.get("prev") != line_hash(lines[index - 1]):
             result.problems.append(f"Record {index}: the record before it was changed, removed or moved.")
+            result.bad[index] = "link"
     result.ok = not result.problems
     return result
 

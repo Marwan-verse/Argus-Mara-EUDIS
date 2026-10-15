@@ -45,6 +45,7 @@ class DecisionLogTests(unittest.TestCase):
         result = self.log.verify()
         self.assertFalse(result.ok)
         self.assertEqual(result.problems[0], "Record 2: the signature does not match. The record was changed after signing.")
+        self.assertEqual(result.bad, {2: "changed", 3: "link"})  # Record 3 only lost its link to record 2.
 
     def test_removed_or_reordered_records_break_the_chain(self):
         lines = self.lines()

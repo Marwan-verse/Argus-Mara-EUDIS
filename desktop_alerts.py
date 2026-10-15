@@ -1189,17 +1189,21 @@ class DecisionLogWindow:
         tk.Label(top, text="SIM", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 7, "bold"), padx=5,
                  highlightthickness=1, highlightbackground=ui.LINE).pack(side="left", padx=(8, 0), pady=(3, 0))
         self.key_label = tk.Label(self.window, text="", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 10), anchor="w",
-                                  justify="left")
+                                  justify="left", wraplength=720)
         self.key_label.pack(fill="x", padx=18)
         self.text = ctk.CTkTextbox(self.window, wrap="word", fg_color=ui.BG, text_color=ui.INK,
                                    font=ctk.CTkFont(SANS, 12), corner_radius=6)
         self.text.pack(fill="both", expand=True, padx=18, pady=10)
+        self.text.tag_config("changed", foreground=STYLE["critical"][0])
+        self.text.tag_config("link", foreground=STYLE["medium"][0])
+        self.bad: dict = {}  # From the last check: record number -> "changed" or "link".
         self.result = tk.Label(self.window, text="", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 11), anchor="w",
                                justify="left", wraplength=700)
         self.result.pack(fill="x", padx=18)
         buttons = tk.Frame(self.window, bg=ui.CARD)
         buttons.pack(fill="x", padx=18, pady=(8, 16))
-        self.verify_button = ctk.CTkButton(buttons, text="Verify signatures", command=self.verify, width=150, height=30)
+        self.verify_button = ctk.CTkButton(buttons, text="Verify signatures", command=self.verify, width=150, height=30,
+                                           fg_color=ui.TEAL, hover_color="#6ed5e3", text_color=ui.BG)
         self.verify_button.pack(side="left")
         ctk.CTkButton(buttons, text="Show the file", command=self.show_file, width=120, height=30,
                       fg_color="transparent", border_width=1).pack(side="left", padx=8)
@@ -1214,9 +1218,11 @@ class DecisionLogWindow:
             records = None
         key = log.public_key() if log.key_path.exists() else None
         from argus.decision_log import fingerprint
+        seal = log.seal()
         self.key_label.configure(text=(f"Signed on this computer with key {fingerprint(key)}. "
                                        if key else "No decisions yet; this computer gets its key with the first one. ")
-                                 + f"File: {log.path}")
+                                 + (f"Seal of the last record: {seal}. Note it down: removing records from the "
+                                    "end changes it. " if seal else "") + f"File: {log.path}")
         self.text.configure(state="normal")
         self.text.delete("1.0", "end")
         if records is None:
@@ -1225,8 +1231,11 @@ class DecisionLogWindow:
         for record in reversed(rows):
             when = record.get("time", "")[11:19] + " UTC" if len(record.get("time", "")) >= 19 else record.get("time", "")
             vessel = f"{record['vessel']} ({record['alert']}) · " if record.get("vessel") else ""
-            self.text.insert("end", f"{when} · {record.get('operator', '?')} · {record.get('action', '?')}\n")
-            self.text.insert("end", f"    {vessel}{record.get('detail', '')}\n")
+            problem = self.bad.get(record.get("seq"))
+            tags = (problem,) if problem else ()
+            changed = {"changed": "  · CHANGED AFTER SIGNING", "link": "  · LINK BROKEN"}.get(problem, "")
+            self.text.insert("end", f"{when} · {record.get('operator', '?')} · {record.get('action', '?')}{changed}\n", tags)
+            self.text.insert("end", f"    {vessel}{record.get('detail', '')}\n", tags)
         if records is not None and not rows:
             self.text.insert("end", "No decisions yet. Acknowledge, escalate, reject or send a responder, "
                                     "and each decision appears here, signed.")
@@ -1234,6 +1243,7 @@ class DecisionLogWindow:
 
     def verify(self) -> None:
         result = self.board.decision_log.verify()
+        self.bad = result.bad
         colour = VERIFIED if result.ok else STYLE["critical"][0]
         details = "" if result.ok or len(result.problems) == 1 else f"  (+{len(result.problems) - 1} more)"
         self.result.configure(text=result.summary() + details, fg=colour)
