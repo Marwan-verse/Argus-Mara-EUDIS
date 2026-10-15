@@ -123,6 +123,10 @@ class SOCClient:
             self.token = None
             raise
 
+    def signup(self, username, password):
+        """Request an account; it can sign in once an administrator adds it to a group."""
+        return self.request("POST", "/v1/signup", {"username": username, "password": password})
+
     def create(self, group=None):
         self.leave()
         cipher = RoomCipher()
