@@ -153,6 +153,10 @@ preserves the draft and never retries automatically. Check with colleagues befor
 retrying an uncertain send; an unchanged retry keeps its ID so receiving clients
 can suppress duplicates. Update the relay and all clients together for the new
 `report` message kind. Reports received by a client are never sent back as new reports.
+Submitting during background polling queues one report behind the current request;
+no second click is needed. The send remains bound to the selected room, and a
+session change before delivery stops it and preserves the draft. A failed network
+send is still never retried automatically.
 
 HTTPS polling delivers changes about every 1.5 seconds. Leave closes the room
 for all participants. Logout and account revocation close rooms. There are no silent

@@ -101,16 +101,19 @@ class ReportDialog:
             self.saved("Local analyst", False)
             return
         soc = app.soc
-        if soc.busy or soc.pending or soc.stopping:
-            self.problem.configure(text="A SOC request is finishing. Your draft is saved; try again in a moment.")
-            return
         self.pending = True
         self.submit_button.configure(state="disabled")
         self.cancel.configure(state="disabled")
         self.category.configure(state="disabled")
         self.reason.configure(state="disabled")
-        self.problem.configure(text="Sharing report with your SOC session…")
-        soc.send_message("report", self.report, lambda: self.saved(app.soc_client.user["username"], True))
+        self.problem.configure(text="Report queued; waiting for the current SOC request…" if soc.pending else
+                               "Sharing report with your SOC session…", text_color=MUTED)
+        sender = app.soc_client.user["username"]
+        accepted = soc.send_message("report", self.report, lambda: self.saved(sender, True),
+                                    expected_room=self.scope[1])
+        if not accepted:
+            self.delivery_failed(soc.last_status)
+            return
         self.window.after(100, self.check_delivery)
 
     def check_delivery(self):
@@ -119,12 +122,15 @@ class ReportDialog:
         if self.app.soc.busy:
             self.window.after(100, self.check_delivery)
             return
+        self.delivery_failed(self.app.soc.last_status + " Delivery may be uncertain; check with your team before retrying.")
+
+    def delivery_failed(self, text):
         self.pending = False
         self.submit_button.configure(state="normal")
         self.cancel.configure(state="normal")
         self.category.configure(state="normal")
         self.reason.configure(state="normal")
-        self.problem.configure(text=self.app.soc.last_status + " Delivery may be uncertain; check with your team before retrying.")
+        self.problem.configure(text=text, text_color="#ffb176")
 
     def saved(self, sender, shared):
         self.app.vessel_reports.add(self.report, sender, shared=shared)

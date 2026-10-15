@@ -81,7 +81,7 @@ Both client and server information should be available. An installed Docker CLI
 alone is insufficient. Docker Hub sign-in is not required for these public images.
 See the [official Windows installation guide](https://docs.docker.com/desktop/setup/install/windows-install/).
 
-## 2. Prepare the two sample accounts
+## 2. Prepare the sample accounts
 
 The private `data/soc-local/demo.env` has already been prepared on Ihor's PC with
 the requested sample passwords. It is ignored by Git and excluded from the Docker
@@ -90,14 +90,16 @@ build context. The password values are deliberately not included in this documen
 | Login | Membership | Access |
 | --- | --- | --- |
 | `Mykhailo` | `intelligence`, `user` | Intelligence tools and participation in Igor's common user room |
-| `Igor` | `user` | Standard operator tools and communication |
+| `Igor` | `intelligence`, `user` | Full operator tools, matching Marwan's operator access |
+| `Bob` | `user` | Standard operator tools and communication; restricted comparison account |
 | `admin` | `intelligence`, `user`, plus admin flag | Account/group management; separate generated long password |
 
-Logins are case-insensitive, passwords are case-sensitive. Neither Mykhailo nor
-Igor has administrator privileges. Mykhailo has both memberships so that the two
-accounts can still communicate in a private `user` room. A Team session does not
-require their groups to overlap. Igor cannot join a private intelligence room
-until an administrator adds that membership.
+Logins are case-insensitive, passwords are case-sensitive. Mykhailo, Igor and Bob
+have no administrator privileges. Mykhailo and Igor can use private
+intelligence rooms as well as user rooms. A Team session does not require groups
+to overlap. Bob cannot join a private intelligence room. Seeding does not change
+existing accounts; an administrator must update an existing Igor's memberships,
+which revokes old sign-ins and rooms.
 
 On a new development PC, create the private file:
 
@@ -111,12 +113,14 @@ Fill it with your own test values and save:
 ```text
 ARGUS_DEMO_MYKHAILO_PASSWORD=<chosen local Mykhailo password>
 ARGUS_DEMO_IGOR_PASSWORD=<chosen local Igor password>
+ARGUS_DEMO_BOB_PASSWORD=<chosen local Bob password>
 ARGUS_DEMO_ADMIN_PASSWORD=<unique password of at least 14 characters>
 ```
 
 Replace the placeholders. Do not commit or distribute this file. Short sample
 passwords are accepted only by the explicitly enabled local seeding command with
-a localhost origin. Normal account creation still requires 14–128 characters.
+a localhost origin. Bob's local-only seed accepts a requested password of 3–128
+characters. Normal account creation and reset still require 14–128 characters.
 Seeding creates missing accounts and never silently changes an existing password.
 
 ## 3. Start Docker and open two application windows
@@ -169,8 +173,9 @@ TLS verification stays enabled and the CA private key is not exported.
 9. Select an AIS contact and use **Share selected contact**. The peer receives a
    text summary. AIS may be empty when the separate public AIS service has no
    data; chat and pings do not depend on that feed.
-10. Verify the permission difference: Igor has no evidence-sharing/review tools,
-    while Mykhailo's account does. A mixed Team room allows only everyone's common
+10. Igor and Mykhailo both have full operator tools. To verify restricted access,
+    sign in as Bob in a separate test: Bob has no evidence-sharing/review tools.
+    A mixed Team room allows only everyone's common
     message tools; evidence sharing needs a session with authorized
     members. A refused evidence send in the user room is expected.
 11. Leave on either client. The room closes for everyone. Create a fresh session

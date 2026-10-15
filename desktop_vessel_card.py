@@ -106,7 +106,8 @@ class VesselCard:
         self.fleet_button.pack(side='left')
         self.details_button = self.button(actions, 'Vessel details', self.open_details, width=146, primary=True)
         self.details_button.pack(side='right')
-        self.report_button = self.button(self.body, 'Report vessel', self.report_vessel, width=146)
+        self.report_button = self.button(self.body, 'Report vessel', self.report_vessel, width=146,
+            primary=True, image=self.icons.get('alerts', WHITE, 18))
         self.report_button.pack(fill='x', padx=8, pady=(0, 8))
 
         voyage = ctk.CTkFrame(self.body, fg_color=WHITE)

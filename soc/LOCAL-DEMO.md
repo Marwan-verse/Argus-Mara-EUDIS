@@ -27,7 +27,7 @@ command can finish. Closing clients leaves shared containers running and preserv
 accounts/certificates. Use the stop command below when the server is no longer needed.
 
 If `data/soc-local/demo.env` is absent, startup creates random passwords for
-`Mykhailo`, `Igor` and `admin` in that ignored private file. Open it locally to read
+`Mykhailo`, `Igor`, `Bob` and `admin` in that ignored private file. Open it locally to read
 them; passwords are never logged or passed as process arguments. Existing files
 and account passwords are preserved. Preserve the file with the account volume:
 recreating the file does not reset accounts already in Docker.
@@ -58,6 +58,7 @@ Create the private `data/soc-local/demo.env` from the repository root:
 ```text
 ARGUS_DEMO_MYKHAILO_PASSWORD=<local Mykhailo test password>
 ARGUS_DEMO_IGOR_PASSWORD=<local Igor test password>
+ARGUS_DEMO_BOB_PASSWORD=<local Bob test password>
 ARGUS_DEMO_ADMIN_PASSWORD=<separate long administrator password>
 ```
 
@@ -69,9 +70,15 @@ must have at least 14 characters. Short passwords are permitted only by local
 demo seeding; normal account creation still requires at least 14 characters.
 Do not publish this file or reuse sample passwords on other services.
 
-`Mykhailo` belongs to `intelligence` and `user`; `Igor` belongs only to `user`.
-Logins are case-insensitive and passwords are case-sensitive. Neither account
-is an administrator. A separate `admin` account manages users and groups.
+New local demos give `Mykhailo` and `Igor` both `intelligence` and `user`, matching
+the full operator access of the retained `marwan` account. `Bob` belongs only to
+`user`, for demonstrating restricted access. None of these accounts is an
+administrator; the separate `admin` account manages users and groups. Existing
+accounts are never changed by seeding; grant an existing Igor both groups through
+Administration. Such an update revokes that account's sign-ins and rooms, so sign
+in again afterward. Logins are case-insensitive; passwords are case-sensitive.
+Bob's local-only seed accepts 3–128 characters for a requested short test password.
+The normal account creation and password-reset APIs still require 14–128 characters.
 
 ## 3. Start the local server
 
@@ -107,16 +114,18 @@ is unchanged and TLS verification remains enabled.
    pairs; only the two codes within the same pair must match.
 6. Once everyone is verified, send a message. Use Ping on the right map toolbar:
    peers see the coordinate marker for 15 seconds.
-7. Select an AIS contact and use **Share selected contact**. Igor cannot share
-   evidence until an administrator grants the appropriate permission.
+7. Select an AIS contact and use **Share selected contact**. Igor and Mykhailo can
+   also share evidence. Use Bob in another session to demonstrate restricted
+   access; Bob cannot share evidence, review alerts or review responses.
 
 Team sessions allow people from different groups without a shared membership;
 only tools permitted for every participant are available. **Private: group-name**
 restricts membership to that group. Invitations are eight symbols with copying;
 the more readable verification code retains all 128 bits.
 
-For a third participant, admin creates an account with `chat` and `map.view`
-access. Open another client and join before the roster is fixed. Adding someone
+For a third participant, use the restricted Bob account, or have admin create a
+custom account with `chat` and `map.view` access. Open another client and join
+before the roster is fixed. Adding someone
 afterward requires a new room and fresh verification. Leaving, revocation or
 login expiry closes the session, preventing key reuse with changed membership.
 

@@ -335,7 +335,7 @@ class DesktopSOC:
     def task(self, function, callback=None, background=False):
         if self.stopping or self.pending >= 8:
             self.status("Please wait for the current request")
-            return
+            return False
         self.pending += 1
         if not background:
             self.busy += 1
@@ -346,6 +346,7 @@ class DesktopSOC:
             except Exception as error:
                 self.events.put((callback, None, error, background))
         self.executor.submit(job)
+        return True
 
     def tick(self):
         if self.stopping:
@@ -568,21 +569,28 @@ class DesktopSOC:
         from desktop_soc_view import render
         render(self)
 
-    def send_message(self, kind, payload, on_success=None):
+    def send_message(self, kind, payload, on_success=None, *, expected_room=None):
         if not self.client:
             self.status('Sign in to communicate.')
-            return
+            return False
         permissions = (self.client.room or {}).get('permissions', self.client.user['permissions'])
         if KINDS.get(kind) not in permissions:
             self.status('This tool is not available to everyone in the session.')
-            return
+            return False
+        client = self.client
+        def send():
+            # A queued report must never move to a different room after polling.
+            if expected_room is not None and (self.client is not client or
+                    (client.room or {}).get('room_id') != expected_room):
+                raise ClientError('SOC session changed. Reopen this form for the new session.', 409)
+            return client.send(kind, payload)
         def done(_):
             self.record('You', True, kind, payload)
             if on_success:
                 on_success()
             self.status('Message sent.' if kind == 'chat' else 'Shared with your team.')
             self.render()
-        self.task(lambda: self.client.send(kind, payload), done)
+        return self.task(send, done)
 
     def send_text(self):
         if self.busy:

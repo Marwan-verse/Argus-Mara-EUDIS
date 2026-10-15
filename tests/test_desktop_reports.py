@@ -1,5 +1,6 @@
 """Native report submission, incident display and SOC delivery failure behavior."""
 import time
+import threading
 import tkinter as tk
 from unittest.mock import Mock, patch
 import unittest
@@ -129,3 +130,56 @@ class DesktopReportTests(unittest.TestCase):
         dialog.submit()
         self.assertIn("session changed", dialog.problem.cget("text"))
         client.send.assert_not_called()
+
+    def test_background_poll_queues_one_report_without_requiring_another_click(self):
+        client = self.connect()
+        release = threading.Event()
+        def delayed_poll():
+            release.wait(3)
+            return []
+        dialog = open_report(self.app, VESSEL)
+        dialog.reason.insert('1.0', 'A report submitted during the background poll.')
+        self.app.soc.task(delayed_poll, self.app.soc.receive, background=True)
+        try:
+            dialog.submit()
+            dialog.submit()  # A second click cannot add another send.
+            self.assertTrue(dialog.pending)
+            self.assertIn('queued', dialog.problem.cget('text'))
+            client.send.assert_not_called()
+        finally:
+            release.set()
+        self.pump()
+        client.send.assert_called_once()
+        self.assertEqual(len(self.app.vessel_reports.entries), 1)
+
+    def test_session_change_during_queued_poll_cannot_send_to_another_team(self):
+        client = self.connect()
+        release = threading.Event()
+        def change_room():
+            release.wait(3)
+            client.room['room_id'] = 'another-team'
+            return []
+        dialog = open_report(self.app, VESSEL)
+        dialog.reason.insert('1.0', 'Only for the original team.')
+        self.app.soc.task(change_room, self.app.soc.receive, background=True)
+        dialog.submit()
+        release.set()
+        self.pump()
+        client.send.assert_not_called()
+        self.assertEqual(self.app.vessel_reports.entries, [])
+        self.assertIn('session changed', dialog.problem.cget('text'))
+        self.assertIn('Only for the original team', dialog.reason.get('1.0', 'end'))
+
+    def test_full_queue_preserves_draft_and_restores_submit_controls(self):
+        client = self.connect()
+        dialog = open_report(self.app, VESSEL)
+        dialog.reason.insert('1.0', 'A draft that must stay editable.')
+        self.app.soc.pending = 8
+        try:
+            dialog.submit()
+            self.assertFalse(dialog.pending)
+            self.assertEqual(str(dialog.submit_button.cget('state')), 'normal')
+            self.assertIn('draft that must stay editable', dialog.reason.get('1.0', 'end'))
+            client.send.assert_not_called()
+        finally:
+            self.app.soc.pending = 0

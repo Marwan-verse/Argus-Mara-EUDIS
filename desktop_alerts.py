@@ -1192,8 +1192,10 @@ class ReviewDialog:
         self.tag.pack(side="right", padx=(0, 10))
         name_row = tk.Frame(self.frame, bg=ui.CARD)
         name_row.pack(fill="x", padx=20, pady=(4, 0))
-        self.report_button = ctk.CTkButton(name_row, text="Report", width=70, height=28,
-            fg_color=ui.CARD, hover_color=ui.HOVER, text_color=ui.INK,
+        self.report_button = ctk.CTkButton(name_row, text="Report vessel", width=140, height=36,
+            fg_color="#47c7da", hover_color="#6ed5e3", text_color=ui.BG,
+            font=ctk.CTkFont(SANS, 12, "bold"),
+            image=app.tools.icons.get("alerts", ui.BG, 18),
             command=self.report_vessel)
         self.report_button.pack(side="right", padx=(5, 0))
         self.name = tk.Label(name_row, text="", bg=ui.CARD, fg=ui.INK, font=(SANS, 18, "bold"), anchor="w")
