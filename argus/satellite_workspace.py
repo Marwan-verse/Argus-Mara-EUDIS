@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 import shutil
 
-from argus import satellite
+from argus import satellite, supabase_ais
 from argus.satellite_ais import ArchiveChanged, associate, attach_latest, historical_ais
 from argus.satellite_ai import PILOT_USD, get_key, read_ledger, visual_analysis
 
@@ -134,6 +134,9 @@ class SatelliteWorkspace:
                   'review_status': 'unreviewed',
                   'automatic': automatic, 'quality_excluded_contacts': excluded,
                   'caveat': 'Possible visual contacts and AIS associations require operator review. Unmatched does not mean hostile or deliberately dark. No operational response is sent.'}
+        if supabase_ais.linked(self.root):
+            # Free and best-effort: the paid image request has already finished.
+            result['database'] = supabase_ais.publish_review(scene, contacts, self.scenes)
         satellite.atomic_json(self.root/'reviews'/(identifier+'.json'), result)
         return result
 
@@ -169,11 +172,25 @@ class SatelliteWorkspace:
                     'coverage': {'status': 'unavailable', 'eligible_vessels': 0, 'files_scanned': 0,
                                  'complete_regional_census': False,
                                  'caveat': 'Synthetic or unverified imagery cannot be associated with real archived AIS.'}}
+        note = None
+        if supabase_ais.linked(self.root):
+            # The team database records the Railway feed every 30 s even when no
+            # app is open, so it is preferred over this computer's own capture.
+            try:
+                ais = supabase_ais.historical_ais_from_database(scene['acquired_utc'], scene['bbox'])
+                if ais['coverage'].get('database_position_rows'):
+                    return ais
+                note = 'The team database has no AIS near this acquisition time; local archive used.'
+            except ValueError as error:
+                note = 'Team database unavailable (%s); local archive used.' % str(error)[:120]
         try:
-            return historical_ais(self.archive_root, scene['acquired_utc'], scene['bbox'])
+            ais = historical_ais(self.archive_root, scene['acquired_utc'], scene['bbox'])
         except ArchiveChanged:
             # Retry only the free file read, before visual_analysis is called.
-            return historical_ais(self.archive_root, scene['acquired_utc'], scene['bbox'])
+            ais = historical_ais(self.archive_root, scene['acquired_utc'], scene['bbox'])
+        if note:
+            ais['coverage']['database_note'] = note
+        return ais
 
     def review(self, identifier):
         self.scene(identifier)
