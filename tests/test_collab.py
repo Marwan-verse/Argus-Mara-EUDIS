@@ -448,6 +448,18 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.api("DELETE", "/v1/admin/groups/custom", self.alice))[0], 200)
         self.assertEqual((await self.api("PUT", f"/v1/admin/users/{self.alice['id']}", self.alice, {"groups": []}))[0], 400)
 
+    async def test_report_requires_contact_sharing_for_all_room_members(self):
+        from argus.vessel_reports import make_report
+        # The sender can share contacts, but the user-scoped room cannot.
+        self.relay.store.set_group("user", ["map.view", "chat"], self.alice["id"])
+        a, b, created, joined = await self.confirmed_room()
+        report = make_report({"id": "123456789", "name": "TEST CONTACT", "label": "simulated",
+                              "lat": 53.2, "lon": -6.1}, "Other", "Written reason for review.")
+        path = f"/v1/rooms/{created['room_id']}/messages"
+        for user, cipher in ((self.alice, a), (self.bob, b)):
+            status, _ = await self.api("POST", path, user, cipher.encrypt("report", report))
+            self.assertEqual(status, 403)
+
     async def test_admin_account_creation_disable_and_password_policy(self):
         data = {'username': 'charlie', 'password': 'weak', 'groups': ['user']}
         self.assertEqual((await self.api('POST', '/v1/admin/users', self.alice, data))[0], 400)
@@ -534,6 +546,18 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.to_thread(b.send, "ping", {"lat": 53.35, "lon": -6.25})
         self.assertEqual((await asyncio.to_thread(a.poll))[0]["payload"], {"lat": 53.35, "lon": -6.25})
         self.assertEqual((await asyncio.to_thread(c.poll))[0]['payload'], {'lat': 53.35, 'lon': -6.25})
+        from argus.vessel_reports import make_report, ReportStore
+        report = make_report({"id": "123456789", "name": "TEST CONTACT", "label": "simulated",
+                              "lat": 53.2, "lon": -6.1}, "Other", "SYNTHETIC_REPORT_REASON")
+        await asyncio.to_thread(a.send, "report", report)
+        for peer in (b, c):
+            received = (await asyncio.to_thread(peer.poll))[0]
+            self.assertEqual(received["kind"], "report")
+            self.assertEqual(received["sender"], "alice")
+            inbox = ReportStore()
+            inbox.add(received["payload"], received["sender"], shared=True)
+            self.assertEqual(inbox.grouped()[0][0]["report"], report)
+        self.assertNotIn("SYNTHETIC_REPORT_REASON", json.dumps(self.relay.snapshot(self.relay.rooms[room['room_id']])))
         bad = SOCClient(url)
         with self.assertRaises(ClientError):
             await asyncio.to_thread(bad.login, "bob", SECRET)

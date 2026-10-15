@@ -74,6 +74,11 @@ class VesselCardWindowTests(unittest.TestCase):
             self.assertIn('unavailable', card.hero.cget('text'))
             self.assertIn('simulated', card.source.cget('text'))
             self.assertIn('unknown', card.source.cget('text'))
+            card.report_button.invoke()
+            root.update()
+            self.assertEqual(app.report_dialog.vessel['id'], '250123456')
+            self.assertEqual(app.report_dialog.vessel['label'], 'simulated')
+            app.report_dialog.close()
             self.assertEqual(len(card.flag.find_all()), 3)
             self.assertTrue(app.map.find_withtag('selected_ais_name'))
             self.assertTrue(any(app.map.type(item) == 'line' and app.map.itemcget(item, 'fill') == '#ffd15a'

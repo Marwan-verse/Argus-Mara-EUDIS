@@ -22,7 +22,8 @@ from aiohttp import web
 from argus.collab_store import Store, name, password
 
 SERVICE = web.AppKey("soc", object)
-KINDS = {"chat": "chat", "ping": "ping", "contact": "contact.share", "evidence": "evidence.share"}
+KINDS = {"chat": "chat", "ping": "ping", "contact": "contact.share", "evidence": "evidence.share",
+         "report": "contact.share"}
 PUBLIC_PATHS = {"/v1/login", "/v1/signup"}  # Everything else needs a signed-in token.
 PENDING_LIMIT = 20  # Requested accounts waiting for an administrator at once.
 
