@@ -1546,7 +1546,7 @@ class ArgusApp:
         self.panel_visible = True
         self.panel_caption.configure(text=title)
         self._position_console_panel()
-        if not already_open:
+        if not already_open and self.tools.panel_position is None:
             self.tools.animate('details', self.floating_panel, (-46, 16), (-70, 16), {'relx': 1, 'anchor': 'ne'})
 
     def _position_console_panel(self) -> None:
@@ -1560,8 +1560,18 @@ class ArgusApp:
             # Stay clear of the mode bar, and of the replay bar while the exercise is shown.
             bottom = 200 if self.exercise_visible.get() else 120
             height = max(350, self.chart_host.winfo_height() - bottom)
-            self.floating_panel.configure(width=right_width, height=height)
-            self.floating_panel.place(relx=1, x=-70, y=16, anchor="ne")
+            if self.tools.panel_position is None:
+                self.floating_panel.configure(width=right_width, height=height)
+                self.floating_panel.place(relx=1, x=-70, y=16, anchor="ne")
+            else:
+                # The operator dragged the panel: keep its right edge, so the left-edge resize still works.
+                scaling = ctk.ScalingTracker.get_widget_scaling(self.chart_host)
+                host_width = self.chart_host.winfo_width() / scaling
+                host_height = self.chart_host.winfo_height() / scaling
+                right, top = self.tools.clamp_panel(right_width, host_width, host_height)
+                height = min(height, max(250, host_height - top - 16))
+                self.floating_panel.configure(width=right_width, height=height)
+                self.floating_panel.place(relx=0, x=right, y=top, anchor="ne")
         if hasattr(self, "alert_board") and self.alert_board.dialog.visible:
             self.alert_board.dialog.place()
 

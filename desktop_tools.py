@@ -73,6 +73,8 @@ class ConsoleTools:
         self.palette = None
         self.save_timer = None
         self.drag = None
+        self.move_drag = None
+        self.panel_position = None  # (right edge, top) over the map once the panel is dragged
         self.legend_sar = None
         self.icons = Icons()
         self.alert_details = {}
@@ -97,6 +99,10 @@ class ConsoleTools:
             value = self.settings.get(attribute, default)
             setattr(self, attribute, max(minimum, min(maximum, value)) if type(value) is int else default)
         self.alerts_visible = self.settings.get('alerts_visible', True) is not False
+        position = self.settings.get('panel_position')
+        if (isinstance(position, list) and len(position) == 2
+                and all(type(v) in (int, float) and math.isfinite(v) for v in position)):
+            self.panel_position = tuple(position)
         self.reduced_motion.set(self.settings.get('reduced_motion', self.reduced_motion.get()) is True)
         for name, view in self.settings.get('views', {}).items() if isinstance(self.settings.get('views'), dict) else []:
             if self.valid_view(name, view):
@@ -177,6 +183,7 @@ class ConsoleTools:
         data = {'alert_width': self.alert_width, 'detail_width': self.detail_width,
             'reduced_motion': self.reduced_motion.get(),
             'alerts_visible': self.alerts_visible, 'views': self.custom_views,
+            'panel_position': list(self.panel_position) if self.panel_position else None,
             'filters': {'fresh_only': tracker.fresh_only.get(), 'type': tracker.kind.get(),
                 'minimum': tracker.minimum_speed.get(), 'maximum': tracker.maximum_speed.get(), 'visible': tracker.visible.get()}}
         try:
@@ -202,6 +209,68 @@ class ConsoleTools:
         handle.bind('<B1-Motion>', lambda e: self.resize(kind, e.x_root))
         handle.bind('<ButtonRelease-1>', lambda _: self.schedule_save())
         handle.bind('<Enter>', lambda _: self.app.map_status_label.configure(text=f'Drag this edge to resize {kind}'), add=True)
+
+    def make_movable(self, handles):
+        """Drag the floating panel by its header; double-click the header to dock it again."""
+        for handle in handles:
+            handle.configure(cursor='fleur')
+            handle.bind('<ButtonPress-1>', self.start_move, add=True)
+            handle.bind('<B1-Motion>', self.move, add=True)
+            handle.bind('<ButtonRelease-1>', self.end_move, add=True)
+            handle.bind('<Double-Button-1>', lambda _: self.dock_panel(), add=True)
+            handle.bind('<Enter>', lambda _: self.app.map_status_label.configure(
+                text='Drag to move this panel · double-click to dock it'), add=True)
+
+    def start_move(self, event):
+        panel, host = self.app.floating_panel, self.app.chart_host
+        scaling = ctk.ScalingTracker.get_widget_scaling(host)
+        self.cancel_animation('details')
+        right = (panel.winfo_rootx() + panel.winfo_width() - host.winfo_rootx()) / scaling
+        top = (panel.winfo_rooty() - host.winfo_rooty()) / scaling
+        self.move_drag = (event.x_root, event.y_root, right, top)
+
+    def move(self, event):
+        if not self.move_drag:
+            return
+        # Motion events arrive faster than the map can repaint; apply only the latest once per idle.
+        pending = self.move_drag[4] if len(self.move_drag) > 4 else None
+        self.move_drag = self.move_drag[:4] + ((event.x_root, event.y_root),)
+        if pending is None:
+            self.app.root.after_idle(self.apply_move)
+
+    def apply_move(self):
+        if not self.move_drag or len(self.move_drag) < 5 or self.move_drag[4] is None:
+            return
+        x, y, right, top, (x_root, y_root) = self.move_drag
+        self.move_drag = (x, y, right, top, None)
+        panel, host = self.app.floating_panel, self.app.chart_host
+        scaling = ctk.ScalingTracker.get_widget_scaling(host)
+        self.panel_position = (right + (x_root - x) / scaling, top + (y_root - y) / scaling)
+        # While dragging only move the panel: resizing it re-lays out every tab and makes the drag lag.
+        right, top = self.clamp_panel(panel.winfo_width() / scaling, host.winfo_width() / scaling,
+                                      host.winfo_height() / scaling)
+        panel.place(relx=0, x=right, y=top, anchor='ne')
+
+    def end_move(self, _event=None):
+        if self.move_drag:
+            self.apply_move()
+            self.move_drag = None
+            self.app._position_console_panel()
+            self.schedule_save()
+
+    def dock_panel(self):
+        self.move_drag = None
+        self.panel_position = None
+        self.app._position_console_panel()
+        self.schedule_save()
+
+    def clamp_panel(self, width, available_width, available_height):
+        """Keep part of a moved panel, and its whole header, inside the map."""
+        right, top = self.panel_position
+        right = max(min(width, 120), min(available_width + width - 120, right))
+        top = max(0, min(available_height - 48, top))
+        self.panel_position = (right, top)
+        return right, top
 
     def start_resize(self, kind, x):
         self.drag = (x, self.alert_width if kind == 'alerts' else self.detail_width)
