@@ -296,6 +296,11 @@ class DesktopSOC:
                 self.app._place_map_ping((payload["lat"], payload["lon"]), share=False)
                 self.app.map_status_label.configure(text="Peer ping · analyst annotation · not a sensor alert")
                 text = f"{sender} ping: {payload['lat']:.5f}, {payload['lon']:.5f}"
+            elif kind == "report":
+                self.app.vessel_reports.add(payload, sender, shared=True)
+                self.app.alert_board.refresh_reports()
+                self.app.map_status_label.configure(text=f"Vessel report from {sender} · open Incidents to review")
+                text = f"{sender} · Report · {payload['vessel']['name']}\n{payload['category']}: {payload['reason']}"
             else:
                 text = f"{sender} · {'Message' if kind == 'chat' else kind.title()}\n{payload['text']}"
             self.history.append(text)
@@ -422,12 +427,17 @@ class DesktopSOC:
         render(self)
 
     def send_message(self, kind, payload, on_success=None):
+        if not self.client:
+            self.status('Sign in to communicate.')
+            return
         permissions = (self.client.room or {}).get('permissions', self.client.user['permissions'])
         if KINDS.get(kind) not in permissions:
             self.status('This tool is not available to everyone in the session.')
             return
         def done(_):
-            self.history.append(f"You · {kind.title()}\n{payload.get('text', payload)}")
+            summary = (f"{payload['vessel']['name']} · {payload['category']}\n{payload['reason']}"
+                       if kind == 'report' else payload.get('text', payload))
+            self.history.append(f"You · {kind.title()}\n{summary}")
             self.history = self.history[-100:]
             if on_success:
                 on_success()

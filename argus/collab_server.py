@@ -22,7 +22,8 @@ from aiohttp import web
 from argus.collab_store import Store, name, password
 
 SERVICE = web.AppKey("soc", object)
-KINDS = {"chat": "chat", "ping": "ping", "contact": "contact.share", "evidence": "evidence.share"}
+KINDS = {"chat": "chat", "ping": "ping", "contact": "contact.share", "evidence": "evidence.share",
+         "report": "contact.share"}
 
 
 @dataclass

@@ -193,6 +193,8 @@ class ArgusApp:
         self.root = root
         self.soc_client = soc_client
         self.soc_online = bool(soc_client)
+        from argus.vessel_reports import ReportStore
+        self.vessel_reports = ReportStore()
         self.scenario = scenario
         self.coastline = coastline
         self.coastline_rings = []

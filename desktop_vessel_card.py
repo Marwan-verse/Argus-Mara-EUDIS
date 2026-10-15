@@ -106,6 +106,8 @@ class VesselCard:
         self.fleet_button.pack(side='left')
         self.details_button = self.button(actions, 'Vessel details', self.open_details, width=146, primary=True)
         self.details_button.pack(side='right')
+        self.report_button = self.button(self.body, 'Report vessel', self.report_vessel, width=146)
+        self.report_button.pack(fill='x', padx=8, pady=(0, 8))
 
         voyage = ctk.CTkFrame(self.body, fg_color=WHITE)
         voyage.pack(fill='x', padx=10, pady=(5, 0))
@@ -292,6 +294,12 @@ class VesselCard:
         self.hide()
         self.app.open_window('ais')
         self.tracker.tabs.select(self.tracker.detail_tab)
+
+    def report_vessel(self):
+        from desktop_reports import live_snapshot, open_report
+        vessel = self.tracker.state.vessels.get(self.tracker.selected)
+        if vessel:
+            open_report(self.app, live_snapshot(vessel))
 
     def measure_route(self):
         self.hide()

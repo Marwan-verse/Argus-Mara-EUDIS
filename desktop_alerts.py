@@ -205,7 +205,7 @@ class AlertBoard:
         restart.pack(side="right", padx=2)
         app.tools.style_button(restart, "Reset incidents and decisions at this replay time")
         tk.Label(head, text="Incidents", bg=ui.CARD, fg=ui.INK, font=(SANS, 15, "bold")).pack(side="left")
-        tk.Label(head, text="SIM", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 7, "bold"), padx=5,
+        tk.Label(head, text="REPLAY", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 7, "bold"), padx=5,
                  highlightthickness=1, highlightbackground=ui.LINE).pack(side="left", padx=(8, 0), pady=(3, 0))
         self.clock = tk.Label(head, text=self.stamp(self.replay.now), bg=ui.CARD, fg=ui.AMBER, font=(MONO, 9, "bold"))
         self.clock.pack(side="left", padx=(6, 0), pady=(3, 0))
@@ -261,6 +261,8 @@ class AlertBoard:
         self.list = ctk.CTkScrollableFrame(panel, fg_color=ui.CARD, corner_radius=0,
             scrollbar_button_color=ui.LINE, scrollbar_button_hover_color=ui.HOVER)
         self.list.pack(fill="both", expand=True, padx=(4, 4))
+        self.reports_frame = tk.Frame(self.list, bg=ui.CARD)
+        self.refresh_reports(relayout=False)
         self.headers = {}
         for group, text in GROUP_TITLES.items():
             header = tk.Frame(self.list, bg=ui.CARD)
@@ -279,6 +281,32 @@ class AlertBoard:
                               justify="left", wraplength=self.wrap)
         for item in self.items:
             self._card(item)
+
+    def refresh_reports(self, relayout=True):
+        """Analyst reports stay separate from the simulated Brain severity groups."""
+        from desktop_reports import review_reports
+        ui = self.ui
+        self.report_cards = []
+        for child in self.reports_frame.winfo_children():
+            child.destroy()
+        groups = self.app.vessel_reports.grouped()
+        if groups:
+            tk.Label(self.reports_frame, text=f"REPORTED VESSELS · {len(groups)}", bg=ui.CARD,
+                     fg=ui.INK, font=(SANS, 10, "bold")).pack(anchor="w", padx=10, pady=(12, 6))
+            for entries in groups:
+                report = entries[-1]["report"]
+                vessel = report["vessel"]
+                text = (f"{vessel['name']} · {vessel['id']}\n{report['category']}\n"
+                        f"{entries[-1]['sender']} · {vessel['label']} · {len(entries)} report(s)\nReview concern")
+                card = tk.Button(self.reports_frame, text=text, anchor="w", justify="left",
+                    wraplength=max(150, self.wrap), padx=10, pady=8, cursor="hand2",
+                    bg=ui.CARD, fg=ui.INK, activebackground=ui.HOVER, activeforeground=ui.INK,
+                    relief="flat", font=(SANS, 10), highlightthickness=1, highlightbackground=ui.LINE,
+                    command=lambda found=entries: review_reports(self.app, found))
+                card.pack(fill="x", padx=8, pady=(0, 6))
+                self.report_cards.append(card)
+        if relayout:
+            self.relayout(top=True)
 
     def _card(self, item):
         """One card: a level stripe, then name and timer, one line of why, asset and status, flags."""
@@ -606,6 +634,8 @@ class AlertBoard:
         ui = self.ui
         for widget in self.list.winfo_children():
             widget.pack_forget()
+        if self.app.vessel_reports.entries:
+            self.reports_frame.pack(fill="x", pady=(0, 12))
         groups = {item["id"]: self.group(item["id"]) for item in self.items}
         first = True
 
@@ -645,7 +675,7 @@ class AlertBoard:
             for item in found:
                 card(item)
             shown = len(found)
-        if not shown and self.level_filter != "low":
+        if not shown and self.level_filter != "low" and not self.app.vessel_reports.entries:
             self.empty.configure(text="No open incidents at this level." if self.level_filter else "No open incidents.",
                                  wraplength=self.wrap)
             self.empty.pack(fill="x", padx=10, pady=16)
@@ -709,6 +739,9 @@ class AlertBoard:
             text=f"{counts['New']} new · {counts['Reviewed']} reviewed · {counts['Acknowledged']} acknowledged · "
                  f"{counts['Escalated']} escalated · {counts['Rejected']} rejected\n"
                  "Brain: {} contacts scored in {:.0f} ms at this replay step".format(*self.replay.scored))
+        if self.app.vessel_reports.entries:
+            self.app.alert_counts_label.configure(text=self.app.alert_counts_label.cget("text") +
+                f"\n{len(self.app.vessel_reports.grouped())} reported vessels · analyst review")
 
     def set_filter(self, level: str | None) -> None:
         self.level_filter = None if level == self.level_filter else level
@@ -731,6 +764,8 @@ class AlertBoard:
         if pixels <= 0 or wrap == self.wrap:
             return
         self.wrap = wrap
+        for card in self.report_cards:
+            card.configure(wraplength=wrap)
         for identifier in self.cards:
             self.paint(identifier)
         self.empty.configure(wraplength=wrap)
@@ -1155,8 +1190,14 @@ class ReviewDialog:
         self.tag = tk.Label(head, text="", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 7, "bold"), padx=5,
                             highlightthickness=1, highlightbackground=ui.LINE)
         self.tag.pack(side="right", padx=(0, 10))
-        self.name = tk.Label(self.frame, text="", bg=ui.CARD, fg=ui.INK, font=(SANS, 18, "bold"), anchor="w")
-        self.name.pack(fill="x", padx=20, pady=(4, 0))
+        name_row = tk.Frame(self.frame, bg=ui.CARD)
+        name_row.pack(fill="x", padx=20, pady=(4, 0))
+        self.report_button = ctk.CTkButton(name_row, text="Report", width=70, height=28,
+            fg_color=ui.CARD, hover_color=ui.HOVER, text_color=ui.INK,
+            command=self.report_vessel)
+        self.report_button.pack(side="right", padx=(5, 0))
+        self.name = tk.Label(name_row, text="", bg=ui.CARD, fg=ui.INK, font=(SANS, 18, "bold"), anchor="w")
+        self.name.pack(side="left", fill="x", expand=True)
         self.meta = tk.Label(self.frame, text="", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 10), anchor="w",
                              justify="left")
         self.meta.pack(fill="x", padx=20)
@@ -1205,6 +1246,11 @@ class ReviewDialog:
         self.body = ctk.CTkScrollableFrame(self.middle, fg_color=ui.CARD, corner_radius=0,
             scrollbar_button_color=ui.LINE, scrollbar_button_hover_color=ui.HOVER)
         self.body.pack(fill="both", expand=True)
+
+    def report_vessel(self):
+        from desktop_reports import board_snapshot, open_report
+        if self.item:
+            open_report(self.board.app, board_snapshot(self.item))
 
     # ----- layout ---------------------------------------------------------------------
     def place(self) -> None:

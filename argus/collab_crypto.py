@@ -15,7 +15,8 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-KINDS = {"chat": "chat", "ping": "ping", "contact": "contact.share", "evidence": "evidence.share"}
+KINDS = {"chat": "chat", "ping": "ping", "contact": "contact.share", "evidence": "evidence.share",
+         "report": "contact.share"}
 # Line breaks, tabs and the two joiners that emoji and some writing systems need.
 ALLOWED_INVISIBLE = "\n\t‌‍"
 
@@ -56,7 +57,10 @@ def decode(value, maximum=8192):
 def validate_payload(kind, payload):
     if kind not in KINDS or not isinstance(payload, dict):
         raise ValueError("Invalid message")
-    if kind == "ping":
+    if kind == "report":
+        from argus.vessel_reports import validate_report
+        validate_report(payload)
+    elif kind == "ping":
         if set(payload) != {"lat", "lon"}:
             raise ValueError("A ping requires coordinates")
         for name, limit in (("lat", 90), ("lon", 180)):

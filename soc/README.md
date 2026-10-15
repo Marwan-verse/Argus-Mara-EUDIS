@@ -121,6 +121,33 @@ demo (`--soc-client`) never reads or saves a sign-in.
 5. Send text, share the selected AIS contact, or use the existing map Ping.
    Received pings last 15 seconds; they are analyst annotations, not sensor alerts.
 
+### Report a vessel
+
+Select an AIS vessel and choose **Report vessel**, or choose **Report** in a
+simulated contact's review window. Select **Suspicious activity**,
+**AIS / identity concern**, **Unsafe navigation**, **Infrastructure concern** or
+**Other**, then write why you are reporting it. A category alone or a blank
+reason cannot be submitted. Reasons allow up to 2000 characters within the
+existing 6000-byte encoded message limit.
+
+In SOC mode, **Report and share** sends the report to every participant of your
+current verified secure session. All participants must have `contact.share`.
+Reports appear in **Incidents → Reported vessels** on the sender's screen after
+the relay accepts the send and on peers' screens when they receive it. Click a
+reported vessel to read all submitted categories, reasons, authors, UTC times
+and reported positions. These are unverified analyst concerns; they do not
+change Brain severity or authorize a response. The vessel's original provenance
+label remains visible. Multiple reports group under one vessel and provenance.
+
+Without SOC sign-in, **Create report** adds a local incident only. Reports stay
+in application memory (latest 256), survive replay resets/rewinds and disappear
+when the app closes. They are not a durable incident archive; delivery is limited
+to the current session and its existing relay retention window. A failed send
+preserves the draft and never retries automatically. Check with colleagues before
+retrying an uncertain send; an unchanged retry keeps its ID so receiving clients
+can suppress duplicates. Update the relay and all clients together for the new
+`report` message kind. Reports received by a client are never sent back as new reports.
+
 HTTPS polling delivers changes about every 1.5 seconds. Leave closes the room
 for all participants. Logout and account revocation close rooms. There are no silent
 send retries, automatic URL opening, executable attachments or remote actions.

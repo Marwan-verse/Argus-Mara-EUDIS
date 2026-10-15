@@ -101,7 +101,8 @@ class DesktopAlertBoardTests(unittest.TestCase):
         # The card shortens long text with an ellipsis to fit; fonts differ between macOS and Windows.
         shown = board.cards['SIM-01']['status'].cget('text')
         self.assertTrue(shown.startswith('Escalated · Irish'), shown)
-        self.assertTrue('Escalated · Irish Coast Guard (MRCC)'.startswith(shown.removesuffix('…')), shown)
+        full_status = f"Escalated · Irish Coast Guard (MRCC) · hand-written · {board.by_id['SIM-01']['line_name']}"
+        self.assertTrue(full_status.startswith(shown.removesuffix('…')), shown)
         self.assertEqual(board.history['SIM-01'][-1][1], 'Escalated to Irish Coast Guard (MRCC). Note: Anchor still down')
         self.assertIn('1 escalated', app.alert_counts_label.cget('text'))
         self.assertIn('Withdraw', self.actions())
