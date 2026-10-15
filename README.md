@@ -8,6 +8,11 @@ demo remains available without private credentials or a server. `python run_gui.
 shows sign-in with **Continue offline** (one window, no Docker) and **Start local
 server + two sign-in windows**. See [automatic local startup](soc/LOCAL-DEMO.md).
 
+For two computers using a VS Code/GitHub forwarded link, start
+`HOST-SOC-FORWARDED-WINDOWS.bat` on the account-owning machine and follow
+[the forwarded-port guide](soc/FORWARDED-PORT.md). Both native clients sign in
+to the same forwarded HTTPS URL with their existing SOC accounts.
+
 > *"Ireland can crew two ships. Argus Mara gives them a hundred eyes."*
 
 **What it is:** a rule-based early-warning demonstration for Ireland's undersea internet cables and gas and power lines. It works like this:

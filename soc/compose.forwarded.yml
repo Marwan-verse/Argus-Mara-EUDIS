@@ -1,0 +1,47 @@
+# Alternative to compose.local.yml, with the SAME project/account volume.
+# This switches the one existing relay; do not run a second relay on its database.
+name: argus-soc-local
+services:
+  relay:
+    build:
+      context: ..
+      dockerfile: soc/Dockerfile
+    environment:
+      ARGUS_SOC_ORIGIN: ${SOC_FORWARDED_URL:?Set SOC_FORWARDED_URL to the forwarded HTTPS origin}
+      ARGUS_SOC_DB: /data/accounts.sqlite3
+      ARGUS_SOC_PROXY_NETWORK: 172.30.66.0/24
+      ARGUS_SOC_LOCAL_DEMO: "0"
+    volumes:
+      - local_accounts:/data
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    pids_limit: 64
+    networks: [local_private]
+  https:
+    image: caddy:2.11.3-alpine
+    ports:
+      - "127.0.0.1:${SOC_FORWARD_PORT:-8765}:8080"
+    volumes:
+      - ./Caddyfile.forwarded:/etc/caddy/Caddyfile:ro
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /config:size=8m,noexec,nosuid
+      - /data:size=8m,noexec,nosuid
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [local_private]
+networks:
+  local_private:
+    ipam:
+      config:
+        - subnet: 172.30.66.0/24
+volumes:
+  local_accounts:
+    external: true
+    name: ${SOC_ACCOUNTS_VOLUME:-argus-soc-local_local_accounts}

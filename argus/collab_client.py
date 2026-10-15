@@ -1,6 +1,8 @@
 """HTTPS SOC client. Passwords and ephemeral keys stay in memory; only a token the
 user chose to remember goes to the OS keychain (see soc_session)."""
 import json
+import ipaddress
+import re
 import ssl
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
@@ -15,18 +17,43 @@ class ClientError(Exception):
         self.status = status
 
 
+def forwarded_origin(value):
+    """Recognize the documented VS Code/Codespaces HTTPS tunnel domains."""
+    parsed = urlsplit(value)
+    host = (parsed.hostname or '').lower()
+    return parsed.scheme == 'https' and any(host.endswith(suffix) for suffix in ('.devtunnels.ms', '.app.github.dev'))
+
+
+TUNNEL_ACCESS_HELP = ('The forwarded port requires GitHub/Microsoft web access. In VS Code set '
+                      'Port Visibility to Public, then use the HTTPS link. Argus account login is still required.')
+
+
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if forwarded_origin(req.full_url):
+            raise ClientError(TUNNEL_ACCESS_HELP)
         raise ClientError("Server redirects are disabled")
 
 
 def server_url(value, allow_loopback_http=False):
-    if not isinstance(value, str):
+    if not isinstance(value, str) or not value or len(value) > 2048 or any(ord(char) <= 32 for char in value):
         raise ValueError("Enter the SOC HTTPS address")
     value = value.rstrip("/")
-    parsed = urlsplit(value)
-    if (parsed.scheme != "https" and not (allow_loopback_http and parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"})) or not parsed.hostname or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        raise ValueError('Enter a valid SOC HTTPS address') from None
+    if (parsed.scheme != "https" and not (allow_loopback_http and parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"})) or not parsed.hostname or parsed.username is not None or parsed.password is not None or parsed.path or parsed.query or parsed.fragment:
         raise ValueError("Use an HTTPS origin without a path or credentials")
+    if '\\' in value or port is not None and not 1 <= port <= 65535:
+        raise ValueError('Enter a valid SOC HTTPS address')
+    try:
+        ipaddress.ip_address(parsed.hostname)
+    except ValueError:
+        host = parsed.hostname
+        if len(host) > 253 or not all(re.fullmatch(r'[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?', label) for label in host.split('.')):
+            raise ValueError('Enter a valid SOC HTTPS hostname') from None
     return value
 
 
@@ -47,6 +74,10 @@ class SOCClient:
 
     def request(self, method, path, data=None):
         headers = {"Accept": "application/json"}
+        if forwarded_origin(self.url):
+            # Microsoft documents this for API clients. It bypasses the HTML
+            # warning page, never tunnel authorization or Argus authentication.
+            headers['X-Tunnel-Skip-AntiPhishing-Page'] = 'true'
         if self.token:
             headers["Authorization"] = "Bearer " + self.token
         raw = None
@@ -59,12 +90,17 @@ class SOCClient:
                 raw = response.read(2 * 1024 * 1024 + 1)
                 if len(raw) > 2 * 1024 * 1024:
                     raise ClientError("Server response exceeds limit")
-                return json.loads(raw)
+                try:
+                    return json.loads(raw)
+                except (ValueError, UnicodeError):
+                    if forwarded_origin(self.url):
+                        raise ClientError('The tunnel returned a web page instead of the SOC API. ' + TUNNEL_ACCESS_HELP) from None
+                    raise ClientError('The server did not return the SOC API response') from None
         except HTTPError as error:
             try:
                 message = json.loads(error.read(8192)).get("error", "Request refused")
             except (ValueError, AttributeError):
-                message = "Request refused"
+                message = TUNNEL_ACCESS_HELP if forwarded_origin(self.url) and error.code in (401, 403) else "Request refused"
             raise ClientError(str(message)[:200], error.code) from None
         except (OSError, ValueError):
             raise ClientError("Cannot reach the SOC service securely; check address, certificate and connection") from None

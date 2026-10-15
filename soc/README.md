@@ -10,6 +10,11 @@ Compose configurations, databases and certificate volumes.
 For an English implementation summary and the full two-user walkthrough, see
 [IMPLEMENTATION-AND-TESTING.md](IMPLEMENTATION-AND-TESTING.md).
 
+For **two devices using a VS Code/GitHub forwarded HTTPS link**, follow
+[the forwarded-port hosting guide](FORWARDED-PORT.md). Start
+`HOST-SOC-FORWARDED-WINDOWS.bat` (or its macOS/Linux equivalent) on the
+account-owning host; both desktop apps use the same forwarded URL and accounts.
+
 The current SOC workspace guides users through Connect, Verify and Chat.
 Invitations are eight symbols displayed as `ABCD-EFGH`, with one-click copying.
 Choose **Team session (all groups)** to communicate across different groups;
