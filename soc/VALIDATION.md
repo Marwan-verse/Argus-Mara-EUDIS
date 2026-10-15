@@ -175,3 +175,24 @@ compiled bundles were unchanged; the Playwright suite was not run for this nativ
 change. The local test log is ignored under `data/validation/`. These checks do
 not constitute deployment to a real forwarded SOC host. Reports remain in memory
 until application closure, and relay and clients need the new report message kind.
+
+## Report queue and local demo roles — 15 October 2026
+
+The full Windows Python 3.12.14 suite passed **415 tests** after D68 and D69.
+New regressions submit once while a background poll is blocked, refuse a queued
+send after a room change and retain an editable draft when the queue is full.
+Fresh local seeding gives Igor full operator permissions and Bob the restricted
+user group, including the local-only short-password case. The test credential is
+synthetic and independent from the ignored local account password. Normal API
+password requirements remain unchanged. The JavaScript checks passed **8 tests**;
+contract validation, `run_gui.py --check` and Git whitespace checks passed too.
+
+On the running local Docker deployment, an administrator granted Igor the same
+groups as Marwan and created restricted Bob. The requested local Bob credential
+is kept only in the ignored private environment file. HTTPS login confirmed both
+roles. The relay image was rebuilt and replaced without removing its account or
+certificate volumes. `scripts/smoke_soc_local.py` then passed against verified
+local HTTPS: Igor and Bob exchanged encrypted chat, ping and structured report
+messages, and Bob's evidence send was refused. These are local container results,
+not an external forwarded-host deployment. Restart native clients for the new
+button/queue behavior and sign in again after the permission update.

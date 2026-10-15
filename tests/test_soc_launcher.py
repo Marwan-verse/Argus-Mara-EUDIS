@@ -30,7 +30,7 @@ class LocalStartupTests(unittest.TestCase):
             path = Path(directory) / 'accounts.sqlite3'
             environment = {'ARGUS_SOC_DB': str(path), 'ARGUS_SOC_ORIGIN': 'https://localhost:8443',
                            'ARGUS_SOC_LOCAL_DEMO': '1', 'ARGUS_DEMO_MYKHAILO_PASSWORD': 'synthetic-mykhailo',
-                           'ARGUS_DEMO_IGOR_PASSWORD': 'synthetic-igor', 'ARGUS_DEMO_BOB_PASSWORD': 'bob',
+                           'ARGUS_DEMO_IGOR_PASSWORD': 'synthetic-igor', 'ARGUS_DEMO_BOB_PASSWORD': 'xyz',
                            'ARGUS_DEMO_ADMIN_PASSWORD': 'synthetic-admin-password'}
             with patch.dict(os.environ, environment), patch.object(sys, 'argv', ['soc', '--seed-demo']), \
                     contextlib.redirect_stdout(io.StringIO()):
@@ -41,7 +41,7 @@ class LocalStartupTests(unittest.TestCase):
                 bob = store.user(store.credential('bob')['id'])
                 self.assertEqual(igor['groups'], ['intelligence', 'user'])
                 self.assertEqual(bob['groups'], ['user'])
-                self.assertTrue(store.verify(store.credential('bob')['password_hash'], 'bob'))
+                self.assertTrue(store.verify(store.credential('bob')['password_hash'], 'xyz'))
                 self.assertFalse(igor['admin'] or bob['admin'])
             finally:
                 store.close()
