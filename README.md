@@ -244,6 +244,7 @@ the answer is "after the hackathon". ([plan §4.6](docs/04-work-plan.md))
 | [docs/09-team-skills.md](docs/09-team-skills.md) | How teammates download the repository skills |
 | [docs/10-space-dataset-plan.md](docs/10-space-dataset-plan.md) | Space dataset comparison, implementation sequence and handoffs to Data, Brain and Interface |
 | [docs/12-argus-mara-alert-levels.md](docs/12-argus-mara-alert-levels.md) | How alert levels are scored and how the docked alert panel works |
+| [docs/14-aircraft-and-magnetic-sensing.md](docs/14-aircraft-and-magnetic-sensing.md) | Research (15 Oct): public aircraft (ADS-B) data, tasked aircraft and magnetic sensing between satellite looks, with fleet corrections and a build plan |
 | [docs/demo-runbook.md](docs/demo-runbook.md) | Four-minute click and talk script, offline acceptance and fallback steps |
 | [docs/one-pager.md](docs/one-pager.md) | Current demonstrated capability and explicit validation limits |
 | [docs/ui-skills-survey.md](docs/ui-skills-survey.md) | UI skills and tools ranked for this static offline console |
