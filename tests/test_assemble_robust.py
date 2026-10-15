@@ -248,6 +248,28 @@ class CleanDataUnchangedTests(unittest.TestCase):
         alerts = json.dumps(build_alerts(SCENARIO), indent=1, ensure_ascii=False) + "\n"
         self.assertEqual(alerts, (ROOT / "demo/alerts.json").read_text(encoding="utf-8"))
 
+    def test_fixes_without_course_inside_the_gap_mean_no_gap(self):
+        def gap_reasons(result):
+            return [reason for finding in result["findings"] for reason in finding["reasons"]
+                    if "AIS reception gap" in reason]
+
+        original = assess_vessel(EXERCISE, CONTEXT)
+        self.assertEqual(len(gap_reasons(original)), 1)
+        self.assertGreaterEqual(original["observations"]["ais_gap_min"], 10)
+        # The same vessel kept transmitting every minute through the gap, but with COG 360 ("not available").
+        before, after = (next(item for item in EXERCISE["track"] if item["t"] == t) for t in (1740, 3000))
+
+        def between(t):
+            share = (t - 1740) / (3000 - 1740)
+            return {**before, "t": t, "cog_deg": 360, "lat": before["lat"] + share * (after["lat"] - before["lat"]),
+                    "lon": before["lon"] + share * (after["lon"] - before["lon"])}
+
+        filled = sorted(EXERCISE["track"] + [between(t) for t in range(1800, 3000, 60)], key=lambda item: item["t"])
+        result = assess_vessel({**EXERCISE, "track": filled}, CONTEXT)
+        self.assertEqual(gap_reasons(result), [])
+        self.assertNotIn("ais_gap_min", result["observations"])
+        self.assertNotIn("legacy_cable_v1", [finding["detector"] for finding in result["findings"]])
+
     def test_clean_fixes_are_passed_through(self):
         cleaned, quality = clean_vessel(EXERCISE)
         self.assertTrue(all(a is b for a, b in zip(cleaned["track"], EXERCISE["track"])))

@@ -20,7 +20,7 @@ hand except the track: an anchor-drag approach to EWIC without an AIS gap
 (SIM-50), a ship holding beside the North Dublin cable cluster and then
 anchoring (SIM-51), and two innocent ones, a ship at anchor in Dublin Bay
 outside every corridor (SIM-52) and a fast ferry crossing the lines (SIM-53).
-SIM-55 is an innocent transit whose AIS feed is deliberately corrupted (missing
+SIM-49 is an innocent transit whose AIS feed is deliberately corrupted (missing
 and "not available" positions, repeated and out-of-order times, "not
 available" speed and course, numbers as text): Brain cleans it, scores it
 without failing and reports what it ignored. The map and the card show the
@@ -244,7 +244,7 @@ STORY_ITEMS = [
       "Fast ferry crossing the cable corridors at a steady speed",
       "Normal transit; no action.",
       {}), "A", _ferry_story),
-    (("SIM-55", "KESTREL MOOR", "General cargo", 150, "north-dublin", 0, 0, 0, 0, 0, "line",
+    (("SIM-49", "KESTREL MOOR", "General cargo", 150, "north-dublin", 0, 0, 0, 0, 0, "line",
       "Steady transit; its AIS feed has missing positions, repeated times and 'not available' values",
       "Normal transit; Brain ignored the faulty fixes and lists them in the review. Check the AIS receiver.",
       {}), "A", _dirty_feed_story),

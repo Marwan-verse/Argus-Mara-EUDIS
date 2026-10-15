@@ -207,14 +207,19 @@ def legacy_cable_v1(vessel: dict, context: dict) -> list[dict]:
     """The four-cue rule from ``argus.brain``, mapped to levels like the alert board's exercise item.
 
     The rule compares speed and course between fixes, so it reads only fixes that report both.
+    Its AIS gap is then checked against the full cleaned track: a vessel that kept transmitting
+    positions without speed or course was not silent, so no finding is made.
     """
     now = context.get("now")
-    track = [fix for fix in vessel["track"] if fix.get("sog_kn") is not None and fix.get("cog_deg") is not None
-             and (now is None or fix["t"] <= now)]
+    known = [fix for fix in vessel["track"] if now is None or fix["t"] <= now]
+    track = [fix for fix in known if fix.get("sog_kn") is not None and fix.get("cog_deg") is not None]
     cables, detections = context.get("cables", []), context.get("detections", [])
     alert = detect_vessel({**vessel, "track": track}, cables, context.get("assets", []), detections, "A1")
     if alert is None:
         return []
+    seen = alert["observations"]
+    if any(seen["baseline_fix_t"] < fix["t"] < seen["gap_end_t"] for fix in known):
+        return []  # fixes were received inside the "gap": there was no reception gap
     item = exercise_item({"vessels": [vessel], "cables": cables, "detections": detections}, alert)
     obs = dict(item["observations"])
     radar_t = alert["observations"].get("radar_contact_t")
