@@ -51,17 +51,18 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertTrue(app.alerts_panel.winfo_ismapped())
         self.assertGreaterEqual(app.chart_host.winfo_x(), app.alerts_panel.winfo_x() + app.alerts_panel.winfo_width())
         order = self.packed_cards()
-        self.assertEqual(len(order), 22)  # Medium and above: one incident card each; Low is folded away
+        self.assertEqual(len(order), 26)  # Medium and above: one incident card each; Low is folded away
         ranks = [RANK[board.by_id[key]['assessment']['level']] for key in order]
         self.assertEqual(ranks, sorted(ranks, reverse=True))
         # SIM-06, SIM-44 and SIM-48 are raised one level: no responder reaches them before their line ETA.
         # Stories SIM-50 to SIM-52 are watched at T+90 (SIM-53 starts at T+95).
+        # Site contacts SIM-61 and SIM-64 are High, SIM-62 and SIM-63 Medium; SIM-54 is a Low stop (D63).
         self.assertEqual([board.tiles[f'{level}-count'].cget('text') for level in ('critical', 'high', 'medium', 'low')],
-                         ['6', '6', '10', '30'])
+                         ['6', '8', '12', '31'])
         self.assertEqual(board.cards['SIM-01']['stripe'].cget('bg'), STYLE['critical'][0])
         self.assertIn('In corridor', board.cards['SIM-01']['eta'].cget('text'))
-        self.assertIn('22 new', app.alert_counts_label.cget('text'))
-        self.assertEqual(board.summary.cget('text'), '22 open · 0 escalated')
+        self.assertIn('26 new', app.alert_counts_label.cget('text'))
+        self.assertEqual(board.summary.cget('text'), '26 open · 0 escalated')
         self.assertEqual(self.flags('SIM-45'), ['AIS spoofing?'])
         self.assertEqual(len(self.map_tags('sim-alert:')), len(board.items) - 1)  # SIM-53 starts at T+95
         badge = next(item for item in app.map.find_withtag('sim-badge') if app.map.type(item) == 'text')
@@ -73,7 +74,7 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertIsNone(board.level_filter)
         board.set_filter('low')
         self.assertIn('SIM-40', self.packed_cards())
-        self.assertEqual(len(self.packed_cards()), 30)  # with stories SIM-50 to SIM-52
+        self.assertEqual(len(self.packed_cards()), 31)  # with stories SIM-50 to SIM-52 and the stop SIM-54
         self.assertEqual(self.flags('SIM-40'), ['Small craft · capped Low'])
         board.set_filter(None)
         board.toggle_watching()
@@ -97,7 +98,10 @@ class DesktopAlertBoardTests(unittest.TestCase):
         dialog.confirm()
         self.assertEqual(board.status('SIM-01'), 'Escalated')
         self.assertEqual(board.recipients['SIM-01'], 'Irish Coast Guard (MRCC)')
-        self.assertIn('Escalated · Irish Coast Guard (MRCC)', board.cards['SIM-01']['status'].cget('text'))
+        # The card shortens long text with an ellipsis to fit; fonts differ between macOS and Windows.
+        shown = board.cards['SIM-01']['status'].cget('text')
+        self.assertTrue(shown.startswith('Escalated · Irish'), shown)
+        self.assertTrue('Escalated · Irish Coast Guard (MRCC)'.startswith(shown.removesuffix('…')), shown)
         self.assertEqual(board.history['SIM-01'][-1][1], 'Escalated to Irish Coast Guard (MRCC). Note: Anchor still down')
         self.assertIn('1 escalated', app.alert_counts_label.cget('text'))
         self.assertIn('Withdraw', self.actions())
