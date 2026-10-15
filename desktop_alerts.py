@@ -21,7 +21,10 @@ on it can rise, and the review window warns before that happens.
 """
 from __future__ import annotations
 
+import getpass
 import math
+import os
+import subprocess
 import sys
 import tkinter as tk
 import tkinter.font as tkfont
@@ -29,6 +32,7 @@ import tkinter.font as tkfont
 import customtkinter as ctk
 
 from argus import responders
+from argus.decision_log import DecisionLog
 from argus.alert_board import inside, line_path, sort_key
 from argus.brain_board import build_board, update
 from argus.explain import explain, source
@@ -182,6 +186,8 @@ class AlertBoard:
         self.halos: list[tuple[int, float, float]] = []
         self.pulse = False
         self.flashing: dict[str, str] = {}
+        self.decision_log = DecisionLog()
+        self.log_window: DecisionLogWindow | None = None
         app.alert_board = self
         self.dialog = ReviewDialog(self)
         self._build()
@@ -204,6 +210,10 @@ class AlertBoard:
                                 width=30, height=30, fg_color="transparent", hover_color=ui.HOVER)
         restart.pack(side="right", padx=2)
         app.tools.style_button(restart, "Reset incidents and decisions at this replay time")
+        seal = ctk.CTkButton(head, text="", image=app.tools.icons.get("seal"), command=self.open_log,
+                             width=30, height=30, fg_color="transparent", hover_color=ui.HOVER)
+        seal.pack(side="right", padx=2)
+        app.tools.style_button(seal, "Signed decision log: who decided what and when, and a check that nothing was changed")
         tk.Label(head, text="Incidents", bg=ui.CARD, fg=ui.INK, font=(SANS, 15, "bold")).pack(side="left")
         tk.Label(head, text="SIM", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 7, "bold"), padx=5,
                  highlightthickness=1, highlightbackground=ui.LINE).pack(side="left", padx=(8, 0), pady=(3, 0))
@@ -372,13 +382,21 @@ class AlertBoard:
         if hasattr(self.app, 'require_tool') and not self.app.require_tool('response.review'):
             return
         item = self.by_id[identifier]
-        self.rescore(lambda: self.replay.send(item, asset_id), f"Sent {asset_id} to {item['name']} (simulated)")
+        def action():
+            events = self.replay.send(item, asset_id)
+            self.signed(item, "Sent responder", f"Sent {asset_id} (simulated)", asset=asset_id)
+            return events
+        self.rescore(action, f"Sent {asset_id} to {item['name']} (simulated)")
 
     def recall(self, identifier: str, asset_id: str) -> None:
         if hasattr(self.app, 'require_tool') and not self.app.require_tool('response.review'):
             return
         item = self.by_id[identifier]
-        self.rescore(lambda: self.replay.recall(item, asset_id), f"Recalled {asset_id} from {item['name']}")
+        def action():
+            events = self.replay.recall(item, asset_id)
+            self.signed(item, "Recalled responder", f"Recalled {asset_id}", asset=asset_id)
+            return events
+        self.rescore(action, f"Recalled {asset_id} from {item['name']}")
 
     def rescore(self, action, text: str) -> None:
         """Run a change that scores the board again at this replay time; repaint and announce what rose."""
@@ -435,11 +453,42 @@ class AlertBoard:
             return
         before = self.snapshot()
         self.replay.decide(item, status, text, reason, to)
+        self.signed(item, status, text, reason=reason, to=to)
         self.sync_exercise(item, status)
         after = self.snapshot()
         for other in {key for key in after if after[key] != before[key]} - {identifier}:
             self.paint(other)  # a closed incident frees its assets for the others
         self.changed(identifier)
+
+    def operator(self) -> str:
+        """The SOC account that is signed in, otherwise this computer's user."""
+        client = getattr(self.app, "soc_client", None)
+        user = getattr(client, "user", None) if client else None
+        if user and user.get("username"):
+            return user["username"]
+        return f"{getpass.getuser()} (this computer)"
+
+    def signed(self, item: dict | None, action: str, text: str, **details) -> None:
+        """Add a decision to the signed log; if the file cannot be written, the decision still stands."""
+        record = {"operator": self.operator(), "action": action, "detail": text, "replay": self.stamp(self.replay.now),
+                  "simulated": True, **{key: value for key, value in details.items() if value}}
+        if item is not None:
+            incident = self.tracker.incident(item) or {}
+            record.update(alert=item["id"], vessel=item["name"], level=incident.get("level") or item["assessment"]["level"])
+        try:
+            self.decision_log.append(**record)
+        except OSError as error:
+            self.app.map_status_label.configure(text=f"Decision kept, but the signed log could not be written: {error}")
+            return
+        if self.log_window is not None:
+            self.log_window.refresh()
+
+    def open_log(self) -> None:
+        if self.log_window is None or not self.log_window.window.winfo_exists():
+            self.log_window = DecisionLogWindow(self)
+        self.log_window.window.deiconify()
+        self.log_window.window.lift()
+        self.log_window.refresh()
 
     def mark_reviewed(self, identifier: str) -> None:
         if self.status(identifier) != "New":
@@ -854,6 +903,7 @@ class AlertBoard:
             self.paint(identifier)
         self.relayout(top=True)
         self.app._draw_map()
+        self.signed(None, "Simulation restarted", "Incidents and decisions reset at this replay time")
         self.app.map_status_label.configure(text="Incidents restarted at this replay time · decisions reset")
 
     def snapshot(self) -> dict[str, tuple]:
@@ -1117,6 +1167,89 @@ class AlertBoard:
         where = f"{incident['id']} {self.status(identifier)}" if incident else self.status(identifier)
         return (f"{kind} · {item['name']} · {item['assessment']['level_name']} {item['assessment']['score']} · "
                 f"{where} · {item['title']}")
+
+
+VERIFIED = "#7ee0a1"  # Result colour when every signature and link checks out.
+
+
+class DecisionLogWindow:
+    """The signed decision log: newest decisions first, a verify button and the file for a tamper test."""
+
+    def __init__(self, board: AlertBoard):
+        import run_gui as ui
+        self.board, self.ui = board, ui
+        self.window = ctk.CTkToplevel(board.app.root)
+        self.window.title("Signed decision log")
+        self.window.geometry("760x520")
+        self.window.configure(fg_color=ui.CARD)
+        self.window.transient(board.app.root)
+        top = tk.Frame(self.window, bg=ui.CARD)
+        top.pack(fill="x", padx=18, pady=(16, 4))
+        tk.Label(top, text="Signed decision log", bg=ui.CARD, fg=ui.INK, font=(SANS, 15, "bold")).pack(side="left")
+        tk.Label(top, text="SIM", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 7, "bold"), padx=5,
+                 highlightthickness=1, highlightbackground=ui.LINE).pack(side="left", padx=(8, 0), pady=(3, 0))
+        self.key_label = tk.Label(self.window, text="", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 10), anchor="w",
+                                  justify="left")
+        self.key_label.pack(fill="x", padx=18)
+        self.text = ctk.CTkTextbox(self.window, wrap="word", fg_color=ui.BG, text_color=ui.INK,
+                                   font=ctk.CTkFont(SANS, 12), corner_radius=6)
+        self.text.pack(fill="both", expand=True, padx=18, pady=10)
+        self.result = tk.Label(self.window, text="", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 11), anchor="w",
+                               justify="left", wraplength=700)
+        self.result.pack(fill="x", padx=18)
+        buttons = tk.Frame(self.window, bg=ui.CARD)
+        buttons.pack(fill="x", padx=18, pady=(8, 16))
+        self.verify_button = ctk.CTkButton(buttons, text="Verify signatures", command=self.verify, width=150, height=30)
+        self.verify_button.pack(side="left")
+        ctk.CTkButton(buttons, text="Show the file", command=self.show_file, width=120, height=30,
+                      fg_color="transparent", border_width=1).pack(side="left", padx=8)
+        ctk.CTkButton(buttons, text="Close", command=self.window.withdraw, width=84, height=30,
+                      fg_color="transparent", border_width=1).pack(side="right")
+
+    def refresh(self) -> None:
+        log = self.board.decision_log
+        try:
+            records = log.records()
+        except ValueError:
+            records = None
+        key = log.public_key() if log.key_path.exists() else None
+        from argus.decision_log import fingerprint
+        self.key_label.configure(text=(f"Signed on this computer with key {fingerprint(key)}. "
+                                       if key else "No decisions yet; this computer gets its key with the first one. ")
+                                 + f"File: {log.path}")
+        self.text.configure(state="normal")
+        self.text.delete("1.0", "end")
+        if records is None:
+            self.text.insert("end", "The log file is not readable. Press Verify signatures to see where.")
+        rows = [r for r in records or [] if r.get("kind") == "decision"]
+        for record in reversed(rows):
+            when = record.get("time", "")[11:19] + " UTC" if len(record.get("time", "")) >= 19 else record.get("time", "")
+            vessel = f"{record['vessel']} ({record['alert']}) · " if record.get("vessel") else ""
+            self.text.insert("end", f"{when} · {record.get('operator', '?')} · {record.get('action', '?')}\n")
+            self.text.insert("end", f"    {vessel}{record.get('detail', '')}\n")
+        if records is not None and not rows:
+            self.text.insert("end", "No decisions yet. Acknowledge, escalate, reject or send a responder, "
+                                    "and each decision appears here, signed.")
+        self.text.configure(state="disabled")
+
+    def verify(self) -> None:
+        result = self.board.decision_log.verify()
+        colour = VERIFIED if result.ok else STYLE["critical"][0]
+        details = "" if result.ok or len(result.problems) == 1 else f"  (+{len(result.problems) - 1} more)"
+        self.result.configure(text=result.summary() + details, fg=colour)
+        self.refresh()
+
+    def show_file(self) -> None:
+        path = self.board.decision_log.path
+        if not path.exists():
+            self.result.configure(text="There is no log file yet.", fg=self.ui.MUTED)
+            return
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", str(path)])
+        elif os.name == "nt":
+            subprocess.Popen(["explorer", "/select,", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path.parent)])
 
 
 class ReviewDialog:
