@@ -153,3 +153,46 @@ created yet. The host launcher performs Compose validation and verifies the
 external SOC `/healthz` once the operator creates the link. A real two-device
 tunnel smoke test remains a host deployment check; the local proxy test is not
 reported as that external deployment.
+
+## Vessel reporting and current main integration — 15 October 2026
+
+The reporting branch was merged with main at `2a18242`, preserving account
+requests, copyable verification codes and the structured SOC chat. Reports now
+render as vessel reports in that chat and appear in the analyst incident inbox.
+The decision is recorded as D67, after the existing D65 and D66.
+
+On Windows with Python 3.12.14, the full suite passed **411 tests**:
+`python -m unittest discover -s tests -v`. Coverage includes mandatory written
+reasons for every category including Other, native vessel-card reporting,
+replay-reset retention, failed-send draft retention, duplicate suppression,
+session-change refusal, permission enforcement and report display in the new chat.
+Three actual HTTPS clients exchanged an encrypted structured report; the relay
+snapshot contained no plaintext report reason.
+
+The JavaScript replay/live-state checks passed **8 tests**. Contract validation,
+`run_gui.py --check` and the Git whitespace check also passed. Browser source and
+compiled bundles were unchanged; the Playwright suite was not run for this native
+change. The local test log is ignored under `data/validation/`. These checks do
+not constitute deployment to a real forwarded SOC host. Reports remain in memory
+until application closure, and relay and clients need the new report message kind.
+
+## Report queue and local demo roles — 15 October 2026
+
+The full Windows Python 3.12.14 suite passed **415 tests** after D68 and D69.
+New regressions submit once while a background poll is blocked, refuse a queued
+send after a room change and retain an editable draft when the queue is full.
+Fresh local seeding gives Igor full operator permissions and Bob the restricted
+user group, including the local-only short-password case. The test credential is
+synthetic and independent from the ignored local account password. Normal API
+password requirements remain unchanged. The JavaScript checks passed **8 tests**;
+contract validation, `run_gui.py --check` and Git whitespace checks passed too.
+
+On the running local Docker deployment, an administrator granted Igor the same
+groups as Marwan and created restricted Bob. The requested local Bob credential
+is kept only in the ignored private environment file. HTTPS login confirmed both
+roles. The relay image was rebuilt and replaced without removing its account or
+certificate volumes. `scripts/smoke_soc_local.py` then passed against verified
+local HTTPS: Igor and Bob exchanged encrypted chat, ping and structured report
+messages, and Bob's evidence send was refused. These are local container results,
+not an external forwarded-host deployment. Restart native clients for the new
+button/queue behavior and sign in again after the permission update.

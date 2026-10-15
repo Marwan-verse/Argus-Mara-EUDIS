@@ -12,6 +12,16 @@ See [SOC security boundaries and handoff](../soc/README.md). Existing map pings
 are shared annotations; no user-created threat alert or remote response is added.
 Both demo JSON contracts remain unchanged. The browser frontend is unchanged.
 
+**Manual vessel reports (D67, 15 October):** `argus/vessel_reports.py` validates
+structured analyst reports and groups an in-memory inbox by vessel identity and
+provenance. `desktop_reports.py` provides the mandatory category/reason form and
+review window; `desktop_alerts.py` shows reported vessels separately from replay
+severity groups. `report` messages use the existing SOC E2EE path and
+`contact.share` permission, with the authenticated sender name attached by the
+receiving client. Reports do not enter Brain scoring, response dispatch or either
+demo JSON file. They survive replay reset but remain session-local in memory.
+This extends the annotation-only workflow described above.
+
 *Proposed implementation structure, 7 October 2026. This follows decisions D13–D15 and D22. It does not change the seven-beat demo.*
 
 ## Browser frontend (D37, 9 October 2026)

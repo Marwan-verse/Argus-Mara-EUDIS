@@ -302,6 +302,9 @@ def draw_chat(soc):
             summary, point = contact_summary(entry['text'])
             soc.chat.insert('end', 'Contact  ', 'kind')
             soc.chat.insert('end', summary)
+        elif kind == 'report':
+            soc.chat.insert('end', 'Vessel report\n', 'kind')
+            soc.chat.insert('end', entry['text'] + '\n', 'quote')
         else:
             soc.chat.insert('end', 'Evidence summary\n', 'kind')
             soc.chat.insert('end', entry['text'] + '\n', 'quote')

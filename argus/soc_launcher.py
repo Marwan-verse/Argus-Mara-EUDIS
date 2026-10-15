@@ -60,7 +60,7 @@ def prepare_credentials(directory):
         present = {line.split("=", 1)[0] for line in existing.splitlines() if "=" in line}
         if existing and not existing.endswith("\n"):
             stream.write("\n")
-        for account in ("MYKHAILO", "IGOR", "ADMIN"):
+        for account in ("MYKHAILO", "IGOR", "BOB", "ADMIN"):
             if f"ARGUS_DEMO_{account}_PASSWORD" not in present:
                 stream.write(f"ARGUS_DEMO_{account}_PASSWORD={secrets.token_urlsafe(24)}\n")
     return target

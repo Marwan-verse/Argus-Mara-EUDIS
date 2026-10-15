@@ -3,7 +3,8 @@ import argparse
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from argus.collab_client import SOCClient
+from argus.collab_client import SOCClient, ClientError
+from argus.vessel_reports import make_report
 
 
 def main():
@@ -16,8 +17,8 @@ def main():
     clients = [SOCClient(args.url, ca_file=args.ca) for _ in range(2)]
     try:
         a, b = clients
-        a.login('Mykhailo', values['ARGUS_DEMO_MYKHAILO_PASSWORD'])
-        b.login('Igor', values['ARGUS_DEMO_IGOR_PASSWORD'])
+        a.login('Igor', values['ARGUS_DEMO_IGOR_PASSWORD'])
+        b.login('Bob', values['ARGUS_DEMO_BOB_PASSWORD'])
         assert 'evidence.share' in a.user['permissions'] and 'evidence.share' not in b.user['permissions']
         room = a.create()  # Team session: accounts need not share a group.
         b.join(room['code'])
@@ -36,7 +37,18 @@ def main():
         assert b.poll()[0]['payload']['text'] == 'Local Docker SOC smoke test'
         b.send('ping', {'lat': 53.35, 'lon': -6.25})
         assert a.poll()[0]['payload'] == {'lat': 53.35, 'lon': -6.25}
-        print('PASS: HTTPS certificate, sample account roles, E2EE chat and map ping')
+        report = make_report({'id': '123456789', 'name': 'SMOKE TEST CONTACT', 'label': 'simulated',
+                              'lat': 53.35, 'lon': -6.25}, 'Other', 'Synthetic local report delivery check.')
+        a.send('report', report)
+        received = b.poll()[0]
+        assert received['kind'] == 'report' and received['payload'] == report
+        try:
+            b.send('evidence', {'text': 'Restricted synthetic evidence'})
+        except ClientError as error:
+            assert error.status == 403
+        else:
+            raise AssertionError('Restricted Bob unexpectedly shared evidence')
+        print('PASS: HTTPS, full Igor/restricted Bob roles, encrypted chat/ping/report and evidence refusal')
     finally:
         for client in clients:
             try:

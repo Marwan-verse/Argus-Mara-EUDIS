@@ -22,7 +22,8 @@ from aiohttp import web
 from argus.collab_store import Store, name, password
 
 SERVICE = web.AppKey("soc", object)
-KINDS = {"chat": "chat", "ping": "ping", "contact": "contact.share", "evidence": "evidence.share"}
+KINDS = {"chat": "chat", "ping": "ping", "contact": "contact.share", "evidence": "evidence.share",
+         "report": "contact.share"}
 PUBLIC_PATHS = {"/v1/login", "/v1/signup"}  # Everything else needs a signed-in token.
 PENDING_LIMIT = 20  # Requested accounts waiting for an administrator at once.
 
@@ -554,12 +555,17 @@ def main():
         store = Store(config.database)
         try:
             for username, env_key, groups in (('Mykhailo', 'ARGUS_DEMO_MYKHAILO_PASSWORD', ['intelligence', 'user']),
-                                               ('Igor', 'ARGUS_DEMO_IGOR_PASSWORD', ['user'])):
+                                               ('Igor', 'ARGUS_DEMO_IGOR_PASSWORD', ['intelligence', 'user'])):
                 secret = os.environ.get(env_key, '')
                 if not 4 <= len(secret) <= 128:
                     parser.error('Set both demo passwords in the private local environment')
                 if not store.credential(username.lower()):
                     store.create_user(username, store.hasher.hash(secret), groups)
+            bob_secret = os.environ.get('ARGUS_DEMO_BOB_PASSWORD', '')
+            if bob_secret and not store.credential('bob'):
+                if not 3 <= len(bob_secret) <= 128:
+                    parser.error('Set a local Bob demo password of 3–128 characters')
+                store.create_user('Bob', store.hasher.hash(bob_secret), ['user'])
             admin_secret = os.environ.get('ARGUS_DEMO_ADMIN_PASSWORD', '')
             if admin_secret and not store.credential('admin'):
                 store.create_user('admin', store.hasher.hash(password(admin_secret)), ['intelligence', 'user'], admin=True)

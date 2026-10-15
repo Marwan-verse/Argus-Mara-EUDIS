@@ -21,6 +21,31 @@ SAVED = {'url': 'https://soc.example.invalid', 'token': 'synthetic-token-' + 'x'
 
 
 class LocalStartupTests(unittest.TestCase):
+    def test_fresh_demo_has_full_igor_and_restricted_bob_with_local_short_password(self):
+        import contextlib
+        import io
+        from argus.collab_server import main
+        from argus.collab_store import Store
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'accounts.sqlite3'
+            environment = {'ARGUS_SOC_DB': str(path), 'ARGUS_SOC_ORIGIN': 'https://localhost:8443',
+                           'ARGUS_SOC_LOCAL_DEMO': '1', 'ARGUS_DEMO_MYKHAILO_PASSWORD': 'synthetic-mykhailo',
+                           'ARGUS_DEMO_IGOR_PASSWORD': 'synthetic-igor', 'ARGUS_DEMO_BOB_PASSWORD': 'xyz',
+                           'ARGUS_DEMO_ADMIN_PASSWORD': 'synthetic-admin-password'}
+            with patch.dict(os.environ, environment), patch.object(sys, 'argv', ['soc', '--seed-demo']), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                main()
+            store = Store(path)
+            try:
+                igor = store.user(store.credential('igor')['id'])
+                bob = store.user(store.credential('bob')['id'])
+                self.assertEqual(igor['groups'], ['intelligence', 'user'])
+                self.assertEqual(bob['groups'], ['user'])
+                self.assertTrue(store.verify(store.credential('bob')['password_hash'], 'xyz'))
+                self.assertFalse(igor['admin'] or bob['admin'])
+            finally:
+                store.close()
+
     def test_command_output_handles_utf8_and_unexpected_bytes_on_windows(self):
         result = launcher.run_command([
             sys.executable, '-c',
@@ -34,13 +59,13 @@ class LocalStartupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             target = launcher.prepare_credentials(Path(directory))
             original = target.read_text()
-            self.assertEqual(len(original.splitlines()), 3)
+            self.assertEqual(len(original.splitlines()), 4)
             for line in original.splitlines():
                 self.assertGreaterEqual(len(line.split('=', 1)[1]), 14)
             launcher.prepare_credentials(Path(directory))
             self.assertEqual(target.read_text(), original)
 
-    def test_existing_credentials_gain_only_the_missing_mykhailo_password(self):
+    def test_existing_credentials_gain_only_missing_demo_passwords(self):
         old_lines = ['ARGUS_DEMO_MARWAN_PASSWORD=old-marwan-secret-1', 'ARGUS_DEMO_IGOR_PASSWORD=old-igor-secret-22',
                      'ARGUS_DEMO_ADMIN_PASSWORD=old-admin-secret-333']
         for ending in ('\n', ''):  # Also a hand-made file without a final line break.
@@ -50,7 +75,8 @@ class LocalStartupTests(unittest.TestCase):
                 launcher.prepare_credentials(Path(directory))
                 lines = target.read_text().splitlines()
                 self.assertEqual(lines[:3], old_lines)
-                self.assertEqual([line.split('=', 1)[0] for line in lines[3:]], ['ARGUS_DEMO_MYKHAILO_PASSWORD'])
+                self.assertEqual([line.split('=', 1)[0] for line in lines[3:]],
+                                 ['ARGUS_DEMO_MYKHAILO_PASSWORD', 'ARGUS_DEMO_BOB_PASSWORD'])
                 self.assertGreaterEqual(len(lines[3].split('=', 1)[1]), 14)
                 updated = target.read_text()
                 launcher.prepare_credentials(Path(directory))

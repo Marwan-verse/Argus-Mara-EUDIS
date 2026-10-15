@@ -335,7 +335,7 @@ class DesktopSOC:
     def task(self, function, callback=None, background=False):
         if self.stopping or self.pending >= 8:
             self.status("Please wait for the current request")
-            return
+            return False
         self.pending += 1
         if not background:
             self.busy += 1
@@ -346,6 +346,7 @@ class DesktopSOC:
             except Exception as error:
                 self.events.put((callback, None, error, background))
         self.executor.submit(job)
+        return True
 
     def tick(self):
         if self.stopping:
@@ -394,10 +395,15 @@ class DesktopSOC:
     def receive(self, messages):
         for message in messages:
             payload, kind = message["payload"], message["kind"]
+            sender = message.get('sender', 'Peer')
             if kind == "ping":
                 self.app._place_map_ping((payload["lat"], payload["lon"]), share=False)
                 self.app.map_status_label.configure(text="Peer ping · analyst annotation · not a sensor alert")
-            self.record(message.get('sender', 'Peer'), False, kind, payload)
+            elif kind == "report":
+                self.app.vessel_reports.add(payload, sender, shared=True)
+                self.app.alert_board.refresh_reports()
+                self.app.map_status_label.configure(text=f"Vessel report from {sender} · open Incidents to review")
+            self.record(sender, False, kind, payload)
         self.render()
 
     def record(self, sender, own, kind, payload):
@@ -405,6 +411,8 @@ class DesktopSOC:
         entry = {'sender': sender, 'own': own, 'kind': kind, 'at': time.time()}
         if kind == 'ping':
             entry['point'] = (payload['lat'], payload['lon'])
+        elif kind == 'report':
+            entry['text'] = f"{payload['vessel']['name']} · {payload['category']}\n{payload['reason']}"
         else:
             entry['text'] = payload['text']
         self.history = (self.history + [entry])[-100:]
@@ -561,18 +569,28 @@ class DesktopSOC:
         from desktop_soc_view import render
         render(self)
 
-    def send_message(self, kind, payload, on_success=None):
+    def send_message(self, kind, payload, on_success=None, *, expected_room=None):
+        if not self.client:
+            self.status('Sign in to communicate.')
+            return False
         permissions = (self.client.room or {}).get('permissions', self.client.user['permissions'])
         if KINDS.get(kind) not in permissions:
             self.status('This tool is not available to everyone in the session.')
-            return
+            return False
+        client = self.client
+        def send():
+            # A queued report must never move to a different room after polling.
+            if expected_room is not None and (self.client is not client or
+                    (client.room or {}).get('room_id') != expected_room):
+                raise ClientError('SOC session changed. Reopen this form for the new session.', 409)
+            return client.send(kind, payload)
         def done(_):
             self.record('You', True, kind, payload)
             if on_success:
                 on_success()
             self.status('Message sent.' if kind == 'chat' else 'Shared with your team.')
             self.render()
-        self.task(lambda: self.client.send(kind, payload), done)
+        return self.task(send, done)
 
     def send_text(self):
         if self.busy:
