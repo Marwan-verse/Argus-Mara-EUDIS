@@ -130,7 +130,19 @@ class DesktopSOCTests(unittest.TestCase):
         self.pump()
         soc = self.app.soc
         soc.compare_peer('peer')
+        from desktop_soc import shareable_code
+        # Opening the dialog copies one's own code, labelled with both names.
+        self.assertEqual(self.root.clipboard_get(), shareable_code('analyst', 'colleague', own.safety_codes['peer']))
+        soc.verify_paste()  # Pasting that back is one's own code, not the colleague's.
+        soc.verify_check()
+        self.assertIn('your own code', soc.verify_problem.cget('text'))
+        soc.verify_entry.delete(0, 'end')
+        soc.verify_entry.insert(0, shareable_code('someone', 'analyst', peer.safety_codes['own']))
+        soc.verify_check()
+        self.assertIn('not from colleague to you', soc.verify_problem.cget('text'))
+        self.assertEqual(own.verified_peers, set())
         read_aloud = peer.safety_codes['own']
+        soc.verify_entry.delete(0, 'end')
         soc.verify_entry.insert(0, ('B' if read_aloud[0] == 'A' else 'A') + read_aloud[1:])
         soc.verify_check()
         self.assertIn('codes differ', soc.verify_problem.cget('text'))
@@ -138,7 +150,8 @@ class DesktopSOCTests(unittest.TestCase):
         self.assertEqual(own.verified_peers, set())
         self.client.confirm.assert_not_called()
         soc.verify_entry.delete(0, 'end')
-        soc.verify_entry.insert(0, read_aloud)
+        # The colleague's own copied text, sent through another app and pasted here.
+        soc.verify_entry.insert(0, shareable_code('colleague', 'analyst', read_aloud))
         soc.verify_check()
         self.pump()
         self.assertIn('peer', soc.verified_peers)

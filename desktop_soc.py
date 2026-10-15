@@ -2,6 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import queue
 import os
+import re
 import time
 import threading
 import tkinter as tk
@@ -12,6 +13,26 @@ import customtkinter as ctk
 from argus import soc_session
 from argus.collab_client import ClientError, SOCClient
 from argus.collab_crypto import KINDS
+
+SHARED_CODE = re.compile(r"code from\s+([^\s:]+)\s+to\s+([^\s:]+)\s*:\s*(.+)", re.IGNORECASE | re.DOTALL)
+
+
+def shareable_code(sender, recipient, code):
+    """Clipboard text that names both people, so a pasted code can be checked for its direction."""
+    return f"Argus Mara code from {sender} to {recipient}: {code}"
+
+
+def received_code(text, own, peer):
+    """The code to compare from typed or pasted text; refuse a code sent by oneself or another pair."""
+    match = SHARED_CODE.search(text)
+    if not match:
+        return text
+    sender, recipient, code = match.groups()
+    if sender.lower() == own.lower():
+        raise ValueError(f"That is your own code. Paste the code {peer} sends you.")
+    if sender.lower() != peer.lower() or recipient.lower() != own.lower():
+        raise ValueError(f"This code is from {sender} to {recipient}, not from {peer} to you.")
+    return code
 
 
 def login_screen(root, initial_url, on_login, *, allow_loopback_http=False,
@@ -457,23 +478,42 @@ class DesktopSOC:
         from desktop_soc_view import label, button, BG, CARD, MUTED
         dialog = ctk.CTkToplevel(self.window)
         dialog.title('Verify ' + member['username'])
-        dialog.geometry('610x470')
+        dialog.geometry('610x500')
         dialog.resizable(False, False)
         dialog.configure(fg_color=CARD)
         dialog.transient(self.window)
         dialog.grab_set()
         label(dialog, 'Compare with ' + member['username'], 21, True).pack(padx=24, pady=(22, 8))
-        label(dialog, f"Read your code aloud to {member['username']}, then type the code they read to you. "
-                      'Compare by voice or in person, not through this application.',
+        own, peer = self.client.user['username'], member['username']
+        code = cipher.safety_codes[user_id]
+        # Copied with both names, so pasting one's own code back is caught below.
+        shared = shareable_code(own, peer, code)
+        def copy_code():
+            dialog.clipboard_clear()
+            dialog.clipboard_append(shared)
+        copy_code()
+        label(dialog, f"Your code is copied. Send it to {peer} in another app, such as Signal or WhatsApp, "
+                      f"or read it aloud. Then paste or type the code {peer} sends you. Not through this chat.",
               wraplength=545, justify='left', text_color=MUTED).pack(padx=24, pady=8)
-        # The code is shown for reading aloud and is deliberately not copyable:
-        # only a code typed from the peer's own screen proves both keys agree.
         label(dialog, 'Your code', text_color=MUTED).pack(padx=24, pady=(8, 0))
-        label(dialog, cipher.safety_codes[user_id], font=ctk.CTkFont('Consolas', 19, 'bold')).pack(padx=20, pady=(2, 12))
-        label(dialog, f"Code {member['username']} reads to you", text_color=MUTED).pack(padx=24)
-        entry = ctk.CTkEntry(dialog, width=420, height=38, font=ctk.CTkFont('Consolas', 17),
-                             placeholder_text='XXXXX XXXXX XXXXX XXXXX XXXXX X')
-        entry.pack(padx=24, pady=(2, 4))
+        mine = ctk.CTkFrame(dialog, fg_color='transparent')
+        mine.pack(pady=(2, 10))
+        label(mine, code, font=ctk.CTkFont('Consolas', 19, 'bold')).pack(side='left', padx=(0, 10))
+        button(mine, 'Copy again', copy_code, width=100).pack(side='left')
+        label(dialog, f"Code from {peer}", text_color=MUTED).pack(padx=24)
+        theirs = ctk.CTkFrame(dialog, fg_color='transparent')
+        theirs.pack(pady=(2, 4))
+        entry = ctk.CTkEntry(theirs, width=420, height=38, font=ctk.CTkFont('Consolas', 15),
+                             placeholder_text=f"Paste or type the code {peer} sends you")
+        entry.pack(side='left', padx=(0, 8))
+        def paste():
+            try:
+                pasted = dialog.clipboard_get()
+            except tk.TclError:
+                return
+            entry.delete(0, 'end')
+            entry.insert(0, pasted.strip())
+        button(theirs, 'Paste', paste, width=80).pack(side='left')
         problem = label(dialog, '', text_color='#ff7b72', wraplength=545, justify='left')
         problem.pack(padx=24, pady=4)
         row = ctk.CTkFrame(dialog, fg_color='transparent')
@@ -484,7 +524,12 @@ class DesktopSOC:
                 dialog.destroy()
                 self.status('Session changed. Verify the new session instead.')
                 return
-            if not cipher.verify_peer(user_id, entry.get()):
+            try:
+                received = received_code(entry.get(), own, peer)
+            except ValueError as error:
+                problem.configure(text=str(error))
+                return
+            if not cipher.verify_peer(user_id, received):
                 problem.configure(text='The codes differ. Check the code again together. If it still differs, '
                                        'do not chat: someone may be intercepting. Leave the session.')
                 return
@@ -497,6 +542,7 @@ class DesktopSOC:
         button(row, 'Cancel', dialog.destroy, width=130).pack(side='left')
         button(row, 'Check code', check, True, width=220).pack(side='right')
         self.verify_window, self.verify_entry, self.verify_problem, self.verify_check = dialog, entry, problem, check
+        self.verify_paste = paste
         entry.focus_set()
 
     def render(self):
