@@ -1,0 +1,18 @@
+{
+    auto_https off
+    admin off
+}
+# ONLY published to 127.0.0.1 by compose.forwarded.yml. The host's
+# VS Code tunnel terminates public HTTPS before delivering to this local hop.
+:8080 {
+    request_body {
+        max_size 128KB
+    }
+    @landing path /
+    respond @landing "Argus Mara SOC relay is running. Paste the forwarded HTTPS address into the Argus desktop sign-in screen. Use your existing SOC account." 200
+    reverse_proxy relay:8080 {
+        # Replace caller-supplied scheme/address headers. Trust no public XFF.
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-For {remote_host}
+    }
+}

@@ -137,3 +137,19 @@ Checked on Windows with Python 3.12 in the project's ignored `.venv`.
 
 Local logs and the baseline archive remain under ignored `data/`; no production
 credentials, generated keys or account database are included in Git.
+# Forwarded-port validation (15 October 2026)
+
+The SOC regression run passed 59 checks, including two independent native
+clients through a temporary real HTTPS reverse proxy: existing account hashes,
+cross-group room joining, typed peer-code verification, bidirectional encrypted
+chat/ping delivery, certificate rejection, unencrypted-backend rejection and
+wrong-Origin rejection. Hosting checks cover account-volume ownership, a
+read-only active-account preflight, fixed-text setup listener, and refusal to
+seed/reset accounts. The offline contract and native asset checks also pass.
+
+The forwarded Docker/Caddy configuration has not been started on this execution
+host: no Docker executable is available here. No real forwarded URL has been
+created yet. The host launcher performs Compose validation and verifies the
+external SOC `/healthz` once the operator creates the link. A real two-device
+tunnel smoke test remains a host deployment check; the local proxy test is not
+reported as that external deployment.

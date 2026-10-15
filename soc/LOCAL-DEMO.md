@@ -33,7 +33,8 @@ and account passwords are preserved. Preserve the file with the account volume:
 recreating the file does not reset accounts already in Docker.
 
 This local option is for **two windows on one PC**. For **two physical devices**,
-deploy the shared HTTPS server using [README.md](README.md) and Sign in on both.
+use [VS Code forwarded-port hosting](FORWARDED-PORT.md) with the same accounts,
+or deploy the shared HTTPS server using [README.md](README.md).
 
 The implementation follows Docker's [Desktop start command](https://docs.docker.com/reference/cli/docker/desktop/start/)
 and [Compose up command](https://docs.docker.com/reference/cli/docker/compose/up/).

@@ -479,7 +479,7 @@ def create_app(config):
     app = web.Application(client_max_size=128 * 1024, middlewares=[security])
     app[SERVICE] = Relay(config)
     async def health(request):
-        return json_response({"ready": True})
+        return json_response({"ready": True, "service": "argus-soc", "protocol": 2})
     app.router.add_get("/healthz", health)
     app.router.add_post("/v1/login", login)
     app.router.add_get("/v1/me", me)
