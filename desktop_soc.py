@@ -39,7 +39,7 @@ def login_screen(root, initial_url, on_login, *, allow_loopback_http=False,
         remember_box = ctk.CTkCheckBox(frame, text="Stay signed in on this computer (up to 8 hours)")
         remember_box.select()
         remember_box.pack(anchor="w", padx=16, pady=(0, 6))
-    welcome = "Administrator accounts are created on the server."
+    welcome = "No account yet? Create one; an administrator approves new accounts."
     status = ctk.CTkLabel(frame, text=welcome, wraplength=480)
     status.pack(padx=16, pady=4)
     executor = ThreadPoolExecutor(max_workers=1)
@@ -108,6 +108,68 @@ def login_screen(root, initial_url, on_login, *, allow_loopback_http=False,
                 events.put(("resume", saved, f"The saved sign-in could not be used: {error}"))
         executor.submit(job)
 
+    signup = {}
+
+    def create_account():
+        dialog = signup.get("dialog")
+        if dialog is not None and dialog.winfo_exists():
+            dialog.lift()
+            return
+        if busy:
+            return
+        dialog = ctk.CTkToplevel(root)
+        dialog.title("Create an Argus Mara account")
+        dialog.geometry("440x390")
+        dialog.resizable(False, False)
+        dialog.transient(root)
+        entries = {}
+        for key, title in (("username", "Username"), ("password", "Password (at least 14 characters)"),
+                           ("repeat", "Repeat password")):
+            ctk.CTkLabel(dialog, text=title).pack(anchor="w", padx=20, pady=(12 if key == "username" else 0, 0))
+            entry = ctk.CTkEntry(dialog, show="" if key == "username" else "•")
+            entry.pack(fill="x", padx=20, pady=(0, 6))
+            entries[key] = entry
+        entries["username"].insert(0, fields["username"].get().strip())
+        note = ctk.CTkLabel(dialog, text="An administrator approves new accounts before they can sign in. "
+                                         "The account is created on the server in the sign-in screen's address field.",
+                            wraplength=390, justify="left")
+        note.pack(anchor="w", padx=20, pady=6)
+        row = ctk.CTkFrame(dialog, fg_color="transparent")
+        row.pack(fill="x", padx=20, pady=10)
+        ctk.CTkButton(row, text="Cancel", width=110, fg_color="transparent", border_width=1,
+                      command=dialog.destroy).pack(side="left")
+        send = ctk.CTkButton(row, text="Request account", width=170, command=request_account)
+        send.pack(side="right")
+        entries["repeat"].bind("<Return>", lambda _: request_account())
+        signup.update(dialog=dialog, entries=entries, note=note, send=send)
+        entries["username"].focus_set()
+
+    def request_account():
+        entries, note = signup["entries"], signup["note"]
+        username, secret = entries["username"].get().strip(), entries["password"].get()
+        if secret != entries["repeat"].get():
+            note.configure(text="The two passwords differ. Type them again.")
+            for key in ("password", "repeat"):
+                entries[key].delete(0, "end")
+            return
+        try:
+            client = SOCClient(fields["url"].get().strip(), allow_loopback_http=allow_loopback_http, ca_file=ca_file)
+        except (ValueError, OSError) as error:
+            note.configure(text=f"{error} (first field of the sign-in screen).")
+            return
+        for key in ("password", "repeat"):
+            entries[key].delete(0, "end")
+        signup["send"].configure(state="disabled")
+        note.configure(text="Sending your request…")
+
+        def job():
+            try:
+                client.signup(username, secret)
+                events.put(("signup", username, None))
+            except Exception as error:
+                events.put(("signup", None, str(error)))
+        executor.submit(job)
+
     def launch_local():
         if busy:
             return
@@ -153,6 +215,21 @@ def login_screen(root, initial_url, on_login, *, allow_loopback_http=False,
                     fields[key].insert(0, result[key])
             status.configure(text=error)
             root.after(100, check)
+        elif kind == "signup":
+            dialog = signup.get("dialog")
+            dialog_open = dialog is not None and dialog.winfo_exists()
+            if error and dialog_open:
+                signup["note"].configure(text=error)
+                signup["send"].configure(state="normal")
+            elif error:
+                status.configure(text=error)
+            else:
+                if dialog_open:
+                    dialog.destroy()
+                fields["username"].delete(0, "end")
+                fields["username"].insert(0, result)
+                status.configure(text=f"Account {result} requested. When an administrator approves it, sign in here.")
+            root.after(100, check)
         elif error:
             set_busy(False)
             status.configure(text=error)
@@ -191,9 +268,14 @@ def login_screen(root, initial_url, on_login, *, allow_loopback_http=False,
                 root.tk.call('after', 'cancel', callback)
         root.destroy()
 
-    button = ctk.CTkButton(frame, text="Sign in", command=submit)
-    button.pack(pady=8)
-    controls.extend([button, *fields.values()] + ([remember_box] if remember_box else []))
+    actions = ctk.CTkFrame(frame, fg_color="transparent")
+    actions.pack(pady=8)
+    button = ctk.CTkButton(actions, text="Sign in", command=submit)
+    button.pack(side="left", padx=4)
+    signup_button = ctk.CTkButton(actions, text="Create account", fg_color="transparent", border_width=1,
+                                  command=create_account)
+    signup_button.pack(side="left", padx=4)
+    controls.extend([button, signup_button, *fields.values()] + ([remember_box] if remember_box else []))
     if local_launcher:
         local_button = ctk.CTkButton(frame, text="Start local server + two sign-in windows", command=launch_local)
         local_button.pack(fill="x", padx=16, pady=(16, 4))
@@ -477,6 +559,8 @@ class DesktopSOC:
         self.user_selector = ttk.Combobox(frame, state="readonly")
         self.user_selector.pack(fill="x", pady=5)
         self.user_selector.bind("<<ComboboxSelected>>", lambda _: self.select_user())
+        self.pending_label = ttk.Label(frame, text="", wraplength=620, justify="left")
+        self.pending_label.pack(anchor="w")
         self.admin_username = ttk.Entry(frame)
         self.admin_username.pack(fill="x", pady=4)
         ttk.Label(frame, text="Username (new accounts only)").pack(anchor="w")
@@ -512,6 +596,9 @@ class DesktopSOC:
             return
         self.admin_data = data
         self.user_selector.configure(values=[u["username"] for u in data["users"]])
+        waiting = [u["username"] for u in data["users"] if not u["groups"] and not u["disabled"] and not u.get("admin")]
+        self.pending_label.configure(text=f"Waiting for approval: {', '.join(waiting)}. Select an account, tick a group "
+                                          "and press Update selected; or tick Disable to refuse it." if waiting else "")
         self.group_selector.configure(values=[g["name"] for g in data["groups"]])
         for frame in (self.memberships, self.permissions_frame):
             for child in frame.winfo_children():

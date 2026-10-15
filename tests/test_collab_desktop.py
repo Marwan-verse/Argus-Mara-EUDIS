@@ -30,7 +30,8 @@ class FakeClient:
     def request(self, method, path, data=None):
         self.calls.append((method, path, data))
         if method == "GET" and path == "/v1/admin":
-            return {"users": [{"id": "other", "username": "bob", "groups": ["user"], "disabled": False}],
+            return {"users": [{"id": "other", "username": "bob", "groups": ["user"], "disabled": False},
+                              {"id": "new", "username": "newcomer", "groups": [], "disabled": False, "admin": False}],
                     "groups": [{"name": "user", "permissions": ["chat"]}, {"name": "intelligence", "permissions": ["evidence.share"]}],
                     "available_permissions": ["map.view", "chat", "ping", "contact.share", "evidence.share", "alert.review", "response.review"]}
         return {"ok": True}
@@ -97,6 +98,7 @@ class DesktopSOCTests(unittest.TestCase):
         soc.save_group()
         self.pump()
         self.assertTrue(any(method == "PUT" and path == "/v1/admin/groups/watch_team" and data["permissions"] == ["map.view", "ping"] for method, path, data in self.client.calls))
+        self.assertIn("Waiting for approval: newcomer.", soc.pending_label.cget("text"))
 
     def test_short_invite_copy_and_lobby_actions(self):
         self.client.room.update(locked=False, confirmed=[], invitation_expires=time.time()+600)
