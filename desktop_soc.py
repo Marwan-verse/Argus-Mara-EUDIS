@@ -394,16 +394,24 @@ class DesktopSOC:
     def receive(self, messages):
         for message in messages:
             payload, kind = message["payload"], message["kind"]
-            sender = message.get('sender', 'Peer')
             if kind == "ping":
                 self.app._place_map_ping((payload["lat"], payload["lon"]), share=False)
                 self.app.map_status_label.configure(text="Peer ping · analyst annotation · not a sensor alert")
-                text = f"{sender} ping: {payload['lat']:.5f}, {payload['lon']:.5f}"
-            else:
-                text = f"{sender} · {'Message' if kind == 'chat' else kind.title()}\n{payload['text']}"
-            self.history.append(text)
-        self.history = self.history[-100:]
+            self.record(message.get('sender', 'Peer'), False, kind, payload)
         self.render()
+
+    def record(self, sender, own, kind, payload):
+        """Keep the latest 100 messages for the chat view, with the UTC time they arrived or were sent."""
+        entry = {'sender': sender, 'own': own, 'kind': kind, 'at': time.time()}
+        if kind == 'ping':
+            entry['point'] = (payload['lat'], payload['lon'])
+        else:
+            entry['text'] = payload['text']
+        self.history = (self.history + [entry])[-100:]
+
+    def show_point(self, point):
+        self.app._change_map_center(point)
+        self.app._place_map_ping(point, share=False)
 
     def open(self):
         if not self.client:
@@ -555,8 +563,7 @@ class DesktopSOC:
             self.status('This tool is not available to everyone in the session.')
             return
         def done(_):
-            self.history.append(f"You · {kind.title()}\n{payload.get('text', payload)}")
-            self.history = self.history[-100:]
+            self.record('You', True, kind, payload)
             if on_success:
                 on_success()
             self.status('Message sent.' if kind == 'chat' else 'Shared with your team.')
