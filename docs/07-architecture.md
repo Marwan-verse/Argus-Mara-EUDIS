@@ -191,3 +191,16 @@ undated static fields cannot be backdated, and invalid motion fails matching.
 SOC read access requires `evidence.share`; starting/stopping shared cycles also
 requires administrator status. A local scan runs with the desktop, a shared scan
 with the existing private SOC host. Neither installs an OS scheduled task.
+
+## Optional team database — 15 October 2026 (D74)
+
+`supabase/migrations/` holds the schema of the Supabase project `argus-mara`.
+Inside the database, `pg_cron` and `pg_net` copy the Railway AIS feed every 30
+seconds into the private `argus` schema; nothing on Railway changed.
+`argus/supabase_ais.py` is the only client: it reads acquisition-time AIS rows in
+the recorder CSV shape, so `argus.satellite_ais.historical_ais` applies the same
+D70 rules, and it saves Coast Watch scenes, AI contacts and clear-water areas,
+then asks `argus.compare_scene` for both comparison directions. It acts only in a
+workspace with `database.link` (or `ARGUS_SUPABASE_LINK=1` on a host) and a secret
+key from the credential store, so tests and the offline demo never touch it.
+See [the database guide](../supabase/README.md).

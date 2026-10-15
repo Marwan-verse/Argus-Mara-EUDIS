@@ -22,6 +22,13 @@ received positions. AI contacts are unreviewed assumptions, with cached
 results and a conservative $20 pilot ceiling. Run `INSTALL-SATELLITE-WINDOWS.bat`
 once for optional image readers. See [setup and open-source accuracy plan](docs/16-satellite-ai.md).
 
+**Team database (optional):** the Supabase project `argus-mara` copies the shared
+Railway AIS feed every 30 seconds by itself, so Coast Watch can compare any image
+with AIS at its acquisition time even when no laptop was recording, both ways:
+image contacts without AIS, and large ships whose AIS position shows nothing on the
+image. Link a computer with `python scripts/configure_supabase.py`. See
+[the database guide](supabase/README.md) and D74.
+
 > *"Ireland can crew two ships. Argus Mara gives them a hundred eyes."*
 
 **What it is:** a rule-based early-warning demonstration for Ireland's undersea internet cables and gas and power lines. It works like this:
