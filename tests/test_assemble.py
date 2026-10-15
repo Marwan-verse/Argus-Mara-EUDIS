@@ -219,7 +219,8 @@ class DemoTests(unittest.TestCase):
                            cwd=ROOT, check=True, capture_output=True)
             result = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual(result["vessels"][0]["assessment"]["level"], "high")
-        self.assertEqual(result["detectors"], ["legacy_cable_v1", "ais_spoofing", "cable_risk"])
+        self.assertEqual(result["detectors"], ["legacy_cable_v1", "ais_spoofing", "cable_risk", "stop_off_port",
+                                              "declared_vs_actual"])  # dark_vessel is held from the exercise
         refused = subprocess.run([sys.executable, "-m", "argus.assemble", "--output", "demo/alerts.json"],
                                  cwd=ROOT, capture_output=True)
         self.assertNotEqual(refused.returncode, 0)

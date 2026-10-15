@@ -21,7 +21,7 @@ CRITICAL_ASSETS = {
     "cluster": "cluster of three or more lines", "transatlantic": "transatlantic cable",
 }
 BEHAVIOUR_CAP, IDENTITY_CAP, CONTEXT_CAP = 6, 3, 3
-RULES_VERSION = "levels v1"
+RULES_VERSION = "levels v1.1"
 
 
 def _band(score: int) -> str:
@@ -64,6 +64,11 @@ def _behaviour(obs, factors):
         patterns.append(("B10", 2, "Bottom-fishing pattern within 2 nm of the line"))
     if obs.get("slowdown_near_corridor"):
         patterns.append(("B11", 2, "Unexplained slowdown within 5 nm of the line"))
+    stopped = obs.get("stopped_offport_min") or 0
+    if stopped >= 30:
+        hours = f"{stopped / 60:.1f} h" if stopped >= 120 else f"{stopped:.0f} min"
+        patterns.append(("B12", 3 if stopped >= 120 else 2,
+                         f"Stopped {hours} away from any port or designated anchorage"))
     patterns.sort(key=lambda item: -item[1])
     total = 0
     for index, (code, points, text) in enumerate(patterns):
