@@ -30,7 +30,8 @@ class FakeClient:
     def request(self, method, path, data=None):
         self.calls.append((method, path, data))
         if method == "GET" and path == "/v1/admin":
-            return {"users": [{"id": "other", "username": "bob", "groups": ["user"], "disabled": False}],
+            return {"users": [{"id": "other", "username": "bob", "groups": ["user"], "disabled": False},
+                              {"id": "new", "username": "newcomer", "groups": [], "disabled": False, "admin": False}],
                     "groups": [{"name": "user", "permissions": ["chat"]}, {"name": "intelligence", "permissions": ["evidence.share"]}],
                     "available_permissions": ["map.view", "chat", "ping", "contact.share", "evidence.share", "alert.review", "response.review"]}
         return {"ok": True}
@@ -97,6 +98,7 @@ class DesktopSOCTests(unittest.TestCase):
         soc.save_group()
         self.pump()
         self.assertTrue(any(method == "PUT" and path == "/v1/admin/groups/watch_team" and data["permissions"] == ["map.view", "ping"] for method, path, data in self.client.calls))
+        self.assertIn("Waiting for approval: newcomer.", soc.pending_label.cget("text"))
 
     def test_short_invite_copy_and_lobby_actions(self):
         self.client.room.update(locked=False, confirmed=[], invitation_expires=time.time()+600)
@@ -128,7 +130,19 @@ class DesktopSOCTests(unittest.TestCase):
         self.pump()
         soc = self.app.soc
         soc.compare_peer('peer')
+        from desktop_soc import shareable_code
+        # Opening the dialog copies one's own code, labelled with both names.
+        self.assertEqual(self.root.clipboard_get(), shareable_code('analyst', 'colleague', own.safety_codes['peer']))
+        soc.verify_paste()  # Pasting that back is one's own code, not the colleague's.
+        soc.verify_check()
+        self.assertIn('your own code', soc.verify_problem.cget('text'))
+        soc.verify_entry.delete(0, 'end')
+        soc.verify_entry.insert(0, shareable_code('someone', 'analyst', peer.safety_codes['own']))
+        soc.verify_check()
+        self.assertIn('not from colleague to you', soc.verify_problem.cget('text'))
+        self.assertEqual(own.verified_peers, set())
         read_aloud = peer.safety_codes['own']
+        soc.verify_entry.delete(0, 'end')
         soc.verify_entry.insert(0, ('B' if read_aloud[0] == 'A' else 'A') + read_aloud[1:])
         soc.verify_check()
         self.assertIn('codes differ', soc.verify_problem.cget('text'))
@@ -136,7 +150,8 @@ class DesktopSOCTests(unittest.TestCase):
         self.assertEqual(own.verified_peers, set())
         self.client.confirm.assert_not_called()
         soc.verify_entry.delete(0, 'end')
-        soc.verify_entry.insert(0, read_aloud)
+        # The colleague's own copied text, sent through another app and pasted here.
+        soc.verify_entry.insert(0, shareable_code('colleague', 'analyst', read_aloud))
         soc.verify_check()
         self.pump()
         self.assertIn('peer', soc.verified_peers)
@@ -180,6 +195,56 @@ class DesktopSOCTests(unittest.TestCase):
         forget.assert_called_once()
         close.assert_called_once()
 
+    def test_chat_groups_people_and_shows_pings_contacts_and_evidence(self):
+        import json
+        soc = self.app.soc
+        soc.open()
+        soc.window.withdraw()
+        self.pump()
+        self.assertIn('No messages yet', soc.chat.get('1.0', 'end'))
+        contact = {"mmsi": 250001234, "name": "SEA EAGLE", "lat": 53.4, "lon": -6.1, "sog_kn": 11.2,
+                   "cog_deg": 284, "received_utc": "2026-10-15T12:01:02Z", "label": "real"}
+        soc.receive([{"kind": "chat", "payload": {"text": "Anchor still down"}, "sender": "colleague"},
+                     {"kind": "chat", "payload": {"text": "Watching it"}, "sender": "colleague"},
+                     {"kind": "ping", "payload": {"lat": 53.35, "lon": -6.25}, "sender": "colleague"},
+                     {"kind": "contact", "payload": {"text": json.dumps(contact)}, "sender": "colleague"},
+                     {"kind": "evidence", "payload": {"text": "Scenario: exercise\nREVIEW CUES"}, "sender": "colleague"}])
+        soc.record('You', True, 'ping', {'lat': 53.0, 'lon': -6.0})
+        soc.render()
+        shown = soc.chat.get('1.0', 'end')
+        self.assertEqual(shown.count('colleague'), 1)  # One name line for messages close together.
+        self.assertIn('UTC', shown)
+        self.assertIn('Anchor still down\nWatching it\n', shown)
+        self.assertIn('Ping  53.3500°N, 6.2500°W   Show on map', shown)
+        self.assertIn('Contact  SEA EAGLE · MMSI 250001234 · 53.4000°N, 6.1000°W · 11.2 kn · 284° · fix 12:01 UTC · real',
+                      shown)
+        self.assertIn('Evidence summary\nScenario: exercise\nREVIEW CUES', shown)
+        self.assertIn('You', shown)
+        for raw in ('{"mmsi"', "{'lat'"):
+            self.assertNotIn(raw, shown)
+        with patch.object(self.app, '_change_map_center') as center:
+            soc.show_point((53.35, -6.25))
+        center.assert_called_once_with((53.35, -6.25))
+
+    def test_creating_a_session_copies_its_invitation(self):
+        self.client.room = None
+        self.client.code = None
+        def create(group):
+            self.client.code = 'WXYZ2345'
+            self.client.room = {'room_id': 'room', 'members': [{'user_id': 'own', 'username': 'analyst', 'groups': ['user']}],
+                                'confirmed': [], 'locked': False, 'host_id': 'own', 'permissions': ['chat'],
+                                'invitation_expires': time.time() + 600}
+            return self.client.room
+        self.client.create = Mock(side_effect=create)
+        self.app.soc.open()
+        self.app.soc.window.withdraw()
+        self.pump()
+        self.app.soc.create()
+        self.pump()
+        self.client.create.assert_called_once_with(None)
+        self.assertEqual(self.app.soc.window.clipboard_get(), 'WXYZ-2345')
+        self.assertIn('Invitation copied', self.app.soc.status_label.cget('text'))
+
     def test_empty_draft_and_enter_do_not_submit(self):
         self.app.soc.open()
         self.app.soc.window.withdraw()
@@ -196,6 +261,16 @@ class DesktopSOCTests(unittest.TestCase):
         self.assertEqual(soc.message.get('1.0', 'end').strip(), 'hello')
         soc.send_message.call_args.args[2]()
         self.assertEqual(soc.message.get('1.0', 'end').strip(), '')
+
+
+class ChatFormattingTests(unittest.TestCase):
+    def test_contact_summary_keeps_only_real_values(self):
+        import json
+        from desktop_soc_view import contact_summary
+        self.assertEqual(contact_summary('plain text'), ('plain text', None))
+        self.assertEqual(contact_summary('[1, 2]'), ('[1, 2]', None))
+        weird = {'name': 'X', 'lat': 95, 'lon': 0, 'sog_kn': True, 'cog_deg': float('nan'), 'received_utc': 'soon'}
+        self.assertEqual(contact_summary(json.dumps(weird)), ('X', None))
 
 
 if __name__ == "__main__":

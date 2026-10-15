@@ -2,6 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import queue
 import os
+import re
 import time
 import threading
 import tkinter as tk
@@ -12,6 +13,26 @@ import customtkinter as ctk
 from argus import soc_session
 from argus.collab_client import ClientError, SOCClient
 from argus.collab_crypto import KINDS
+
+SHARED_CODE = re.compile(r"code from\s+([^\s:]+)\s+to\s+([^\s:]+)\s*:\s*(.+)", re.IGNORECASE | re.DOTALL)
+
+
+def shareable_code(sender, recipient, code):
+    """Clipboard text that names both people, so a pasted code can be checked for its direction."""
+    return f"Argus Mara code from {sender} to {recipient}: {code}"
+
+
+def received_code(text, own, peer):
+    """The code to compare from typed or pasted text; refuse a code sent by oneself or another pair."""
+    match = SHARED_CODE.search(text)
+    if not match:
+        return text
+    sender, recipient, code = match.groups()
+    if sender.lower() == own.lower():
+        raise ValueError(f"That is your own code. Paste the code {peer} sends you.")
+    if sender.lower() != peer.lower() or recipient.lower() != own.lower():
+        raise ValueError(f"This code is from {sender} to {recipient}, not from {peer} to you.")
+    return code
 
 
 def login_screen(root, initial_url, on_login, *, allow_loopback_http=False,
@@ -39,7 +60,7 @@ def login_screen(root, initial_url, on_login, *, allow_loopback_http=False,
         remember_box = ctk.CTkCheckBox(frame, text="Stay signed in on this computer (up to 8 hours)")
         remember_box.select()
         remember_box.pack(anchor="w", padx=16, pady=(0, 6))
-    welcome = "Administrator accounts are created on the server."
+    welcome = "No account yet? Create one; an administrator approves new accounts."
     status = ctk.CTkLabel(frame, text=welcome, wraplength=480)
     status.pack(padx=16, pady=4)
     executor = ThreadPoolExecutor(max_workers=1)
@@ -108,6 +129,68 @@ def login_screen(root, initial_url, on_login, *, allow_loopback_http=False,
                 events.put(("resume", saved, f"The saved sign-in could not be used: {error}"))
         executor.submit(job)
 
+    signup = {}
+
+    def create_account():
+        dialog = signup.get("dialog")
+        if dialog is not None and dialog.winfo_exists():
+            dialog.lift()
+            return
+        if busy:
+            return
+        dialog = ctk.CTkToplevel(root)
+        dialog.title("Create an Argus Mara account")
+        dialog.geometry("440x390")
+        dialog.resizable(False, False)
+        dialog.transient(root)
+        entries = {}
+        for key, title in (("username", "Username"), ("password", "Password (at least 14 characters)"),
+                           ("repeat", "Repeat password")):
+            ctk.CTkLabel(dialog, text=title).pack(anchor="w", padx=20, pady=(12 if key == "username" else 0, 0))
+            entry = ctk.CTkEntry(dialog, show="" if key == "username" else "•")
+            entry.pack(fill="x", padx=20, pady=(0, 6))
+            entries[key] = entry
+        entries["username"].insert(0, fields["username"].get().strip())
+        note = ctk.CTkLabel(dialog, text="An administrator approves new accounts before they can sign in. "
+                                         "The account is created on the server in the sign-in screen's address field.",
+                            wraplength=390, justify="left")
+        note.pack(anchor="w", padx=20, pady=6)
+        row = ctk.CTkFrame(dialog, fg_color="transparent")
+        row.pack(fill="x", padx=20, pady=10)
+        ctk.CTkButton(row, text="Cancel", width=110, fg_color="transparent", border_width=1,
+                      command=dialog.destroy).pack(side="left")
+        send = ctk.CTkButton(row, text="Request account", width=170, command=request_account)
+        send.pack(side="right")
+        entries["repeat"].bind("<Return>", lambda _: request_account())
+        signup.update(dialog=dialog, entries=entries, note=note, send=send)
+        entries["username"].focus_set()
+
+    def request_account():
+        entries, note = signup["entries"], signup["note"]
+        username, secret = entries["username"].get().strip(), entries["password"].get()
+        if secret != entries["repeat"].get():
+            note.configure(text="The two passwords differ. Type them again.")
+            for key in ("password", "repeat"):
+                entries[key].delete(0, "end")
+            return
+        try:
+            client = SOCClient(fields["url"].get().strip(), allow_loopback_http=allow_loopback_http, ca_file=ca_file)
+        except (ValueError, OSError) as error:
+            note.configure(text=f"{error} (first field of the sign-in screen).")
+            return
+        for key in ("password", "repeat"):
+            entries[key].delete(0, "end")
+        signup["send"].configure(state="disabled")
+        note.configure(text="Sending your request…")
+
+        def job():
+            try:
+                client.signup(username, secret)
+                events.put(("signup", username, None))
+            except Exception as error:
+                events.put(("signup", None, str(error)))
+        executor.submit(job)
+
     def launch_local():
         if busy:
             return
@@ -153,6 +236,21 @@ def login_screen(root, initial_url, on_login, *, allow_loopback_http=False,
                     fields[key].insert(0, result[key])
             status.configure(text=error)
             root.after(100, check)
+        elif kind == "signup":
+            dialog = signup.get("dialog")
+            dialog_open = dialog is not None and dialog.winfo_exists()
+            if error and dialog_open:
+                signup["note"].configure(text=error)
+                signup["send"].configure(state="normal")
+            elif error:
+                status.configure(text=error)
+            else:
+                if dialog_open:
+                    dialog.destroy()
+                fields["username"].delete(0, "end")
+                fields["username"].insert(0, result)
+                status.configure(text=f"Account {result} requested. When an administrator approves it, sign in here.")
+            root.after(100, check)
         elif error:
             set_busy(False)
             status.configure(text=error)
@@ -191,9 +289,14 @@ def login_screen(root, initial_url, on_login, *, allow_loopback_http=False,
                 root.tk.call('after', 'cancel', callback)
         root.destroy()
 
-    button = ctk.CTkButton(frame, text="Sign in", command=submit)
-    button.pack(pady=8)
-    controls.extend([button, *fields.values()] + ([remember_box] if remember_box else []))
+    actions = ctk.CTkFrame(frame, fg_color="transparent")
+    actions.pack(pady=8)
+    button = ctk.CTkButton(actions, text="Sign in", command=submit)
+    button.pack(side="left", padx=4)
+    signup_button = ctk.CTkButton(actions, text="Create account", fg_color="transparent", border_width=1,
+                                  command=create_account)
+    signup_button.pack(side="left", padx=4)
+    controls.extend([button, signup_button, *fields.values()] + ([remember_box] if remember_box else []))
     if local_launcher:
         local_button = ctk.CTkButton(frame, text="Start local server + two sign-in windows", command=launch_local)
         local_button.pack(fill="x", padx=16, pady=(16, 4))
@@ -291,16 +394,24 @@ class DesktopSOC:
     def receive(self, messages):
         for message in messages:
             payload, kind = message["payload"], message["kind"]
-            sender = message.get('sender', 'Peer')
             if kind == "ping":
                 self.app._place_map_ping((payload["lat"], payload["lon"]), share=False)
                 self.app.map_status_label.configure(text="Peer ping · analyst annotation · not a sensor alert")
-                text = f"{sender} ping: {payload['lat']:.5f}, {payload['lon']:.5f}"
-            else:
-                text = f"{sender} · {'Message' if kind == 'chat' else kind.title()}\n{payload['text']}"
-            self.history.append(text)
-        self.history = self.history[-100:]
+            self.record(message.get('sender', 'Peer'), False, kind, payload)
         self.render()
+
+    def record(self, sender, own, kind, payload):
+        """Keep the latest 100 messages for the chat view, with the UTC time they arrived or were sent."""
+        entry = {'sender': sender, 'own': own, 'kind': kind, 'at': time.time()}
+        if kind == 'ping':
+            entry['point'] = (payload['lat'], payload['lon'])
+        else:
+            entry['text'] = payload['text']
+        self.history = (self.history + [entry])[-100:]
+
+    def show_point(self, point):
+        self.app._change_map_center(point)
+        self.app._place_map_ping(point, share=False)
 
     def open(self):
         if not self.client:
@@ -334,7 +445,11 @@ class DesktopSOC:
     def create(self):
         scope = self.group.get()
         group = None if scope == 'Team session (all groups)' else scope.removeprefix('Private: ')
-        self.task(lambda: self.client.create(group), self.reset)
+        self.task(lambda: self.client.create(group), self.created)
+
+    def created(self, result=None):
+        self.reset(result)
+        self.copy_invite()  # Sharing the invitation is the host's next step.
 
     def join(self, code):
         if len(code.replace('-', '').replace(' ', '')) != 8:
@@ -375,23 +490,42 @@ class DesktopSOC:
         from desktop_soc_view import label, button, BG, CARD, MUTED
         dialog = ctk.CTkToplevel(self.window)
         dialog.title('Verify ' + member['username'])
-        dialog.geometry('610x470')
+        dialog.geometry('610x500')
         dialog.resizable(False, False)
         dialog.configure(fg_color=CARD)
         dialog.transient(self.window)
         dialog.grab_set()
         label(dialog, 'Compare with ' + member['username'], 21, True).pack(padx=24, pady=(22, 8))
-        label(dialog, f"Read your code aloud to {member['username']}, then type the code they read to you. "
-                      'Compare by voice or in person, not through this application.',
+        own, peer = self.client.user['username'], member['username']
+        code = cipher.safety_codes[user_id]
+        # Copied with both names, so pasting one's own code back is caught below.
+        shared = shareable_code(own, peer, code)
+        def copy_code():
+            dialog.clipboard_clear()
+            dialog.clipboard_append(shared)
+        copy_code()
+        label(dialog, f"Your code is copied. Send it to {peer} in another app, such as Signal or WhatsApp, "
+                      f"or read it aloud. Then paste or type the code {peer} sends you. Not through this chat.",
               wraplength=545, justify='left', text_color=MUTED).pack(padx=24, pady=8)
-        # The code is shown for reading aloud and is deliberately not copyable:
-        # only a code typed from the peer's own screen proves both keys agree.
         label(dialog, 'Your code', text_color=MUTED).pack(padx=24, pady=(8, 0))
-        label(dialog, cipher.safety_codes[user_id], font=ctk.CTkFont('Consolas', 19, 'bold')).pack(padx=20, pady=(2, 12))
-        label(dialog, f"Code {member['username']} reads to you", text_color=MUTED).pack(padx=24)
-        entry = ctk.CTkEntry(dialog, width=420, height=38, font=ctk.CTkFont('Consolas', 17),
-                             placeholder_text='XXXXX XXXXX XXXXX XXXXX XXXXX X')
-        entry.pack(padx=24, pady=(2, 4))
+        mine = ctk.CTkFrame(dialog, fg_color='transparent')
+        mine.pack(pady=(2, 10))
+        label(mine, code, font=ctk.CTkFont('Consolas', 19, 'bold')).pack(side='left', padx=(0, 10))
+        button(mine, 'Copy again', copy_code, width=100).pack(side='left')
+        label(dialog, f"Code from {peer}", text_color=MUTED).pack(padx=24)
+        theirs = ctk.CTkFrame(dialog, fg_color='transparent')
+        theirs.pack(pady=(2, 4))
+        entry = ctk.CTkEntry(theirs, width=420, height=38, font=ctk.CTkFont('Consolas', 15),
+                             placeholder_text=f"Paste or type the code {peer} sends you")
+        entry.pack(side='left', padx=(0, 8))
+        def paste():
+            try:
+                pasted = dialog.clipboard_get()
+            except tk.TclError:
+                return
+            entry.delete(0, 'end')
+            entry.insert(0, pasted.strip())
+        button(theirs, 'Paste', paste, width=80).pack(side='left')
         problem = label(dialog, '', text_color='#ff7b72', wraplength=545, justify='left')
         problem.pack(padx=24, pady=4)
         row = ctk.CTkFrame(dialog, fg_color='transparent')
@@ -402,7 +536,12 @@ class DesktopSOC:
                 dialog.destroy()
                 self.status('Session changed. Verify the new session instead.')
                 return
-            if not cipher.verify_peer(user_id, entry.get()):
+            try:
+                received = received_code(entry.get(), own, peer)
+            except ValueError as error:
+                problem.configure(text=str(error))
+                return
+            if not cipher.verify_peer(user_id, received):
                 problem.configure(text='The codes differ. Check the code again together. If it still differs, '
                                        'do not chat: someone may be intercepting. Leave the session.')
                 return
@@ -415,6 +554,7 @@ class DesktopSOC:
         button(row, 'Cancel', dialog.destroy, width=130).pack(side='left')
         button(row, 'Check code', check, True, width=220).pack(side='right')
         self.verify_window, self.verify_entry, self.verify_problem, self.verify_check = dialog, entry, problem, check
+        self.verify_paste = paste
         entry.focus_set()
 
     def render(self):
@@ -427,8 +567,7 @@ class DesktopSOC:
             self.status('This tool is not available to everyone in the session.')
             return
         def done(_):
-            self.history.append(f"You · {kind.title()}\n{payload.get('text', payload)}")
-            self.history = self.history[-100:]
+            self.record('You', True, kind, payload)
             if on_success:
                 on_success()
             self.status('Message sent.' if kind == 'chat' else 'Shared with your team.')
@@ -477,6 +616,8 @@ class DesktopSOC:
         self.user_selector = ttk.Combobox(frame, state="readonly")
         self.user_selector.pack(fill="x", pady=5)
         self.user_selector.bind("<<ComboboxSelected>>", lambda _: self.select_user())
+        self.pending_label = ttk.Label(frame, text="", wraplength=620, justify="left")
+        self.pending_label.pack(anchor="w")
         self.admin_username = ttk.Entry(frame)
         self.admin_username.pack(fill="x", pady=4)
         ttk.Label(frame, text="Username (new accounts only)").pack(anchor="w")
@@ -512,6 +653,9 @@ class DesktopSOC:
             return
         self.admin_data = data
         self.user_selector.configure(values=[u["username"] for u in data["users"]])
+        waiting = [u["username"] for u in data["users"] if not u["groups"] and not u["disabled"] and not u.get("admin")]
+        self.pending_label.configure(text=f"Waiting for approval: {', '.join(waiting)}. Select an account, tick a group "
+                                          "and press Update selected; or tick Disable to refuse it." if waiting else "")
         self.group_selector.configure(values=[g["name"] for g in data["groups"]])
         for frame in (self.memberships, self.permissions_frame):
             for child in frame.winfo_children():
