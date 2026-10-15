@@ -10,13 +10,13 @@ new-image cycles; Start scan enables paid review under the same $20 pilot ceilin
 
 Open **Satellite analysis → Start scan**. The app checks for newly available
 Sentinel-2 images every **30 minutes**, records the shared AIS feed every
-**60 seconds**, and works through a persistent queue of **1,463 approximately
+**60 seconds**, and works through a persistent queue of **2,278 approximately
 8 km image areas** around the island, including Northern Ireland. **All Ireland**
 fits the map to that coverage. Stop ends further work after the current request.
 The scan resumes on the next app/host launch if it was left enabled; the app or
 shared SOC host must stay running. No Windows scheduled task is installed.
 
-The pilot covers a roughly **20 km coastal belt**, including represented islands,
+The pilot covers a roughly **40 km coastal belt**, including represented islands,
 not the entire Irish EEZ. The reproducible public-domain Natural Earth planning
 grid removes the Republic/Northern Ireland shared border before buffering the
 shoreline. See `scripts/build_coastal_grid.py`; cells include land and the geometry
@@ -45,7 +45,9 @@ without extra image downloads or charges.
 Before downloading RGB, a small Sentinel-2 L2A scene-classification (SCL) window
 screens for observable water. The crop then aligns native 20 m SCL to its RGB grid
 with nearest-neighbour resampling, rejects cloud, land and shadow, and uses a
-local compact-bright-feature filter before any paid vision call. See the official
+local compact-bright-feature filter before a paid vision call. Clear-water crops
+with eligible acquisition-time AIS vessels also receive review even if that
+filter finds no bright features. See the official
 [Copernicus scene-classification description](https://sentiwiki.copernicus.eu/web/s2-processing).
 This filter is experimental: it misses dark, small, cloud-covered and nearshore
 ships and can confuse glint or wakes with vessels. **No local candidates does not
@@ -71,11 +73,83 @@ candidates, their distance error and nearest-fix time offset. Select a candidate
 for as-of broadcast particulars and its latest received AIS position. That marker
 updates without AI tokens; a dashed link shows straight-line displacement, not
 a recorded voyage. Old fixes explicitly say **stale**, and a fix predating the
-image is never presented as a newer position. The contact list shows the newest
-200 leads; the map index is bounded to 5,000.
+image is never presented as a newer position. The contact list pages through all
+retained observations, 200 per page. The compact map/list index no longer cuts
+off at 5,000; full descriptions load on selection. The current 200-root storage
+limit and adaptive request limits permit at most 24,000 indexed observations.
+Overlapping observations are not a count of distinct boats.
+
+## Crowded-image detail review (D78)
+
+More than 16 eligible image-time AIS vessels or local bright-feature candidates
+selects four overlapping detail windows. Otherwise one overview runs first; a
+24-contact answer then selects the same four windows. There are at most five
+requests per root image, with the existing 1,536-output-token limit per request,
+verified vision route, cache, exclusive slots and persistent $20 ceiling. These
+are lossless crops of the original pixels, not higher-resolution imagery.
+
+Each window retains the original acquisition UTC and derives coordinates from
+the parent raster grid. Every reported observation is retained, including overlap
+and overview observations; possible duplicates across windows within an assumed
+25 m are flagged for review instead of silently merged. Associations with those
+observations remain ambiguous. No complete vessel census is claimed.
+
+An uncertain paid window is durably held and never automatically resubmitted.
+Completed windows are reused for free; pending windows and request caps remain
+visible. Failed paid work pauses subsequent paid review while AIS capture
+continues. A capped window needs further human review but does not pause the
+rest of the coast. An interrupted submitted request is not treated as an empty
+image. Source pixels and a partial result remain reviewable.
+
+Missing-detection checks evaluate only the vessel footprint. All intersecting
+detail-window cores must have verified, uncapped results. Thus one held window
+does not suppress a valid check in a separate completed clear-water window, and
+a footprint crossing into an unfinished window cannot generate an absence lead.
+Database exports also require a fully clear 100 m neighbourhood, with an extra
+source-pixel buffer at inclusive area boundaries. Areas without verified image
+analysis are never exported as negative-detection evidence.
+
+The adaptive tests validate geometry, cache/budget behaviour, failure holds,
+coverage gates and transport size with synthetic provider responses. They do not
+establish improved detector precision/recall on real imagery. A held-out,
+human-reviewed accuracy benchmark remains outstanding.
+
+## Satellite / AIS leads in Incidents (D76)
+
+Incidents now has a separate **Satellite / AIS review** section that stays visible
+with fictional alerts hidden. Each lead opens its acquisition-time image review.
+Results are assumptions on real/reconstructed source pixels; there is no automatic
+threat severity or response. Leads page in groups of 50. Counts distinguish saved
+images still awaiting a history check from images checked without contemporaneous
+AIS, so missing history cannot look like a clean result.
+
+Every eligible image-time AIS vessel is listed in the image overview with its
+comparison result, including provisional/ambiguous matches, nearby contacts,
+unknown/small size, moored status, inconsistent motion, obscured pixels, image
+edges and unavailable quality. A negative review lead requires verified,
+uncapped analysis over its full footprint, a declared length of at least 50 m, no contact
+within 1 km, and a fully unmasked 100 m neighbourhood around the AIS position.
+The 50 m, 100 m and 1 km thresholds are assumptions. SCL excludes cloud, shadow,
+land and missing data, but does not certify freedom from glint, haze or rough sea.
+The wording is **not detected**, never absent or confirmed false AIS.
+
+A free background pass checks one saved image per status cycle, prioritising
+unchecked images. Checks are saved and become eligible for refresh after five
+minutes. It never submits another paid image request. The linked database supplies
+the existing acquisition-time join; unlinked workspaces use the local archive.
+The shared `/v1/satellite/comparisons` endpoint retains `evidence.share` access and
+returns saved results while reconciliation runs on the worker. Update both the
+native client and optional SOC satellite host to use it.
 
 AIS capture uses the team's fixed public Railway snapshot endpoint and stores
-only validated fields in ignored `data/ais/capture/YYYY-MM-DD.csv`. It cannot
+only validated fields in ignored `data/ais/capture/YYYY-MM-DD.v2.csv`. Existing
+unversioned daily CSVs remain readable without rewriting their headers. The
+Python client now retains the feed's optional `ais_length_m`; capture stores its
+declaration with the supplied static receipt UTC. Explicit unknown dimensions
+clear the historical value; future declarations cannot replace past dimensions.
+Contacts with only static information retain their metadata but have no invented
+position. The feed's shared static-receipt timestamp is not an independent
+measurement or per-field observation time. Capture cannot
 recover unreceived messages or reconstruct historical tracks from current fixes.
 Receipt-only times remain explicit assumptions. Distinct server stream epochs
 are never interpolated together. The archive stops at 1 GB / 128 MB per daily
@@ -288,3 +362,11 @@ Docker; the implementation machine did not have Docker available.
    validating detector precision/recall and access. Preserve explicit enablement,
    regional coverage accounting, cost reservations, one review per area/acquisition
    and the human review step. Keep automatic operational responses disabled.
+
+D79 hardens the optional direct database comparison, pending hosted application.
+The publisher attaches a versioned verified-image manifest and 100 m clear-footprint
+flag; overlap ambiguity is retained. Old scenes without this manifest produce no
+review leads. Republish saved verified reviews after applying the migration. SQL
+uses deterministic greedy associations; the native Python path uses global
+assignment, so individual provisional associations can differ in crowded scenes.
+Both paths withhold silence claims for competing contacts and ineligible motion.

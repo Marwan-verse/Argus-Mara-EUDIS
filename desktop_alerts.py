@@ -171,6 +171,15 @@ class AlertBoard:
         self.level_filter: str | None = None
         self.show_closed = False
         self.show_watching = False
+        self.evidence_leads = []
+        self.show_reviewed_evidence = tk.BooleanVar(app.root, value=False)
+        self.evidence_page = 0
+        self.evidence_status = "Waiting for satellite comparisons"
+        self.evidence_signature = None
+        self.history_signature = None
+        self.history_lead_count = 0
+        self.show_demo_alerts = tk.BooleanVar(
+            app.root, value=app.tools.settings.get("show_demo_alerts", True) is True)
         self.sort_mode = tk.StringVar(app.root, value="Severity")
         self.cards: dict[str, dict] = {}
         self.wrap = 230
@@ -210,6 +219,16 @@ class AlertBoard:
         self.clock = tk.Label(head, text=self.stamp(self.replay.now), bg=ui.CARD, fg=ui.AMBER, font=(MONO, 9, "bold"))
         self.clock.pack(side="left", padx=(6, 0), pady=(3, 0))
         app.tools.attach_tooltip(self.clock, "Replay time: incidents follow the exercise replay (Play or the slider)")
+
+        self.demo_switch = ctk.CTkCheckBox(
+            panel, text="Show fictional / simulated alerts", variable=self.show_demo_alerts,
+            command=self.toggle_demo_alerts, font=ctk.CTkFont(SANS, 12),
+            checkbox_width=16, checkbox_height=16, height=26)
+        self.demo_switch.pack(fill="x", padx=16, pady=(8, 0))
+        tk.Label(panel, text="Satellite / AIS review leads appear below.\n"
+                 "Live AIS alone does not establish a threat.",
+                 bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9), justify="left",
+                 wraplength=250).pack(fill="x", padx=16, pady=(4, 6))
 
         row = tk.Frame(panel, bg=ui.CARD)
         row.pack(fill="x", padx=(16, 12), pady=(2, 0))
@@ -261,6 +280,10 @@ class AlertBoard:
         self.list = ctk.CTkScrollableFrame(panel, fg_color=ui.CARD, corner_radius=0,
             scrollbar_button_color=ui.LINE, scrollbar_button_hover_color=ui.HOVER)
         self.list.pack(fill="both", expand=True, padx=(4, 4))
+        self.history_frame = tk.Frame(self.list, bg=ui.CARD)
+        self.refresh_history({'vessels': [], 'summary': {}, 'worker': {}}, relayout=False)
+        self.evidence_frame = tk.Frame(self.list, bg=ui.CARD)
+        self.refresh_evidence({'leads': [], 'reviews_checked': 0, 'reviews_pending': 0}, relayout=False)
         self.reports_frame = tk.Frame(self.list, bg=ui.CARD)
         self.refresh_reports(relayout=False)
         self.headers = {}
@@ -281,6 +304,118 @@ class AlertBoard:
                               justify="left", wraplength=self.wrap)
         for item in self.items:
             self._card(item)
+
+    def refresh_history(self, packet, relayout=True):
+        import json
+        from argus.fleet_history import source_health
+        # Cached data can stay unchanged while its source becomes stale.
+        signature = json.dumps(packet, sort_keys=True)+source_health(packet.get('summary', {}))
+        if signature == self.history_signature:
+            return
+        self.history_signature = signature
+        self.history_lead_count = packet.get('summary', {}).get('review_required', 0)
+        ui = self.ui
+        for child in self.history_frame.winfo_children():
+            child.destroy()
+        summary = packet.get('summary', {})
+        tk.Label(self.history_frame, text=f"FLEET HISTORY REVIEW · {self.history_lead_count}",
+                 bg=ui.CARD, fg=ui.INK, font=(SANS, 10, 'bold')).pack(anchor='w', padx=10, pady=(12, 4))
+        text = (f"{summary.get('checked_vessels', 0)} / {summary.get('total_vessels', 0)} recorded vessels checked\n"
+                f"{summary.get('never_checked', 0)} never checked · {summary.get('new_evidence_pending', 0)} awaiting new evidence checks\n"
+                + source_health(summary)+'\n'
+                + packet.get('worker', {}).get('message', 'History inventory is loading.'))
+        if not packet.get('inventory_complete'):
+            text += '\nInventory is still loading; missing entries are not clean results.'
+        tk.Label(self.history_frame, text=text, bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9),
+                 wraplength=self.wrap, justify='left').pack(anchor='w', padx=10)
+        for row in packet.get('vessels', []):
+            result = row.get('result') or {}
+            findings = [f for f in result.get('findings', []) if f.get('review_required')]
+            text = (f"{result.get('name') or row['mmsi']} · {row['mmsi']}\nMotion history requires review\n"
+                    f"Checked {row.get('checked_utc')} · derived assumption\n"
+                    + '\n'.join(f['reason'] for f in findings[-2:]) + '\nOpen history evidence')
+            tk.Button(self.history_frame, text=text, anchor='w', justify='left', wraplength=self.wrap,
+                      bg=ui.CARD, fg=ui.INK, activebackground=ui.HOVER, activeforeground=ui.INK,
+                      relief='flat', padx=10, pady=8, cursor='hand2',
+                      command=lambda mmsi=row['mmsi']: self.app.satellite.open_fleet(mmsi)).pack(fill='x', padx=8, pady=4)
+        tk.Button(self.history_frame, text='Open all vessel histories', bg=ui.CARD, fg=ui.INK,
+                  relief='flat', cursor='hand2', command=lambda: self.app.satellite.open_fleet()).pack(anchor='w', padx=10, pady=6)
+        if relayout:
+            self.relayout()
+
+    def refresh_evidence(self, result, relayout=True):
+        """Real-image comparisons stay visible when the fictional queue is hidden."""
+        import json
+        signature = json.dumps(result, sort_keys=True)
+        if signature == self.evidence_signature:
+            return
+        self.evidence_signature = signature
+        self.evidence_leads = result.get('leads', [])
+        self.evidence_status = (f"{result.get('reviews_checked', 0)} images checked · "
+                                f"{result.get('reviews_pending', 0)} awaiting history check\n"
+                                f"{result.get('image_contacts', 0)} image contacts · "
+                                f"{result.get('images_without_ais', 0)} images without contemporaneous AIS\n"
+                                f"{result.get('partial_analysis_images', 0)} images with incomplete detail review")
+        self.evidence_page = min(self.evidence_page, max(0, (len(self.evidence_leads)-1)//50))
+        self.paint_evidence()
+        if relayout:
+            self.relayout()
+
+    def paint_evidence(self):
+        from argus.satellite_disposition import OUTCOMES, CLOSED_OUTCOMES
+        ui = self.ui
+        for child in self.evidence_frame.winfo_children():
+            child.destroy()
+        tk.Label(self.evidence_frame, text=f"SATELLITE / AIS REVIEW · {len(self.evidence_leads)} leads",
+                 bg=ui.CARD, fg=ui.INK, font=(SANS, 10, 'bold')).pack(anchor='w', padx=10, pady=(12, 4))
+        tk.Label(self.evidence_frame, text=self.evidence_status, bg=ui.CARD, fg=ui.MUTED,
+                 font=(SANS, 9), wraplength=self.wrap, justify='left').pack(anchor='w', padx=10)
+        def refilter():
+            self.evidence_page = 0
+            self.paint_evidence()
+            self.relayout(top=True)
+        tk.Checkbutton(self.evidence_frame, text='Show reviewed outcomes', variable=self.show_reviewed_evidence,
+                       command=refilter, bg=ui.CARD, fg=ui.INK, selectcolor=ui.CARD).pack(anchor='w', padx=10)
+        visible = [r for r in self.evidence_leads if self.show_reviewed_evidence.get() or r.get('review_status') not in CLOSED_OUTCOMES]
+        self.evidence_page = min(self.evidence_page, max(0, (len(visible)-1)//50))
+        tk.Label(self.evidence_frame, text=f'{len(visible)} shown · analyst outcomes retain the original evidence',
+                 bg=ui.CARD, fg=ui.MUTED, wraplength=self.wrap).pack(anchor='w', padx=10)
+        start = self.evidence_page*50
+        for lead in visible[start:start+50]:
+            state = OUTCOMES.get(lead.get('review_status'), 'Unreviewed')
+            if lead.get('review_status') == 'unreviewed':
+                state = 'Unreviewed'
+            if lead.get('evidence_changed'):
+                state = 'Evidence changed · review again'
+            text = (f"{lead['name']}" + (f" · {lead['mmsi']}" if lead.get('mmsi') else '') +
+                    f"\n{lead['title']}\nImage {lead['acquired_utc']}\n"
+                    f"{lead['source_label']} pixels · assumption · {state}\n{lead['reason']}\nOpen image evidence")
+            tk.Button(self.evidence_frame, text=text, anchor='w', justify='left', wraplength=self.wrap,
+                      bg=ui.CARD, fg=ui.INK, activebackground=ui.HOVER, activeforeground=ui.INK,
+                      relief='flat', padx=10, pady=8, cursor='hand2',
+                      command=lambda row=lead: self.open_evidence(row)).pack(fill='x', padx=8, pady=4)
+            if lead.get('evidence_key'):
+                def review(row=lead):
+                    from desktop_evidence_review import EvidenceReview
+                    EvidenceReview(self, row)
+                tk.Button(self.evidence_frame, text='Record analyst outcome', command=review,
+                          bg=ui.CARD, fg=ui.INK, relief='flat', cursor='hand2').pack(anchor='w', padx=18)
+        if len(visible) > 50:
+            controls = tk.Frame(self.evidence_frame, bg=ui.CARD)
+            controls.pack(fill='x')
+            def turn(delta):
+                self.evidence_page += delta
+                self.paint_evidence()
+                self.relayout(top=True)
+            for text, delta, enabled in [('Previous', -1, start > 0),
+                                         ('Next', 1, start+50 < len(visible))]:
+                tk.Button(controls, text=text, state='normal' if enabled else 'disabled',
+                          command=lambda d=delta: turn(d)).pack(side='left', padx=8)
+
+    def open_evidence(self, lead):
+        satellite = self.app.satellite
+        self.app.open_window('satellite')
+        satellite.pending_contact = (lead['scene_id'], lead.get('contact_id'))
 
     def refresh_reports(self, relayout=True):
         """Analyst reports stay separate from the simulated Brain severity groups."""
@@ -435,6 +570,8 @@ class AlertBoard:
     def group(self, identifier: str) -> str:
         """critical/high/medium for an open incident, else quiet, watching, closed or hidden (not raised yet)."""
         item = self.by_id[identifier]
+        if not self.show_demo_alerts.get():
+            return "hidden"
         if not self.replay.present(item):
             return "hidden"
         incident = self.tracker.open_incident(item)
@@ -450,7 +587,7 @@ class AlertBoard:
         return "T+" + self.ui.clock(t)[:5] if t >= 0 else "T−" + self.ui.clock(-t)[:5]
 
     def counts(self) -> dict[str, int]:
-        states = [self.status(item["id"]) for item in self.items if self.replay.present(item)]
+        states = [self.status(item["id"]) for item in self.items if self.group(item["id"]) != "hidden"]
         return {state: states.count(state) for state in (*STATUSES, "Watching")}
 
     def decide(self, identifier: str, status: str, text: str, reason: str | None = None,
@@ -634,6 +771,8 @@ class AlertBoard:
         ui = self.ui
         for widget in self.list.winfo_children():
             widget.pack_forget()
+        self.history_frame.pack(fill="x", pady=(0, 12))
+        self.evidence_frame.pack(fill="x", pady=(0, 12))
         if self.app.vessel_reports.entries:
             self.reports_frame.pack(fill="x", pady=(0, 12))
         groups = {item["id"]: self.group(item["id"]) for item in self.items}
@@ -675,8 +814,11 @@ class AlertBoard:
             for item in found:
                 card(item)
             shown = len(found)
-        if not shown and self.level_filter != "low" and not self.app.vessel_reports.entries:
-            self.empty.configure(text="No open incidents at this level." if self.level_filter else "No open incidents.",
+        if not shown and self.level_filter != "low" and not self.app.vessel_reports.entries and not self.evidence_leads and not self.history_lead_count:
+            self.empty.configure(text=("Fictional / simulated alerts hidden.\n"
+                                      "No satellite / AIS review leads loaded yet.")
+                                 if not self.show_demo_alerts.get() else
+                                 ("No open incidents at this level." if self.level_filter else "No open incidents."),
                                  wraplength=self.wrap)
             self.empty.pack(fill="x", padx=10, pady=16)
         watching = members("watching")
@@ -739,9 +881,29 @@ class AlertBoard:
             text=f"{counts['New']} new · {counts['Reviewed']} reviewed · {counts['Acknowledged']} acknowledged · "
                  f"{counts['Escalated']} escalated · {counts['Rejected']} rejected\n"
                  "Brain: {} contacts scored in {:.0f} ms at this replay step".format(*self.replay.scored))
+        if not self.show_demo_alerts.get():
+            self.app.alert_counts_label.configure(text="Fictional / simulated alerts hidden")
+        from argus.satellite_disposition import CLOSED_OUTCOMES
+        unresolved = sum(r.get('review_status') not in CLOSED_OUTCOMES for r in self.evidence_leads)
+        self.app.alert_counts_label.configure(text=self.app.alert_counts_label.cget('text') +
+            f"\n{len(self.evidence_leads)} satellite / AIS leads · {unresolved} awaiting review")
+        if self.history_lead_count:
+            self.app.alert_counts_label.configure(text=self.app.alert_counts_label.cget('text') +
+                f"\n{self.history_lead_count} vessel histories require review")
         if self.app.vessel_reports.entries:
             self.app.alert_counts_label.configure(text=self.app.alert_counts_label.cget("text") +
                 f"\n{len(self.app.vessel_reports.grouped())} reported vessels · analyst review")
+
+    def toggle_demo_alerts(self) -> None:
+        """Hide the replay queue and markers, retaining decisions and analyst reports."""
+        self.app.tools.settings["show_demo_alerts"] = self.show_demo_alerts.get()
+        self.app.tools.schedule_save()
+        if not self.show_demo_alerts.get():
+            self.dialog.close()
+            self.selected = self.hovered = None
+            self.level_filter = None
+        self.relayout(top=True)
+        self.app._draw_map()
 
     def set_filter(self, level: str | None) -> None:
         self.level_filter = None if level == self.level_filter else level
@@ -764,6 +926,10 @@ class AlertBoard:
         if pixels <= 0 or wrap == self.wrap:
             return
         self.wrap = wrap
+        for frame in (self.history_frame, self.evidence_frame):
+            for widget in frame.winfo_children():
+                if isinstance(widget, (tk.Label, tk.Button)):
+                    widget.configure(wraplength=wrap)
         for card in self.report_cards:
             card.configure(wraplength=wrap)
         for identifier in self.cards:
@@ -968,7 +1134,7 @@ class AlertBoard:
         app, ui = self.app, self.ui
         self.halos = []
         layer = app.map_layers.get("Simulated alerts")
-        if layer is None or not layer.get():
+        if layer is None or not layer.get() or not self.show_demo_alerts.get():
             return
         width, height = app._map_size
         occupied: list[tuple[float, float, float, float]] = []

@@ -60,6 +60,20 @@ class SatelliteServerTests(unittest.IsolatedAsyncioTestCase):
         self.fail('Synthetic satellite job did not finish')
 
     async def test_login_and_evidence_permission_protect_crops_and_jobs(self):
+        self.assertEqual((await self.api('GET', 'comparisons'))[0], 401)
+        self.assertEqual((await self.api('GET', 'comparisons', 'viewer'))[0], 403)
+        code, comparisons = await self.api('GET', 'comparisons', 'analyst')
+        self.assertEqual(code, 200)
+        self.assertEqual(comparisons['leads'], [])
+        self.assertEqual((await self.api('GET', 'fleet'))[0], 401)
+        self.assertEqual((await self.api('GET', 'fleet', 'viewer'))[0], 403)
+        code, fleet = await self.api('GET', 'fleet', 'analyst')
+        self.assertEqual(code, 200)
+        self.assertEqual(fleet['vessels'], [])
+        self.assertFalse(fleet['complete_regional_census'])
+        self.assertEqual((await self.api('GET', 'fleet?limit=51', 'analyst'))[0], 400)
+        self.assertEqual((await self.api('GET', 'fleet?after=invalid', 'analyst'))[0], 400)
+        self.assertEqual((await self.api('GET', 'fleet?leads=maybe', 'analyst'))[0], 400)
         self.assertEqual((await self.api('GET', 'scenes'))[0], 401)
         self.assertEqual((await self.api('GET', 'scenes', 'viewer'))[0], 403)
         self.assertEqual((await self.api('POST', 'jobs', 'viewer', {'action': 'analyse'}))[0], 403)
@@ -79,6 +93,22 @@ class SatelliteServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['status'], 'complete')
         self.assertEqual(result['result']['ais']['coverage']['status'], 'unavailable')
         self.assertFalse((self.workspace.root/'ai/budget.json').exists())
+
+    async def test_dispositions_require_evidence_permission_and_use_authenticated_actor(self):
+        from test_satellite_disposition import lead_fixture, payload
+        workspace, _ = lead_fixture(self.workspace.root)
+        lead = workspace.comparison_index()['leads'][0]
+        draft = payload(lead)
+        self.assertEqual((await self.api('POST', 'dispositions', data=draft))[0], 401)
+        self.assertEqual((await self.api('POST', 'dispositions', 'viewer', draft))[0], 403)
+        code, result = await self.api('POST', 'dispositions', 'analyst', {**draft, 'actor':'forged'})
+        self.assertEqual(code, 400)
+        code, result = await self.api('POST', 'dispositions', 'analyst', draft)
+        self.assertEqual(code, 200)
+        self.assertTrue(result['event']['actor'].startswith('analyst ('))
+        self.assertEqual((await self.api('POST', 'dispositions', 'analyst', draft))[1]['event'], result['event'])
+        self.assertEqual((await self.api('POST', 'dispositions', 'other', draft))[0], 400)
+        self.assertFalse((workspace.root/'ai/budget.json').exists())
 
     async def test_remote_clients_cannot_change_keys_budget_or_fetch_arbitrary_urls(self):
         self.assertEqual((await self.api('POST', 'jobs', 'analyst', {'action': 'configure', 'key': 'synthetic'}))[0], 400)

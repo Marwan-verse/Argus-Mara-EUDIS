@@ -115,6 +115,12 @@ class SceneUploadTests(unittest.TestCase):
         self.assertEqual([c['external_id'] for c in payload['contacts']], ['c1', 'c2'])
         self.assertTrue(all(c['label'] == 'assumption' and c['source'] == 'tensorx_ai' for c in payload['contacts']))
         self.assertEqual([c['confidence'] for c in payload['contacts']], [None, .7])
+        self.assertFalse(payload['review_evidence']['image_input_verified'])
+        reviewed = supabase_ais.scene_payload(scene, [{**contacts[0], 'overlap_ambiguous': True}],
+                                             analysis={'image_input_verified': True})
+        self.assertTrue(reviewed['review_evidence']['image_input_verified'])
+        self.assertEqual(reviewed['review_evidence']['clear_footprint_radius_m'], 100)
+        self.assertTrue(reviewed['contacts'][0]['overlap_ambiguous'])
         self.assertEqual(supabase_ais.scene_payload({**scene, 'label': 'simulated'}, [])['label'], 'simulated')
         json.dumps(payload, allow_nan=False)
 

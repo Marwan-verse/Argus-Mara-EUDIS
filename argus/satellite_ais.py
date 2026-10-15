@@ -122,8 +122,8 @@ def historical_ais(root, acquired_utc, area):
     # Our daily capture partitions cannot contain reception times outside their
     # named day. Imports remain fully scanned; do not trust arbitrary filenames.
     paths = [p for p in paths if p.parent != Path(root)/'capture' or
-             not re.fullmatch(r'\d{4}-\d{2}-\d{2}\.csv', p.name) or
-             when-2*86400 <= timestamp(p.stem+'T00:00:00Z') <= when+86400]
+             not re.fullmatch(r'\d{4}-\d{2}-\d{2}(?:\.v2)?\.csv', p.name) or
+             when-2*86400 <= timestamp(p.name[:10]+'T00:00:00Z') <= when+86400]
     if len(paths) > 300:
         raise ValueError('Select an AIS archive folder with at most 300 files')
     if sum(path.stat().st_size for path in paths) > 1024*1024*1024:

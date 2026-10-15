@@ -54,7 +54,7 @@ def coast_progress(layout, state):
         if side:
             result[side]['queued'] += job['status'] == 'queued'
             result[side]['active'] += job['status'] == 'processing'
-            result[side]['held'] += job['status'] in {'failed_review_required', 'interrupted_review_required', 'clutter_review_required'}
+            result[side]['held'] += job['status'] in {'failed_review_required', 'interrupted_review_required', 'clutter_review_required', 'partial_review_required'}
     return result
 
 
@@ -99,7 +99,7 @@ class CoastalScan:
         satellite.atomic_json(self.folder/'state.json', self.state)
         statuses = Counter(row['status'] for row in self.state['jobs'].values())
         summary = {key: self.state.get(key) for key in
-                   ('enabled', 'analysis_paused', 'message', 'last_discovery_utc', 'last_tile_utc', 'ais', 'ais_error', 'tiles_without_image')}
+                   ('enabled', 'analysis_paused', 'message', 'last_discovery_utc', 'last_tile_utc', 'ais', 'ais_error', 'history', 'tiles_without_image')}
         summary.update({'updated_utc': now_utc(), 'statuses': dict(statuses),
                         'coasts': coast_progress(self.layout, self.state),
                         'next_coast': self.state.get('next_coast', 'North'),
@@ -263,6 +263,14 @@ class CoastalScan:
                 scene = satellite.crop_scene(product['asset'], job['bbox'], folder, scene_id=product['id'],
                         acquired_utc=product['acquired_utc'], sensor='Sentinel-2', quality_source=product['quality_asset'])
                 triage = screen(scene, (folder/(scene['id']+'.png')).read_bytes(), folder)
+                # A simple bright-feature filter misses dark/low-contrast ships.
+                # Known image-time AIS must still get an actual image review;
+                # triage's empty result is never evidence of clear water.
+                if triage['status'] == 'no_local_candidates':
+                    historical = self.workspace.ais_for_scene(scene)
+                    triage['ais_vessels_at_acquisition'] = len(historical['vessels'])
+                    if historical['vessels']:
+                        triage.update(send_to_ai=True, status='ais_expected_image_review')
                 with self.guard:
                     job['screening'] = triage
                 if self.halt.is_set():
@@ -281,7 +289,12 @@ class CoastalScan:
                     paid_stage = True
                     result = self.workspace.analyse(scene['id'], automatic=True)
                     with self.guard:
-                        job.update(status='review_ready', scene_id=scene['id'], contacts=len(result['contacts']))
+                        partial = result.get('visual', {}).get('analysis_incomplete', False)
+                        job.update(status='partial_review_required' if partial else 'review_ready',
+                                   scene_id=scene['id'], contacts=len(result['contacts']))
+                        if result.get('visual', {}).get('paid_work_held'):
+                            self.state['analysis_paused'] = True
+                            self.state['message'] = 'AI detail review paused; completed windows are saved and AIS capture continues. Review held windows before further paid work.'
                 else:
                     with self.guard:
                         job.update(status=triage['status'], contacts=0)
@@ -328,6 +341,7 @@ class CoastalScan:
     def run(self):
         recorder = threading.Thread(target=self.capture_loop, daemon=True, name='argus-coastal-ais')
         recorder.start()
+        self.workspace.fleet.start()
         try:
             while not self.halt.is_set():
                 last = self.state.get('last_discovery_utc')

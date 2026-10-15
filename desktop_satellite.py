@@ -12,6 +12,7 @@ from pathlib import Path
 import queue
 import time
 import tkinter as tk
+from urllib.parse import urlencode
 from tkinter import filedialog, ttk
 import customtkinter as ctk
 
@@ -20,7 +21,7 @@ from PIL import Image, ImageTk
 from argus.satellite import atomic_json, bounds
 from argus.satellite_ai import choose_model, read_ledger, save_key
 from argus.satellite_workspace import DEFAULT_QUESTION, SatelliteWorkspace
-from argus.satellite_scan import CoastalScan, read_state
+from argus.satellite_scan import CoastalScan, read_state, grid
 from argus.space import timestamp
 
 BG, INK, MUTED, TEAL = '#141e28', '#e4ebf0', '#a8b6c2', '#47c7da'
@@ -48,8 +49,17 @@ class DesktopSatellite:
         self.watch_future = None
         self.watch_at = 0
         self.contact_signature = None
+        self.contact_page = 0
         self.watch_review_at = 0
         self.pending_contact = None
+        self.pending_fleet = None
+        self.fleet_after = ''
+        self.fleet_stack = []
+        self.fleet_next = None
+        self.fleet_rows = {}
+        self.fleet_signature = None
+        self.fleet_filter = False
+        self.fleet_only_leads = tk.BooleanVar(app.root, value=False)
         self.resume_timer = app.root.after(1500, self.resume_local)
         self.show_image = tk.BooleanVar(value=True)
         self.show_ais = tk.BooleanVar(value=True)
@@ -92,6 +102,10 @@ class DesktopSatellite:
                 callback(result)
         except queue.Empty:
             pass
+        if self.pending_fleet is not None and not self.busy:
+            target = self.pending_fleet
+            self.pending_fleet = None
+            self.load_fleet('' if int(target) == 0 else str(int(target)-1).zfill(9), selected=target)
         if self.pending_contact is not None and not self.busy:
             identifier, point_id = self.pending_contact
             self.pending_contact = None
@@ -116,6 +130,7 @@ class DesktopSatellite:
 
     def resume_local(self):
         if not self.closed and not self.remote and self.app.allowed('evidence.share') and os.environ.get('ARGUS_SATELLITE_AUTOSTART', '1') != '0':
+            self.workspace.fleet.start()
             if read_state(self.workspace.root).get('enabled'):
                 try:
                     self.engine().resume()
@@ -129,11 +144,28 @@ class DesktopSatellite:
             review = self.request('scenes/'+identifier+'/review') if self.remote else self.workspace.review(identifier)
             self.watch_review_at = time.monotonic()+60
         if self.remote:
-            return self.request('status'), self.request('contacts')['contacts'], review
-        return self.workspace.status(), self.workspace.contacts(), review
+            status = self.request('status')
+            status['comparisons'] = self.request('comparisons')
+            status['fleet'] = self.read_fleet(self.fleet_after, self.fleet_filter)
+            status['fleet_leads'] = self.read_fleet('', True)
+            return status, self.request('contacts')['contacts'], review
+        if os.environ.get('ARGUS_SATELLITE_AUTOSTART', '1') != '0':
+            self.workspace.fleet.start()
+            self.workspace.reconcile_reviews(limit=1)
+        status = self.workspace.status()
+        status['comparisons'] = self.workspace.comparison_index()
+        status['fleet'] = self.read_fleet(self.fleet_after, self.fleet_filter)
+        status['fleet_leads'] = self.read_fleet('', True)
+        return status, self.workspace.contacts(), review
 
     def apply_watch(self, value):
         status, self.map_contacts, review = value
+        if 'comparisons' in status and hasattr(self.app, 'alert_board'):
+            self.app.alert_board.refresh_evidence(status['comparisons'])
+        if 'fleet_leads' in status and hasattr(self.app, 'alert_board'):
+            self.app.alert_board.refresh_history(status['fleet_leads'])
+        if 'fleet' in status and self.frame is not None and self.frame.winfo_exists():
+            self.apply_fleet(status['fleet'])
         scan = status.get('scan', {})
         if self.frame is not None and self.frame.winfo_exists():
             mode = 'AI PAUSED · AIS RECORDING' if scan.get('running') and scan.get('analysis_paused') else 'SCANNING' if scan.get('running') else 'WAITING TO RESUME' if scan.get('enabled') else 'STOPPED'
@@ -143,20 +175,18 @@ class DesktopSatellite:
             coast_lines = '\n'.join(
                 f"{side}: {row.get('covered_tiles', 0):,}/{row.get('total_tiles', 0):,} processed · {row.get('queued', 0):,} queued · {row.get('obscured', 0):,} obscured"
                 for side in ('North', 'East', 'South', 'West') if (row := coasts.get(side)) is not None)
-            self.coast_status.set(f"{mode} · {scan.get('covered_tiles', 0):,}/{scan.get('total_tiles', 1463):,} areas processed · {scan.get('queued', 0):,} queued\n"
-                 f"{counts.get('unobservable_water', 0):,} obscured/land · {scan.get('tiles_without_image') or 0:,} without images · {counts.get('failed_review_required', 0):,} failed\n"
+            self.coast_status.set(f"{mode} · {scan.get('covered_tiles', 0):,}/{scan.get('total_tiles', 0):,} areas processed · {scan.get('queued', 0):,} queued\n"
+                 f"{counts.get('unobservable_water', 0):,} obscured/land · {scan.get('tiles_without_image') or 0:,} without images · {counts.get('failed_review_required', 0):,} failed · {counts.get('partial_review_required', 0):,} partial\n"
                  f"{len(self.map_contacts):,} visual leads · {ais.get('latest_vessels', 0):,} latest AIS\n"
                  + (coast_lines+'\n' if coast_lines else '')
                  + f"Rotation: North → East → South → West\n"
                  f"{scan.get('message', '')}\n{scan.get('ais_error') or 'New images checked every 30 min · AIS captured every minute'}")
             budget = status.get('budget', {})
             self.coast_budget.set(f"Pilot reserved ${budget.get('reserved_usd', 0):.2f}/$20 · reported ${budget.get('reported_usd', 0):.4f} · {budget.get('calls', 0)} calls")
-            signature = tuple((r['scene_id'], r['id'], r.get('matched_mmsi')) for r in self.map_contacts[:200])
+            signature = tuple((r['scene_id'], r['id'], r.get('matched_mmsi')) for r in self.map_contacts)
             if signature != self.contact_signature:
                 self.contact_signature = signature
-                self.contacts_table.delete(*self.contacts_table.get_children())
-                for index, row in enumerate(self.map_contacts[:200]):
-                    self.contacts_table.insert('', 'end', iid=str(index), values=(row['ts'][5:16].replace('T', ' '), row.get('matched_mmsi') or 'Unmatched lead'))
+                self.render_contacts()
             if review and self.current and review['scene']['id'] == self.current['scene']['id'] and self.selected_contact:
                 point = next((p for p in review['contacts'] if p['id'] == self.selected_contact['id']), None)
                 if point:
@@ -182,7 +212,20 @@ class DesktopSatellite:
         self.task(work, done)
 
     def coast_view(self):
-        self.fit_visible([(51.1, -11.2), (55.7, -5.1)])
+        boxes = [t['bbox'] for t in grid()['tiles']]
+        self.fit_visible([(min(b[1] for b in boxes), min(b[0] for b in boxes)),
+                          (max(b[3] for b in boxes), max(b[2] for b in boxes))])
+
+    def render_contacts(self, delta=0):
+        """Every saved contact is reachable; only the visible page creates rows."""
+        self.contact_page = max(0, min((max(0, len(self.map_contacts)-1))//200, self.contact_page+delta))
+        start = self.contact_page*200
+        self.contacts_table.delete(*self.contacts_table.get_children())
+        for index, row in enumerate(self.map_contacts[start:start+200], start=start):
+            self.contacts_table.insert('', 'end', iid=str(index), values=(row['ts'][5:16].replace('T', ' '), row.get('matched_mmsi') or 'Unmatched lead'))
+        self.contact_page_label.configure(text=f"{start+1 if self.map_contacts else 0}–{min(start+200, len(self.map_contacts))} of {len(self.map_contacts)} contacts")
+        self.contact_previous.configure(state='normal' if start else 'disabled')
+        self.contact_next.configure(state='normal' if start+200 < len(self.map_contacts) else 'disabled')
         self.redraw()
 
     def fit_visible(self, points):
@@ -223,12 +266,15 @@ class DesktopSatellite:
         watch_tab, search_tab, self.contact_tab = ttk.Frame(self.tabs), ttk.Frame(self.tabs), ttk.Frame(self.tabs)
         self.tabs.add(watch_tab, text='Coast Watch')
         self.tabs.add(self.contact_tab, text='Selected contact')
+        self.fleet_tab = ttk.Frame(self.tabs)
+        self.tabs.add(self.fleet_tab, text='Fleet history')
         self.tabs.add(search_tab, text='Search & import')
+        self.build_fleet()
         coast = ctk.CTkFrame(watch_tab, fg_color='#1b2b39', border_color='#294957', border_width=1)
         coast.pack(fill='x', pady=(0, 10))
         ctk.CTkLabel(coast, text='IRELAND · COAST WATCH', text_color=TEAL, anchor='w',
                      font=('Segoe UI', 13, 'bold')).pack(fill='x', padx=10, pady=(8, 2))
-        self.coast_status = tk.StringVar(value='Rolling coverage of the island’s ~20 km coastal belt.\nOptical leads need review; cloud and AIS gaps remain visible.')
+        self.coast_status = tk.StringVar(value='Rolling coverage of the island’s ~40 km coastal belt.\nOptical leads need review; cloud and AIS gaps remain visible.')
         ctk.CTkLabel(coast, textvariable=self.coast_status, text_color=INK, anchor='w', justify='left',
                      wraplength=340, font=('Segoe UI', 11)).pack(fill='x', padx=10, pady=4)
         self.coast_budget = tk.StringVar(value='$20 conservative shared pilot ceiling')
@@ -246,7 +292,16 @@ class DesktopSatellite:
         self.contacts_table.column('match', width=180)
         self.contacts_table.pack(fill='x', pady=(0, 5))
         self.contacts_table.bind('<<TreeviewSelect>>', self.select_contact_row)
-        ttk.Label(watch_tab, text='~20 km coastal belt · optical screening · not every vessel is visible.\nAmber leads require review. Click a map lead for image-time AIS and its latest received position.',
+        paging = ttk.Frame(watch_tab)
+        paging.pack(fill='x')
+        self.contact_previous = ttk.Button(paging, text='Previous', command=lambda: self.render_contacts(-1))
+        self.contact_previous.pack(side='left')
+        self.contact_next = ttk.Button(paging, text='Next', command=lambda: self.render_contacts(1))
+        self.contact_next.pack(side='right')
+        self.contact_page_label = ttk.Label(paging, text='0 contacts')
+        self.contact_page_label.pack(side='left', padx=4)
+        self.render_contacts()
+        ttk.Label(watch_tab, text='~40 km coastal belt · optical screening · not every vessel is visible.\nAmber leads require review. Click a map lead for image-time AIS and its latest received position.',
                   style='Muted.TLabel', wraplength=340, justify='left').pack(fill='x', pady=8)
         self.contact_card = ctk.CTkFrame(self.contact_tab, fg_color='#1b2b39', corner_radius=8)
         self.contact_card.pack(fill='x', pady=(0, 10))
@@ -545,7 +600,7 @@ class DesktopSatellite:
             return
         self.job('analyse', {'identifier': self.current['scene']['id'], 'question': self.question.get()}, self.show_result)
         if self.busy:
-            self.message('Analysing one image crop · cached answer reused when available · no automatic retries')
+            self.message('Analysing image · crowded areas use four detail windows · shared $20 ceiling · cached components reused')
 
     def history(self):
         if self.current is not None:
@@ -570,13 +625,25 @@ class DesktopSatellite:
             lines += [f"AI ASSUMPTION · UNREVIEWED · {visual['model']}", visual['summary'],
                       f"{len(result['contacts'])} possible contacts · {'cached' if visual.get('cached') else 'new request'}", '']
             lines.extend(f"{p['id']} · {p['confidence']} confidence: {p['association'].replace('_', ' ')} · {p['description']}" for p in result['contacts'])
-            lines += ['', f"Reported cost of this answer: ${visual['reported_cost_usd']:.6f}"]
+            cost_label = 'Reported cost of completed image requests' if visual.get('adaptive_version') else 'Reported cost of this answer'
+            lines += ['', f"{cost_label}: ${visual['reported_cost_usd']:.6f}"]
             lines += [''] + visual['limitations']
+            if visual.get('analysis_windows'):
+                lines += ['', 'DETAIL WINDOW COVERAGE']
+                lines.extend(f"Window {i+1}: {w['status']}" + (f" · {w['error']}" if w.get('error') else '')
+                             for i, w in enumerate(visual['analysis_windows']))
+        comparison = result.get('comparison')
+        if comparison:
+            lines += ['', 'ALL ELIGIBLE AIS VESSELS AT IMAGE TIME']
+            lines.extend(f"{v['name']} · {v['mmsi']} · {v['status'].replace('_', ' ')}"
+                         for v in comparison.get('vessel_checks', []))
+            lines += [comparison.get('not_checked') or comparison['caveat']]
         lines += ['', 'Select a blue historical AIS marker for all retained broadcast fields and their timestamps.', result['caveat']]
         self.set_details('\n'.join(lines))
         if visual:
             budget = result.get('budget', {})
-            self.message(f"{visual['model']} · {'cached' if visual.get('cached') else 'image input verified'}\n"
+            verification = 'partial image review' if visual.get('analysis_incomplete') else 'cached' if visual.get('cached') else 'image input verified' if visual.get('image_input_verified') else 'image input unverified'
+            self.message(f"{visual['model']} · {verification}\n"
                          f"Pilot reserved ${budget.get('reserved_usd', 0):.2f}/$20 · reported ${budget.get('reported_usd', 0):.6f} · operator review required")
         else:
             self.message('Review ready · image acquisition time shown on map · operator review required')
@@ -608,6 +675,153 @@ class DesktopSatellite:
             return
         sensor = self.sensor.get()
         self.task(lambda: self.workspace.import_raster(path, area, acquired, sensor, label), self.prepared)
+
+    def build_fleet(self):
+        frame = self.fleet_tab
+        self.fleet_status = tk.StringVar(self.app.root, value='Fleet history inventory is loading. Checks use the linked team database.')
+        ttk.Label(frame, textvariable=self.fleet_status, wraplength=340, justify='left',
+                  style='Muted.TLabel').pack(fill='x', pady=6)
+        ttk.Checkbutton(frame, text='Only histories requiring review', variable=self.fleet_only_leads,
+                        command=self.set_fleet_filter).pack(anchor='w')
+        self.fleet_table = ttk.Treeview(frame, columns=('ship', 'state', 'fixes'), show='headings', height=9, selectmode='browse')
+        for key, title, width in [('ship', 'Vessel / MMSI', 145), ('state', 'History check', 140), ('fixes', 'Fixes', 55)]:
+            self.fleet_table.heading(key, text=title)
+            self.fleet_table.column(key, width=width)
+        self.fleet_table.pack(fill='x')
+        self.fleet_table.bind('<<TreeviewSelect>>', self.show_history)
+        controls = ttk.Frame(frame)
+        controls.pack(fill='x', pady=4)
+        self.fleet_previous_button = ttk.Button(controls, text='Previous', command=self.fleet_previous)
+        self.fleet_previous_button.pack(side='left')
+        self.fleet_next_button = ttk.Button(controls, text='Next', command=self.fleet_forward)
+        self.fleet_next_button.pack(side='left', padx=4)
+        ttk.Button(controls, text='Refresh', command=lambda: self.load_fleet(self.fleet_after)).pack(side='left')
+        if not self.remote:
+            ttk.Button(frame, text='Connect team database', command=self.connect_database).pack(anchor='w', pady=4)
+        self.fleet_details = tk.Text(frame, height=17, wrap='word', bg=BG, fg=INK, relief='flat', state='disabled')
+        self.fleet_details.pack(fill='both', expand=True, pady=6)
+
+    def read_fleet(self, after='', only_leads=False):
+        if self.remote:
+            return self.request('fleet?'+urlencode({'after': after, 'limit': 50, 'leads': str(only_leads).lower()}))
+        return self.workspace.fleet.page(after, 50, only_leads)
+
+    def apply_fleet(self, packet, selected=None):
+        from argus.fleet_history import source_health
+        if packet.get('after', '') != self.fleet_after or packet.get('only_leads', False) != self.fleet_only_leads.get():
+            return
+        summary, worker = packet.get('summary', {}), packet.get('worker', {})
+        self.fleet_status.set(
+            f"{summary.get('checked_vessels', 0):,}/{summary.get('total_vessels', 0):,} recorded vessels checked · "
+            f"{summary.get('never_checked', 0):,} never checked\n"
+            f"{summary.get('new_evidence_pending', 0):,} awaiting new-evidence checks · {summary.get('review_required', 0):,} for review\n"
+            f"Inventory {'complete' if packet.get('inventory_complete') else 'loading'} · {packet.get('inventory_vessels_cached', 0):,} cached\n"
+            f"{source_health(summary)}\n"
+            f"{worker.get('message', '')}\nUpdated {packet.get('updated_utc') or 'not yet'}. Partial received history, not a safety clearance.")
+        self.fleet_next = packet.get('next_after')
+        self.fleet_previous_button.configure(state='normal' if self.fleet_stack else 'disabled')
+        self.fleet_next_button.configure(state='normal' if self.fleet_next else 'disabled')
+        rows = packet.get('vessels', [])
+        signature = json.dumps(rows, sort_keys=True)
+        if signature != self.fleet_signature:
+            old = self.fleet_table.selection()
+            self.fleet_signature = signature
+            self.fleet_rows = {r['mmsi']: r for r in rows}
+            self.fleet_table.delete(*self.fleet_table.get_children())
+            for row in rows:
+                result = row.get('result') or {}
+                state = ('checking' if row.get('checking') else 'unchecked' if not row.get('checked_utc') else
+                         'new evidence pending' if row.get('new_evidence_pending') else result.get('status', 'checked').replace('_', ' '))
+                self.fleet_table.insert('', 'end', iid=row['mmsi'], values=(result.get('name') or row['mmsi'], state,
+                                                                          result.get('rows_checked', '—')))
+            selected = selected or (old[0] if old and old[0] in self.fleet_rows else None)
+        if selected and selected in self.fleet_rows:
+            self.fleet_table.selection_set(selected)
+            self.show_history()
+
+    def load_fleet(self, after='', selected=None):
+        if self.busy:
+            self.message('Wait for the current satellite request before changing history pages.')
+            return
+        self.fleet_after = after
+        only_leads = self.fleet_filter
+        self.task(lambda: self.read_fleet(after, only_leads),
+                  lambda packet: self.apply_fleet(packet, selected))
+
+    def set_fleet_filter(self):
+        self.fleet_filter = self.fleet_only_leads.get()
+        self.fleet_stack = []
+        self.fleet_after = ''
+        self.watch_at = 0
+        self.load_fleet('')
+
+    def fleet_forward(self):
+        if self.fleet_next and not self.busy:
+            self.fleet_stack.append(self.fleet_after)
+            self.load_fleet(self.fleet_next)
+
+    def fleet_previous(self):
+        if self.fleet_stack and not self.busy:
+            self.load_fleet(self.fleet_stack.pop())
+
+    def open_fleet(self, mmsi=None):
+        self.app.open_window('satellite')
+        self.tabs.select(self.fleet_tab)
+        self.fleet_only_leads.set(False)
+        self.fleet_filter = False
+        self.fleet_stack = []
+        if mmsi:
+            self.pending_fleet = mmsi
+        elif not self.busy:
+            self.load_fleet('')
+
+    def show_history(self, _event=None):
+        selected = self.fleet_table.selection()
+        if not selected or selected[0] not in self.fleet_rows:
+            return
+        row = self.fleet_rows[selected[0]]
+        result = row.get('result') or {}
+        lines = [f"{result.get('name') or row['mmsi']} · {row['mmsi']}",
+                 f"Checked: {row.get('checked_utc') or 'not checked yet'}", result.get('caveat', ''),
+                 f"Evidence: {', '.join(result.get('source_labels', [])) or 'not loaded'} · findings are assumptions",
+                 f"Retained history: {result.get('first_fix_utc')} to {result.get('last_fix_utc')}",
+                 f"{result.get('rows_checked', 0)} fixes · {result.get('epoch_count', 0)} stream epochs",
+                 f"Reception gaps: {result.get('received_gap_count', 0)} · not proof of transponder shutdown",
+                 f"New evidence pending: {bool(row.get('new_evidence_pending'))}",
+                 f"{result.get('finding_count', 0)} findings · {result.get('findings_retained', 0)} retained in summary", '']
+        if row.get('last_error'):
+            lines += ['Check incomplete: '+row['last_error'], '']
+        for finding in result.get('findings', []):
+            lines += [f"{finding['received_utc']} · {finding['kind'].replace('_', ' ')}", finding['reason'], '']
+        self.fleet_details.configure(state='normal')
+        self.fleet_details.delete('1.0', 'end')
+        self.fleet_details.insert('1.0', '\n'.join(lines))
+        self.fleet_details.configure(state='disabled')
+
+    def connect_database(self):
+        if self.busy or self.remote:
+            return
+        from tkinter import simpledialog
+        from argus import supabase_ais
+        key = simpledialog.askstring('Connect team database',
+            'Enter the Argus Mara Supabase secret key. It is verified and saved in this computer’s credential store; never put it in chat.',
+            show='•', parent=self.app.root)
+        if not key:
+            return
+        key = key.strip()
+        def work():
+            if not supabase_ais.valid_key(key):
+                raise ValueError('Expected a Supabase secret or service-role key')
+            state = supabase_ais.http_rpc(supabase_ais.base_url()+'/rest/v1/rpc/argus_ais_status', {}, key)
+            supabase_ais.save_key(key)
+            supabase_ais.link(self.workspace.root)
+            return state
+        def done(_state):
+            self.watch_at = 0
+            if os.environ.get('ARGUS_SATELLITE_AUTOSTART', '1') != '0':
+                self.workspace.fleet.start()
+            self.message('Team database connected. History checks require the fleet-history migration on that database.')
+        self.task(work, done)
 
     def connect(self):
         if self.busy:
@@ -724,6 +938,7 @@ class DesktopSatellite:
         self.closed = True
         self.app.root.after_cancel(self.poll_timer)
         self.app.root.after_cancel(self.resume_timer)
+        self.workspace.fleet.stop()
         if self._engine:
             self._engine.stop(suspend=True)
         self.executor.shutdown(wait=False, cancel_futures=True)

@@ -181,6 +181,7 @@ class ConsoleTools:
             return
         tracker = self.app.ais_tracker
         data = {'alert_width': self.alert_width, 'detail_width': self.detail_width,
+            'show_demo_alerts': self.settings.get('show_demo_alerts', True) is True,
             'reduced_motion': self.reduced_motion.get(),
             'alerts_visible': self.alerts_visible, 'views': self.custom_views,
             'panel_position': list(self.panel_position) if self.panel_position else None,

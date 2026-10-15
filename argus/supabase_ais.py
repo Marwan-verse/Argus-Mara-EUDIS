@@ -201,7 +201,7 @@ def confidence(value):
     return round(float(value), 3) if 0 <= value <= 1 else None
 
 
-def scene_payload(scene, contacts, observed_areas=(), source='argus-coast-watch'):
+def scene_payload(scene, contacts, observed_areas=(), source='argus-coast-watch', *, analysis=None):
     sensor = scene.get('sensor') if scene.get('sensor') in SENSORS else 'other'
     real = scene.get('label') in {'real', 'reconstructed'}
     items = []
@@ -210,16 +210,20 @@ def scene_payload(scene, contacts, observed_areas=(), source='argus-coast-watch'
         if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in (lat, lon)):
             continue
         items.append({'external_id': str(point.get('id') or index)[:120], 'lat': lat, 'lon': lon,
+                      'overlap_ambiguous': point.get('overlap_ambiguous') is True,
                       'source': 'tensorx_ai', 'label': 'assumption', 'confidence': confidence(point.get('confidence')),
                       'note': str(point.get('description') or '')[:300] or None})
     return {'id': scene['id'], 'sensor': sensor, 'acquired_utc': scene['acquired_utc'],
             'bbox': [float(v) for v in scene['bbox']], 'source': source,
             'label': 'real' if real else 'simulated', 'contacts': items,
+            'review_evidence': {'version': 'image-ais-review-v2',
+                                'image_input_verified': bool(analysis and analysis.get('image_input_verified') is True),
+                                'clear_footprint_radius_m': 100},
             'observed_areas': [[float(v) for v in area] for area in observed_areas]}
 
 
-def save_scene(scene, contacts, observed_areas=(), *, transport=http_rpc):
-    return rpc('argus_save_scene', {'payload': scene_payload(scene, contacts, observed_areas)}, transport=transport)
+def save_scene(scene, contacts, observed_areas=(), *, analysis=None, transport=http_rpc):
+    return rpc('argus_save_scene', {'payload': scene_payload(scene, contacts, observed_areas, analysis=analysis)}, transport=transport)
 
 
 def compare_scene(scene_id, gate_m=300, alt_m=1000, min_length_m=50, *, transport=http_rpc):
@@ -235,7 +239,7 @@ def _lat(y):
     return math.degrees(2*math.atan(math.exp(y/MERCATOR_R)) - math.pi/2)
 
 
-def observed_rectangles(scene, folder, tiles=16, min_fraction=.95):
+def observed_rectangles(scene, folder, tiles=16, min_fraction=1.0, *, analysis=None):
     """Tiles of the crop where the quality mask says the sea was clearly visible.
 
     The crop grid is Web Mercator (argus.satellite.crop_scene), so a tile is a
@@ -245,19 +249,41 @@ def observed_rectangles(scene, folder, tiles=16, min_fraction=.95):
     if not scene.get('quality_sha256') or not scene.get('mercator_bounds'):
         return []
     from argus.satellite_screen import water_mask
+    from argus.satellite_compare import region_coverage, VISIBILITY_RADIUS_M
+    import numpy as np
     mask, _ = water_mask(scene, Path(folder))
     height, width = mask.shape
     left, bottom, right, top = (float(v) for v in scene['mercator_bounds'])
+    scale = min(math.cos(math.radians(v)) for v in (scene['bbox'][1], scene['bbox'][3]))
+    # One additional pixel covers continuous positions at a published rectangle's
+    # inclusive boundary, not only the centres of its source pixels.
+    rx = math.ceil(VISIBILITY_RADIUS_M/scale/(right-left)*width)+1
+    ry = math.ceil(VISIBILITY_RADIUS_M/scale/(top-bottom)*height)+1
+    if 2*rx >= width or 2*ry >= height:
+        return []
+    # Every exported AIS centre must have a full clear footprint, including
+    # beyond its tile edge. Summed-area erosion avoids a large rank filter.
+    integral = np.pad(mask.astype('int64'), ((1, 0), (1, 0))).cumsum(0).cumsum(1)
+    dx, dy = 2*rx+1, 2*ry+1
+    sums = integral[dy:, dx:]-integral[:-dy, dx:]-integral[dy:, :-dx]+integral[:-dy, :-dx]
+    safe = np.zeros_like(mask)
+    safe[ry:height-ry, rx:width-rx] = sums == dx*dy
+    mask = safe
     areas = []
     for i in range(tiles):
         r0, r1 = i*height//tiles, (i+1)*height//tiles
         for j in range(tiles):
             c0, c1 = j*width//tiles, (j+1)*width//tiles
             block = mask[r0:r1, c0:c1]
-            if block.size and float(block.mean()) >= min_fraction:
+            if block.size and block.all():
+                extent = [(c0-rx)/width, (r0-ry)/height, (c1+rx)/width, (r1+ry)/height]
+                if analysis is not None and region_coverage(scene, analysis, extent) != 'complete':
+                    continue
                 x0, x1 = left + c0*(right-left)/width, left + c1*(right-left)/width
                 y0, y1 = top - r1*(top-bottom)/height, top - r0*(top-bottom)/height
-                areas.append([round(_lon(x0), 6), round(_lat(y0), 6), round(_lon(x1), 6), round(_lat(y1), 6)])
+                # Round inward; never expand a clear tile over excluded pixels.
+                areas.append([math.ceil(_lon(x0)*1e6)/1e6, math.ceil(_lat(y0)*1e6)/1e6,
+                              math.floor(_lon(x1)*1e6)/1e6, math.floor(_lat(y1)*1e6)/1e6])
     return areas
 
 
@@ -271,13 +297,13 @@ def summary(comparison):
             'not_checked': comparison.get('not_checked')}
 
 
-def publish_review(scene, contacts, folder, *, transport=http_rpc):
+def publish_review(scene, contacts, folder, *, analysis=None, transport=http_rpc):
     """Save one reviewed crop and its AI contacts, then compare with database AIS. Never raises."""
     if not configured():
         return {'saved': False, 'reason': 'Supabase not configured'}
     try:
-        areas = observed_rectangles(scene, folder)
-        saved = save_scene(scene, contacts, areas, transport=transport)
+        areas = observed_rectangles(scene, folder, analysis=analysis) if analysis and analysis.get('image_input_verified') is True else []
+        saved = save_scene(scene, contacts, areas, analysis=analysis, transport=transport)
         comparison = compare_scene(scene['id'], transport=transport) if scene.get('label') in {'real', 'reconstructed'} else None
         return {'saved': True, **(saved if isinstance(saved, dict) else {}), 'summary': summary(comparison),
                 'comparison': comparison}
@@ -316,7 +342,7 @@ def main():
                 review = json.loads(path.read_text(encoding='utf-8'))
                 if (review.get('visual') or {}).get('image_input_verified') is not True:
                     continue
-                outcome = publish_review(review['scene'], review.get('contacts'), folder/'scenes')
+                outcome = publish_review(review['scene'], review.get('contacts'), folder/'scenes', analysis=review.get('visual'))
                 result.append({'scene': review['scene']['id'], 'saved': outcome.get('saved'),
                                'summary': outcome.get('summary'), 'error': outcome.get('error')})
     except (ValueError, OSError) as error:

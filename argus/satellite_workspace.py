@@ -11,10 +11,13 @@ import os
 from pathlib import Path
 import re
 import shutil
+import time
 
 from argus import satellite, supabase_ais
 from argus.satellite_ais import ArchiveChanged, associate, attach_latest, historical_ais
 from argus.satellite_ai import PILOT_USD, get_key, read_ledger, visual_analysis
+from argus.fleet_history import FleetHistoryWorker
+from argus.satellite_disposition import Dispositions, evidence_key
 
 DEFAULT_QUESTION = 'Find possible vessels in this image and describe the visible evidence and uncertainty.'
 
@@ -24,6 +27,9 @@ class SatelliteWorkspace:
         self.root = Path(root)
         self.scenes = self.root/'scenes'
         self.archive_root = Path(archive_root or os.environ.get('ARGUS_SATELLITE_AIS_DIR') or self.root.parent/'ais')
+        self._comparison_retry_at = {}
+        self.fleet = FleetHistoryWorker(self.root)
+        self.dispositions = Dispositions(self.root)
 
     def status(self):
         from argus.satellite_scan import scan_status
@@ -118,7 +124,13 @@ class SatelliteWorkspace:
         ais = self.ais_for_scene(scene)
         if len(ais['vessels']) > 1000:
             raise ValueError('Too many historical contacts; choose a smaller analysis area')
-        visual = visual_analysis(self.root/'ai', scene, self.image(identifier), question)
+        from argus.satellite_adaptive import review_image
+        dense = len(ais['vessels']) > 16
+        if scene.get('quality_sha256') and not dense:
+            from argus.satellite_screen import screen
+            dense = screen(scene, self.image(identifier), self.scenes).get('candidate_count', 0) > 16
+        visual = review_image(self.root/'ai', scene, self.image(identifier), question,
+                              analyse=visual_analysis, dense=dense)
         points = visual['contacts']
         excluded = 0
         if scene.get('quality_sha256'):
@@ -134,15 +146,100 @@ class SatelliteWorkspace:
                   'review_status': 'unreviewed',
                   'automatic': automatic, 'quality_excluded_contacts': excluded,
                   'caveat': 'Possible visual contacts and AIS associations require operator review. Unmatched does not mean hostile or deliberately dark. No operational response is sent.'}
+        self.compare(result)
         if supabase_ais.linked(self.root):
             # Free and best-effort: the paid image request has already finished.
-            result['database'] = supabase_ais.publish_review(scene, contacts, self.scenes)
+            result['database'] = supabase_ais.publish_review(scene, contacts, self.scenes, analysis=visual)
         satellite.atomic_json(self.root/'reviews'/(identifier+'.json'), result)
         return result
 
+    def compare(self, review):
+        from argus.provenance import now_utc
+        from argus.satellite_compare import compare_review
+        review['comparison'] = compare_review(review['scene'], review['contacts'], review['ais'],
+                                               review.get('visual'), self.scenes)
+        review['comparison_checked_utc'] = now_utc()
+        return review
+
+    def reconcile_reviews(self, limit=4):
+        """Free bounded backlog: check unchecked images first, refresh old joins later.
+
+        Runs on the satellite worker, never on the Tk event thread. Failed reads
+        leave evidence intact and back off; this method never submits AI work.
+        """
+        from argus.space import timestamp
+        from argus.satellite_compare import VERSION
+        pending = []
+        for path in (self.root/'reviews').glob('*.json'):
+            if not re.fullmatch(r'[0-9a-f]{24}\.json', path.name):
+                continue
+            try:
+                item = json.loads(path.read_text(encoding='utf-8'))
+                if not self.has_visual_review(item):
+                    continue
+                checked = item.get('comparison_checked_utc')
+                due = timestamp(checked) if checked and (item.get('comparison') or {}).get('version') == VERSION else 0
+                if due < time.time()-300 and self._comparison_retry_at.get(path.stem, 0) <= time.monotonic():
+                    pending.append((due, path.stem))
+            except (OSError, ValueError, TypeError):
+                continue
+        for _, identifier in sorted(pending)[:limit]:
+            try:
+                self.review(identifier)
+            except (OSError, ValueError, ImportError):
+                self._comparison_retry_at[identifier] = time.monotonic()+300
+
+    def comparison_index(self):
+        """All saved review leads and per-vessel results, independent of demo alerts."""
+        rows, vessels, pending, reviewed, image_contacts, no_ais, partial = [], [], 0, 0, 0, 0, 0
+        for path in (self.root/'reviews').glob('*.json'):
+            if not re.fullmatch(r'[0-9a-f]{24}\.json', path.name):
+                continue
+            try:
+                review = json.loads(path.read_text(encoding='utf-8'))
+                if not self.has_visual_review(review):
+                    continue
+                comparison = review.get('comparison')
+                if not comparison:
+                    pending += 1
+                    continue
+                reviewed += 1
+                partial += bool(review.get('visual', {}).get('analysis_incomplete'))
+                image_contacts += len(review.get('contacts', []))
+                no_ais += not bool(review.get('ais', {}).get('vessels'))
+                rows.extend(self.dispositions.decorate(lead, evidence_key(review, lead))
+                            for lead in comparison.get('leads', []))
+                vessels.extend({**v, 'scene_id': path.stem, 'acquired_utc': review['scene']['acquired_utc']}
+                               for v in comparison.get('vessel_checks', []))
+            except (OSError, ValueError, TypeError, KeyError):
+                pending += 1
+        return {'leads': sorted(rows, key=lambda r: (r['acquired_utc'], r['id']), reverse=True),
+                'vessel_checks': vessels, 'reviews_checked': reviewed, 'reviews_pending': pending,
+                'image_contacts': image_contacts, 'images_without_ais': no_ais,
+                'partial_analysis_images': partial,
+                'complete_vessel_census': False}
+
+    def save_disposition(self, payload, actor):
+        lead_id = payload.get('lead_id') if isinstance(payload, dict) else None
+        if not isinstance(lead_id, str) or not re.fullmatch(r'[0-9a-f]{24}:(ais|image):[A-Za-z0-9_.:-]{1,160}', lead_id):
+            raise ValueError('Invalid satellite review lead')
+        identifier = lead_id.split(':', 1)[0]
+        path = self.root/'reviews'/(identifier+'.json')
+        if not path.is_file():
+            raise ValueError('Satellite review is no longer available')
+        review = json.loads(path.read_text(encoding='utf-8'))
+        lead = next((r for r in review.get('comparison', {}).get('leads', []) if r['id'] == lead_id), None)
+        if lead is None:
+            raise ValueError('Lead is no longer present; reload the current evidence')
+        event = self.dispositions.save(lead, evidence_key(review, lead), payload, actor)
+        return {'saved': True, 'event': event, 'comparisons': self.comparison_index()}
+
     def associate_current(self, points, ais, scene):
         from argus.satellite_capture import load_latest
-        return attach_latest(associate(points, ais), load_latest(self.root/'scan/latest_ais.json'), scene['acquired_utc'])
+        contacts = attach_latest(associate(points, ais), load_latest(self.root/'scan/latest_ais.json'), scene['acquired_utc'])
+        for point in contacts:
+            point['ambiguous'] = point.get('ambiguous', False) or point.get('overlap_ambiguous', False)
+        return contacts
 
     def contacts(self):
         """Small map index; detailed AIS, image and latest positions load on click."""
@@ -156,9 +253,16 @@ class SatelliteWorkspace:
                 continue
             scene = review['scene']
             for point in review['contacts']:
-                rows.append({key: point[key] for key in ('id', 'lat', 'lon', 'confidence', 'label', 'description', 'ts', 'matched_mmsi')})
+                # Compact map/list index; full descriptions are loaded on click.
+                rows.append({key: point[key] for key in ('id', 'lat', 'lon', 'confidence', 'label', 'ts', 'matched_mmsi')})
                 rows[-1].update(scene_id=scene['id'], sensor=scene['sensor'])
-        return sorted(rows, key=lambda r: r['ts'], reverse=True)[:5000]
+        return sorted(rows, key=lambda r: r['ts'], reverse=True)
+
+    @staticmethod
+    def has_visual_review(review):
+        from argus.satellite_adaptive import VERSION
+        visual = review.get('visual') or {}
+        return visual.get('image_input_verified') is True or visual.get('adaptive_version') == VERSION
 
     def history(self, identifier):
         scene = self.scene(identifier)
@@ -197,12 +301,14 @@ class SatelliteWorkspace:
         path = self.root/'reviews'/(identifier+'.json')
         if path.exists():
             review = json.loads(path.read_text(encoding='utf-8'))
-            if (review.get('visual') or {}).get('image_input_verified') is True:
+            if self.has_visual_review(review):
                 # No AI tokens: new archive imports/recordings can improve a
                 # previous match, and latest fixes change independently of images.
                 ais = self.ais_for_scene(review['scene'])
                 review['ais'] = ais
                 review['contacts'] = self.associate_current(review['contacts'], ais, review['scene'])
+                self.compare(review)
+                satellite.atomic_json(path, review)
                 return review
         return self.history(identifier)
 

@@ -26,6 +26,32 @@ This extends the annotation-only workflow described above.
 
 ## Browser frontend (D37, 9 October 2026)
 
+The native Incidents panel has a saved **Show fictional / simulated alerts**
+switch (D75). Turning it off hides replay incident cards, severity counts and
+their map markers, while keeping analyst vessel reports visible. Live AIS supplies
+map observations only: Brain's incident board still scores fictional replay tracks,
+and Coast Watch comparison leads are shown separately in Incidents (D76). An empty
+live incident queue is not a claim that received traffic is safe. `satellite_compare.py`
+classifies every eligible image-time AIS vessel; saved review comparisons are
+reconciled on the satellite worker without paid calls. The authenticated comparison
+index feeds Incidents independently of its fictional replay filter.
+
+D77 adds `argus/fleet_history.py` and a prepared Supabase migration for a private
+per-MMSI history queue. SQL owns revision snapshots and leases; Python owns motion
+detection. Atomic page checkpoints and a locally cached directory feed the native
+Fleet history tab and a separate Incidents review section. Automatic free checks
+are independent of paid image review, with the existing evidence permission on
+the optional SOC endpoint. The hosted migration remains pending correct database
+access; see [scope, recovery and verification](18-fleet-history.md).
+
+D78 adds `argus/satellite_adaptive.py`: up to four overlapping detail windows on
+crowded images, durable per-window paid-attempt state, original-grid coordinates
+and local coverage gates. Partial windows never become empty-image evidence.
+The map/list index retains all stored observations, with details loaded on click.
+The Python live client preserves optional AIS length, and versioned capture CSVs
+retain its supplied receipt time without altering older headers. Sensor accuracy
+and legacy SQL-comparison alignment remain separate outstanding validation work.
+
 All browser interactions use Svelte 5 components under `ui/src/`: offline replay,
 live dashboard, local evidence review and recorder map preview. The esbuild script
 compiles committed, self-contained bundles; Node 22+ is required for development,
@@ -204,3 +230,10 @@ then asks `argus.compare_scene` for both comparison directions. It acts only in 
 workspace with `database.link` (or `ARGUS_SUPABASE_LINK=1` on a host) and a secret
 key from the credential store, so tests and the offline demo never touch it.
 See [the database guide](../supabase/README.md).
+
+D80: `argus/satellite_disposition.py` stores immutable, reasoned analyst outcomes
+separately under the private satellite workspace. `desktop_evidence_review.py`
+submits a local outcome or authenticated `POST /v1/satellite/dispositions` with
+`evidence.share`; the host supplies actor identity. Acquisition evidence hashes
+reopen changed leads. Notes do not replicate via Supabase or change computed
+findings, scene JSON contracts, identity confidence or operational approval.

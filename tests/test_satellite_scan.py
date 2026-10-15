@@ -203,6 +203,46 @@ class CoastalScanTests(unittest.TestCase):
             self.assertEqual(state['jobs']['one']['status'], 'failed_review_required')
             self.assertFalse(engine.halt.is_set())
 
+    def test_ais_expected_vessel_bypasses_empty_bright_feature_triage(self):
+        with tempfile.TemporaryDirectory() as temp:
+            workspace, scene, _ = image_fixture(Path(temp)/'satellite', feature=False)
+            engine = CoastalScan(workspace)
+            engine.folder.mkdir(exist_ok=True)
+            engine.state['jobs'] = {'one': {'tile': 'test', 'bbox': AREA, 'status': 'queued',
+                'product': {'id': 'TEST', 'asset': 'test', 'quality_asset': 'test', 'acquired_utc': WHEN}}}
+            def crop(_source, _area, output, **kwargs):
+                for path in workspace.scenes.iterdir():
+                    (output/path.name).write_bytes(path.read_bytes())
+                return scene
+            with patch('argus.satellite_scan.quality_preview', return_value={'load_rgb': True}), \
+                    patch('argus.satellite_scan.satellite.crop_scene', side_effect=crop), \
+                    patch.object(workspace, 'ais_for_scene', return_value={'vessels': [{'mmsi': '123456789'}]}), \
+                    patch.object(workspace, 'analyse', return_value={'contacts': []}) as analyse:
+                self.assertTrue(engine.process_one())
+                analyse.assert_called_once_with(scene['id'], automatic=True)
+            self.assertEqual(engine.state['jobs']['one']['status'], 'review_ready')
+            self.assertEqual(engine.state['jobs']['one']['screening']['status'], 'ais_expected_image_review')
+
+    def test_partial_adaptive_result_is_saved_and_pauses_paid_work_while_ais_can_continue(self):
+        with tempfile.TemporaryDirectory() as temp:
+            workspace, scene, _ = image_fixture(Path(temp)/'satellite')
+            engine = CoastalScan(workspace)
+            engine.folder.mkdir(exist_ok=True)
+            engine.state['jobs'] = {'one': {'tile': 'test', 'bbox': AREA, 'status': 'queued',
+                'product': {'id': 'TEST', 'asset': 'test', 'quality_asset': 'test', 'acquired_utc': WHEN}}}
+            def crop(_source, _area, output, **kwargs):
+                for path in workspace.scenes.iterdir():
+                    (output/path.name).write_bytes(path.read_bytes())
+                return scene
+            result = {'contacts': [], 'visual': {'analysis_incomplete': True, 'paid_work_held': True}}
+            with patch('argus.satellite_scan.quality_preview', return_value={'load_rgb': True}), \
+                    patch('argus.satellite_scan.satellite.crop_scene', side_effect=crop), \
+                    patch.object(workspace, 'analyse', return_value=result):
+                self.assertTrue(engine.process_one())
+            self.assertEqual(engine.state['jobs']['one']['status'], 'partial_review_required')
+            self.assertTrue(engine.state['analysis_paused'])
+            self.assertFalse(engine.halt.is_set())
+
     @unittest.skipUnless(RASTERS_AVAILABLE, 'Optional satellite raster readers not installed')
     def test_interrupted_attempt_is_held_and_never_resubmitted_on_resume(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -254,6 +294,48 @@ class SatelliteCustodyTests(unittest.TestCase):
             self.assertIn('DUBLIN', json.dumps(load_latest(capture.path)))
             with self.assertRaisesRegex(ValueError, 'stale'):
                 capture.capture(lambda _: payload, now=timestamp(WHEN)+700)
+
+    def test_length_capture_preserves_old_headers_and_never_backdates_or_keeps_cleared_dimensions(self):
+        with tempfile.TemporaryDirectory() as temp:
+            workspace, _, _ = fixture(Path(temp)/'satellite')
+            capture = AISCapture(workspace)
+            folder = workspace.archive_root/'capture'
+            folder.mkdir(parents=True)
+            legacy = folder/'2026-10-13.csv'
+            original = 'mmsi,msg_type,lat,lon,sog,cog,recv_utc\n'
+            legacy.write_text(original)
+            packet = self.real_snapshot()
+            packet['vessels'][0].update(ais_length_m=180, metadata_received_utc='2026-10-13T11:50:00Z')
+            capture.capture(lambda _: packet, now=timestamp(WHEN)+10)
+            historical = historical_ais(workspace.archive_root, WHEN, AREA)
+            self.assertEqual(historical['vessels'][0]['broadcast_fields']['length_m']['value'], 180)
+            self.assertEqual(legacy.read_text(), original)
+            self.assertTrue((folder/'2026-10-13.v2.csv').exists())
+            packet['sequence'] += 1
+            packet['vessels'][0].update(ais_length_m=250, metadata_received_utc='2026-10-13T12:00:01Z')
+            capture.capture(lambda _: packet, now=timestamp(WHEN)+10)
+            self.assertEqual(historical_ais(workspace.archive_root, WHEN, AREA)['vessels'][0]['broadcast_fields']['length_m']['value'], 180)
+            packet['sequence'] += 1
+            packet['vessels'][0].update(ais_length_m=None, metadata_received_utc=WHEN)
+            capture.capture(lambda _: packet, now=timestamp(WHEN)+10)
+            self.assertIsNone(historical_ais(workspace.archive_root, WHEN, AREA)['vessels'][0]['broadcast_fields']['length_m']['value'])
+
+    def test_static_only_contacts_keep_metadata_without_inventing_a_position(self):
+        with tempfile.TemporaryDirectory() as temp:
+            workspace, _, _ = fixture(Path(temp)/'satellite')
+            capture = AISCapture(workspace)
+            packet = self.real_snapshot()
+            packet['vessels'][0].update(lat=None, lon=None, received_utc=None, ais_length_m=180,
+                                        metadata_received_utc='2026-10-13T11:59:00Z')
+            result = capture.capture(lambda _: packet, now=timestamp(WHEN))
+            self.assertEqual(result['latest_vessels'], 1)
+            self.assertIsNone(load_latest(capture.path)['vessels'][0]['lat'])
+            self.assertEqual(historical_ais(workspace.archive_root, WHEN, AREA)['vessels'], [])
+            packet['sequence'] += 1
+            packet['vessels'][0].update(lat=53.33, lon=-6.12, received_utc=WHEN)
+            capture.capture(lambda _: packet, now=timestamp(WHEN)+1)
+            ship = historical_ais(workspace.archive_root, WHEN, AREA)['vessels'][0]
+            self.assertEqual(ship['broadcast_fields']['length_m']['value'], 180)
 
     def test_stream_reset_never_creates_an_interpolated_fix(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -48,6 +48,13 @@ class SatelliteDesktopTests(unittest.TestCase):
                     for side in ('North', 'East', 'South', 'West'):
                         self.assertIn(side+':', satellite.coast_status.get())
                     self.assertIn('Rotation: North', satellite.coast_status.get())
+                    satellite.map_contacts = [{'scene_id': scene['id'], 'id': str(i), 'ts': scene['acquired_utc'],
+                                               'matched_mmsi': str(i)} for i in range(201)]
+                    satellite.render_contacts()
+                    self.assertEqual(len(satellite.contacts_table.get_children()), 200)
+                    satellite.contact_next.invoke()
+                    self.assertEqual(satellite.contacts_table.get_children(), ('200',))
+                    self.assertIn('201 of 201', satellite.contact_page_label.cget('text'))
                     point = {'id': 'AI-1', 'x': .5, 'y': .5, 'lat': 53.33, 'lon': -6.12,
                              'confidence': 'low', 'description': 'Synthetic test contact', 'association': 'provisional_spatiotemporal_match',
                              'matched_mmsi': '123456789', 'ambiguous': False,

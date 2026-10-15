@@ -153,6 +153,7 @@ def parse_result(value, scene):
                          'confidence': contact['confidence'], 'description': contact['description'][:400],
                          'x': contact['x'], 'y': contact['y'], 'ts': scene['acquired_utc']})
     return {'summary': value['summary'][:1600], 'contacts': contacts,
+            'contact_limit_reached': len(contacts) >= 24,
             'limitations': [str(item)[:400] for item in value.get('limitations', [])[:8]],
             'label': 'assumption', 'review_status': 'unreviewed'}
 

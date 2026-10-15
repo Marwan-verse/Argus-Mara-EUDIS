@@ -83,6 +83,90 @@ class DesktopAlertBoardTests(unittest.TestCase):
         board.relayout(top=True)
         self.assertEqual(len(self.packed_cards()), len(board.items) - 1)
 
+    def test_hide_demo_alerts_clears_queue_counts_and_markers_but_keeps_reports(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from argus.vessel_reports import make_report
+        board = self.board
+        original_cards = self.packed_cards()
+        board.open('SIM-01')
+        self.app.vessel_reports.add(make_report(
+            {'id': '123456789', 'name': 'Reported contact', 'label': 'real', 'lat': 53.2, 'lon': -6.1},
+            'Other', 'An analyst observation for review.'), 'analyst')
+        board.refresh_reports()
+        with tempfile.TemporaryDirectory() as directory:
+            self.app.tools.settings_path = Path(directory) / 'preferences.json'
+            board.demo_switch.toggle()
+            self.root.update()
+            self.assertEqual(self.packed_cards(), [])
+            self.assertEqual(board.visible_items(), [])
+            self.assertEqual(self.map_tags('sim-alert:'), set())
+            self.assertTrue(all(value == 0 for value in board.counts().values()))
+            self.assertFalse(board.dialog.visible)
+            self.assertIsNone(board.selected)
+            self.assertTrue(board.reports_frame.winfo_manager())
+            self.assertIn('Fictional / simulated alerts hidden', self.app.alert_counts_label.cget('text'))
+            self.app.tools.save()
+            self.assertIs(json.loads(self.app.tools.settings_path.read_text())['show_demo_alerts'], False)
+            board.demo_switch.toggle()
+            self.root.update()
+            self.assertEqual(self.packed_cards(), original_cards)
+            self.assertTrue(self.map_tags('sim-alert:'))
+            self.app.tools.settings_path = None
+
+    def test_satellite_leads_remain_visible_with_demo_hidden_and_page_all_results(self):
+        board = self.board
+        board.show_demo_alerts.set(False)
+        board.toggle_demo_alerts()
+        leads = [{'id': str(i), 'name': 'TEST CONTACT', 'mmsi': '123456789',
+                  'title': 'AIS vessel not detected in clear-water image',
+                  'acquired_utc': '2026-10-13T12:00:00Z', 'source_label': 'real',
+                  'reason': 'Synthetic test of presentation only.', 'scene_id': 'a'*24}
+                 for i in range(51)]
+        board.refresh_evidence({'leads': leads, 'reviews_checked': 3, 'reviews_pending': 1})
+        self.root.update()
+        self.assertTrue(board.evidence_frame.winfo_manager())
+        self.assertEqual(self.packed_cards(), [])
+        self.assertIn('51 satellite / AIS leads', self.app.alert_counts_label.cget('text'))
+        buttons = [w for w in board.evidence_frame.winfo_children() if isinstance(w, tk.Button)]
+        self.assertEqual(len(buttons), 50)
+        controls = board.evidence_frame.winfo_children()[-1]
+        next_button = next(w for w in controls.winfo_children() if w.cget('text') == 'Next')
+        next_button.invoke()
+        self.assertEqual(board.evidence_page, 1)
+        self.assertEqual(len([w for w in board.evidence_frame.winfo_children() if isinstance(w, tk.Button)]), 1)
+        self.assertTrue(all(v == 0 for v in board.counts().values()))
+
+    def test_satellite_analyst_outcome_is_saved_and_can_be_shown_again(self):
+        import tempfile
+        import time
+        from pathlib import Path
+        from desktop_evidence_review import EvidenceReview
+        from test_satellite_disposition import lead_fixture
+        with tempfile.TemporaryDirectory() as temp:
+            workspace, _ = lead_fixture(Path(temp)/'satellite')
+            self.app.satellite.workspace = workspace
+            result = workspace.comparison_index()
+            self.board.refresh_evidence(result)
+            form = EvidenceReview(self.board, result['leads'][0])
+            form.outcome.set('Reviewed — no concern identified')
+            form.reason.insert('1.0', 'Synthetic test analyst disposition.')
+            form.save()
+            deadline = time.monotonic()+5
+            while form.window.winfo_exists() and time.monotonic()<deadline:
+                self.root.update()
+                time.sleep(.02)
+            self.assertFalse(form.window.winfo_exists())
+            self.assertEqual(self.board.evidence_leads[0]['review_status'], 'reviewed_no_concern')
+            self.assertFalse(any(isinstance(w, tk.Button) and 'Open image evidence' in w.cget('text')
+                                 for w in self.board.evidence_frame.winfo_children()))
+            self.board.show_reviewed_evidence.set(True)
+            self.board.paint_evidence()
+            self.assertTrue(any(isinstance(w, tk.Button) and 'Reviewed — no concern identified' in w.cget('text')
+                                for w in self.board.evidence_frame.winfo_children()))
+            self.assertEqual(self.errors, [])
+
     def test_review_escalate_withdraw_and_reject_go_through_incidents(self):
         app, board, dialog = self.app, self.board, self.board.dialog
         board.open('SIM-01')

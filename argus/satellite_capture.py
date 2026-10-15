@@ -16,7 +16,7 @@ from argus.space import timestamp
 
 FEED = 'https://shared-live-ais-production.up.railway.app/api/v1/vessels'
 FIELDS = ['mmsi', 'msg_type', 'lat', 'lon', 'sog', 'cog', 'recv_utc', 'time_utc',
-          'timestamp_source', 'stream_id', 'ship_name', 'ship_type_description', 'destination', 'nav_status', 'label', 'present_fields']
+          'timestamp_source', 'stream_id', 'ship_name', 'ship_type_description', 'destination', 'nav_status', 'label', 'present_fields', 'length_m']
 
 
 def load_latest(path):
@@ -44,19 +44,19 @@ class AISCapture:
             raise ValueError('AIS sequence moved backwards; latest positions retained')
         rows, writes = [], {}
         for row in envelope['rows']:
-            if row['label'] != 'real' or row['received_s'] is None or row['lat'] is None or row['lon'] is None:
+            if row['label'] != 'real':
                 continue
-            received = timestamp(row['received_utc'])
-            if received > now+60:
+            received = row['received_s']
+            if received is not None and received > now+60:
                 continue
             row = {key: value for key, value in row.items() if key != 'received_s'}
             rows.append(row)
             old = prior.get(row['mmsi'], {}) if previous.get('stream_id') == stream else {}
-            if old.get('received_utc') and timestamp(old['received_utc']) > received:
+            if old.get('received_utc') and (received is None or timestamp(old['received_utc']) > received):
                 for key in ('received_utc', 'lat', 'lon', 'sog_kn', 'cog_deg', 'nav_status'):
                     row[key] = old[key]
             points = []
-            if row['received_utc'] != old.get('received_utc'):
+            if row['received_utc'] is not None and row['received_utc'] != old.get('received_utc'):
                 points.append(dict(mmsi=row['mmsi'], msg_type='PositionReport', lat=row['lat'], lon=row['lon'],
                                    sog=row['sog_kn'], cog=row['cog_deg'], nav_status=row['nav_status'],
                                    recv_utc=row['received_utc'], time_utc='', timestamp_source='received_time_assumption',
@@ -65,9 +65,12 @@ class AISCapture:
             # never stamp today's destination with the time of an old position.
             for field, received_key, target in [('name', 'metadata_received_utc', 'ship_name'),
                                                  ('type', 'metadata_received_utc', 'ship_type_description'),
+                                                 ('ais_length_m', 'metadata_received_utc', 'length_m'),
                                                  ('destination', 'destination_received_utc', 'destination')]:
+                if field == 'ais_length_m' and field not in row:
+                    continue
                 value, date = row.get(field), row.get(received_key)
-                if (value or field == 'destination') and date and timestamp(date) <= now+60 and (value, date) != (old.get(field), old.get(received_key)):
+                if (value or field in {'destination', 'ais_length_m'}) and date and timestamp(date) <= now+60 and (value, date) != (old.get(field), old.get(received_key)):
                     points.append(dict(mmsi=row['mmsi'], msg_type='ShipStaticData', recv_utc=date,
                                        stream_id=stream, label='real', present_fields='name' if target == 'ship_name' else target, **{target: value}))
             for point in points:
@@ -80,7 +83,8 @@ class AISCapture:
             raise ValueError('Private AIS archive reached 1 GB; archive it on the host to resume capture')
         written = 0
         for day, points in writes.items():
-            path = folder/(day+'.csv')
+            # Keep the old daily CSV headers intact; both versions remain readable.
+            path = folder/(day+'.v2.csv')
             if path.exists() and path.stat().st_size > 128*1024*1024:
                 raise ValueError('Daily AIS capture reached 128 MB; archive it on the host to resume')
             new = not path.exists()

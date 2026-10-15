@@ -20,6 +20,7 @@ def install(app, require, body):
     jobs = {}
     running = set()
     last_request = {}
+    comparison_task = None
 
     def access(request):
         require(request, 'evidence.share')
@@ -42,6 +43,41 @@ def install(app, require, body):
     async def contacts(request):
         access(request)
         return web.json_response({'contacts': await asyncio.to_thread(workspace.contacts)})
+
+    async def comparisons(request):
+        nonlocal comparison_task
+        access(request)
+        # A slow database read must not outlast the client's 15-second HTTP
+        # timeout. Return the saved index while one free backlog task runs.
+        if comparison_task is None or comparison_task.done():
+            async def reconcile():
+                def work():
+                    if os.environ.get('ARGUS_SATELLITE_AUTOSTART', '1') != '0':
+                        workspace.fleet.start()
+                        workspace.reconcile_reviews(1)
+                await asyncio.get_running_loop().run_in_executor(executor, work)
+            comparison_task = asyncio.create_task(reconcile())
+            tasks.add(comparison_task)
+            comparison_task.add_done_callback(tasks.discard)
+        return web.json_response(await asyncio.to_thread(workspace.comparison_index))
+
+    async def fleet(request):
+        access(request)
+        if set(request.query) - {'after', 'limit', 'leads'}:
+            raise ValueError('Unknown fleet directory option')
+        after = request.query.get('after', '')
+        limit = int(request.query.get('limit', '50'))
+        leads = request.query.get('leads', 'false')
+        if leads not in {'true', 'false'}:
+            raise ValueError('Choose leads=true or false')
+        return web.json_response(await asyncio.to_thread(workspace.fleet.page, after, limit, leads == 'true'))
+
+    async def disposition(request):
+        user = access(request)
+        data = await body(request)
+        actor = str(request['user']['username']) + ' (' + str(user) + ')'
+        result = await asyncio.to_thread(workspace.save_disposition, data, actor)
+        return web.json_response(result)
 
     async def scan(request):
         access(request)
@@ -128,6 +164,8 @@ def install(app, require, body):
     async def lifecycle(application):
         try:
             if scanner:
+                if os.environ.get('ARGUS_SATELLITE_AUTOSTART', '1') != '0':
+                    workspace.fleet.start()
                 try:
                     await asyncio.to_thread(scanner.resume)
                 except (ValueError, OSError, ImportError):
@@ -135,6 +173,7 @@ def install(app, require, body):
             yield
         finally:
             if scanner:
+                workspace.fleet.stop()
                 scanner.stop(suspend=True)
                 if scanner.thread:
                     await asyncio.to_thread(scanner.thread.join, 45)
@@ -145,6 +184,9 @@ def install(app, require, body):
     app.router.add_get('/v1/satellite/status', status)
     app.router.add_get('/v1/satellite/scenes', scenes)
     app.router.add_get('/v1/satellite/contacts', contacts)
+    app.router.add_get('/v1/satellite/comparisons', comparisons)
+    app.router.add_post('/v1/satellite/dispositions', disposition)
+    app.router.add_get('/v1/satellite/fleet', fleet)
     app.router.add_post('/v1/satellite/scan', scan)
     app.router.add_get('/v1/satellite/scenes/{identifier}/image', crop)
     app.router.add_get('/v1/satellite/scenes/{identifier}/review', review)

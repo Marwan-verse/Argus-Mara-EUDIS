@@ -3,6 +3,22 @@
 An optional shared database for AIS history and satellite-versus-AIS comparison
 (decision D74). The offline exercise does not use it.
 
+**Pending D77 extension:** the new
+`20261015201441_vessel_history_queue.sql` migration adds whole-fleet history
+revision/lease tracking and five service-role APIs for the Python worker. It has
+been tested in isolated PostgreSQL but **has not been applied to the hosted
+project**; the current connector account cannot access Argus Mara. See
+[fleet-history setup and verification](../docs/18-fleet-history.md). The original
+four-function deployment described below remains the recorded hosted state.
+
+**Pending D79 comparison hardening:**
+`20261015221628_align_satellite_ais_comparison.sql` adds verified-image manifests,
+100 m clear-footprint flags, epoch/motion/24-hour static gates, and competing-contact
+protection. Apply after D77. Legacy scenes cannot generate leads until republished
+with a current verified review; obsolete contacts/visibility are replaced atomically.
+`tests/test_satellite_compare_db.mjs` executes these migrations in isolated
+PostgreSQL/PostGIS. This migration has not been applied to the hosted project.
+
 - **Project:** `argus-mara` in the "Argus Mara" organisation, region eu-west-1
   (Ireland), free plan with a 500 MB database. API URL:
   `https://lcpgnzvkntqdhejrsgpa.supabase.co`.
@@ -55,4 +71,5 @@ that only the secret key may call; the publishable key gets HTTP 401 (checked
   `database_mb` in `status` against the 500 MB free limit.
 - A free project can be paused after a period without use; check it before an event.
 
-The schema is in `migrations/`, applied in file order on 15 October 2026.
+The schema is in `migrations/`. The original D74 migrations were recorded as applied
+on 15 October 2026; the D77 and D79 migrations above remain pending.
