@@ -226,6 +226,25 @@ class DesktopSOCTests(unittest.TestCase):
             soc.show_point((53.35, -6.25))
         center.assert_called_once_with((53.35, -6.25))
 
+    def test_creating_a_session_copies_its_invitation(self):
+        self.client.room = None
+        self.client.code = None
+        def create(group):
+            self.client.code = 'WXYZ2345'
+            self.client.room = {'room_id': 'room', 'members': [{'user_id': 'own', 'username': 'analyst', 'groups': ['user']}],
+                                'confirmed': [], 'locked': False, 'host_id': 'own', 'permissions': ['chat'],
+                                'invitation_expires': time.time() + 600}
+            return self.client.room
+        self.client.create = Mock(side_effect=create)
+        self.app.soc.open()
+        self.app.soc.window.withdraw()
+        self.pump()
+        self.app.soc.create()
+        self.pump()
+        self.client.create.assert_called_once_with(None)
+        self.assertEqual(self.app.soc.window.clipboard_get(), 'WXYZ-2345')
+        self.assertIn('Invitation copied', self.app.soc.status_label.cget('text'))
+
     def test_empty_draft_and_enter_do_not_submit(self):
         self.app.soc.open()
         self.app.soc.window.withdraw()

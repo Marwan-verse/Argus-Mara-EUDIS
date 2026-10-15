@@ -445,7 +445,11 @@ class DesktopSOC:
     def create(self):
         scope = self.group.get()
         group = None if scope == 'Team session (all groups)' else scope.removeprefix('Private: ')
-        self.task(lambda: self.client.create(group), self.reset)
+        self.task(lambda: self.client.create(group), self.created)
+
+    def created(self, result=None):
+        self.reset(result)
+        self.copy_invite()  # Sharing the invitation is the host's next step.
 
     def join(self, code):
         if len(code.replace('-', '').replace(' ', '')) != 8:
