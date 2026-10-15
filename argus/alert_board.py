@@ -114,19 +114,19 @@ SCENARIOS = [
 # (id, name, vessel type, length m, site, lat, lon, track, (radius nm, hours) or (course, minutes),
 #  title, recommendation, extra observations).
 SITE_SCENARIOS = [
-    ("SIM-41", "VELVET PETREL", "Survey vessel", 58, "haulbowline", 51.838, -8.305, "circle", (0.35, 2.5),
+    ("SIM-61", "VELVET PETREL", "Survey vessel", 58, "haulbowline", 51.838, -8.305, "circle", (0.35, 2.5),
      "Circling 2.5 h off Haulbowline naval base after a 30 min AIS gap",
      "Inform Naval Service base security, hail the vessel and ask it to state its intentions.",
      {"ais_gap_min": 30}),
-    ("SIM-44", "MERROW LIGHT", "Workboat", 34, "baginbun-landfall", 52.155, -6.79, "stop", (200, 150),
+    ("SIM-64", "MERROW LIGHT", "Workboat", 34, "baginbun-landfall", 52.155, -6.79, "stop", (200, 150),
      "Stopped 2.5 h off the Greenlink landfall beach, away from any port",
      "Ask the Coast Guard to identify it and notify the landfall operator; small boats landing may carry no AIS.",
      {}),
-    ("SIM-42", "HALCYON REACH", "Offshore supply vessel", 72, "arklow-bank", 52.80, -5.93, "circle", (0.5, 1.6),
+    ("SIM-62", "HALCYON REACH", "Offshore supply vessel", 72, "arklow-bank", 52.80, -5.93, "circle", (0.5, 1.6),
      "Circling 1.6 h inside the Arklow Bank wind farm with no notified work",
      "Ask the wind farm operator whether work is scheduled; hail the vessel if none is notified.",
      {}),
-    ("SIM-43", "SORREL ISLE", "General cargo", 81, "killala-landfall", 54.25, -9.15, "stop", (150, 140),
+    ("SIM-63", "SORREL ISLE", "General cargo", 81, "killala-landfall", 54.25, -9.15, "stop", (150, 140),
      "Stopped 2 h 20 min in Killala Bay, 1 nm outside the cable landfall zone",
      "Hail on VHF 16 for the reason for the stop; keep under watch while it stays near the landfall.",
      {"static_incomplete": True}),
@@ -311,7 +311,8 @@ def build_board(scenario: dict | None = None, alerts: list | None = None) -> lis
     for index, (template, name, kind, line_id, lat, lon, course, speed, minutes, value) in enumerate(LOW_CONTACTS, 16):
         title, recommendation, observe = LOW_TEMPLATES[template]
         pattern = "hover" if template == "repair" else "passes" if template == "survey" else "line"
-        items.append(_item(f"SIM-{index:02d}", name, kind, 0, line_id, lat, lon, course, speed, minutes, pattern,
+        identifier = "SIM-54" if template == "stop" else f"SIM-{index:02d}"
+        items.append(_item(identifier, name, kind, 0, line_id, lat, lon, course, speed, minutes, pattern,
                            title.format(v=value), recommendation, observe(value)))
     return sorted(items, key=sort_key)
 
