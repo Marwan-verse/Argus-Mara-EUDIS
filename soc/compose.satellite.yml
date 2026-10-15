@@ -1,0 +1,12 @@
+# Add AFTER compose.local.yml or compose.forwarded.yml. Reuses the same relay
+# and existing account volume. Does not seed accounts or publish another port.
+services:
+  relay:
+    build:
+      dockerfile: soc/Dockerfile.satellite
+    environment:
+      ARGUS_SATELLITE_ROOT: /data/satellite
+      ARGUS_SATELLITE_AIS_DIR: /data/ais
+    env_file:
+      - ../data/satellite-host/tensorx.env
+    mem_limit: 1g

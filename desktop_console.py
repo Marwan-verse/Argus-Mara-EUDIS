@@ -103,7 +103,7 @@ def build(app):
         ("views", "Saved map views", lambda: app.open_window('views')),
         ("cables", "Historical cable routes", lambda: app.open_window("cables")),
         ("ports", "Port directory", lambda: app.open_window("ports")),
-        ("radar", "SAR satellite plan", lambda: app.open_window("sar_plan")),
+        ("radar", "Satellite analysis / historical AIS", lambda: app.open_window("satellite")),
         ("weather", "Weather", lambda: app.open_window("weather")),
         ("layers", "Display layers", lambda: app.open_window("layers")),
     ):
@@ -138,7 +138,7 @@ def build(app):
     right.place(relx=1, x=-12, y=80, anchor="ne")
     for icon, title, action in (
         ("search", "Global search / Ctrl+K", app.tools.open_search),
-        ("radar", "SAR next step", lambda: app.open_window("sar_plan")),
+        ("radar", "Satellite analysis", lambda: app.open_window("satellite")),
         ("alerts", "Show / hide alerts", app.tools.toggle_alerts),
         ("pen", "Add map note", lambda: app._set_map_tool("pin")),
         ("measure", "Measure distance", lambda: app._set_map_tool("measure")),
@@ -150,6 +150,9 @@ def build(app):
 
     app.floating_panel = ctk.CTkFrame(map_host, fg_color=ui.CARD, corner_radius=8,
                                       border_width=1, border_color=ui.LINE)
+    # The map layout supplies its dimensions. A scrollable tab's small requested
+    # height must not shrink the whole dock and hide most satellite controls.
+    app.floating_panel.pack_propagate(False)
     panel_head = ctk.CTkFrame(app.floating_panel, fg_color="transparent")
     panel_head.pack(fill="x", padx=12, pady=(8, 2))
     app.panel_caption = ctk.CTkLabel(panel_head, text="Maritime", text_color=ui.INK,

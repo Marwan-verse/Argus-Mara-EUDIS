@@ -283,6 +283,7 @@ class ArgusApp:
             "notes": "Map notes", "evidence": "Evidence review",
             "decision": "Decision review", "weather": "Live weather",
             "ais": "AIS ship tracker", "sar_plan": "SAR next step",
+            "satellite": "Satellite analysis",
             "views": "Saved map views",
         }
         self._decision_choice = tk.StringVar(value="")
@@ -293,6 +294,8 @@ class ArgusApp:
         self._initial_split_set = False
         self._configure_window()
         self.ais_tracker = DesktopAIS(self, cache_path=ROOT / "data/desktop/ais_latest.json")
+        from desktop_satellite import DesktopSatellite
+        self.satellite = DesktopSatellite(self, ROOT / 'data/satellite')
         self._build_modern()
         self.render()
         self.root.after(80, self._tick)
@@ -409,6 +412,7 @@ class ArgusApp:
         if hasattr(self, "ais_tracker"):
             nav("△   AIS ship tracker", lambda: self.open_window("ais"))
             nav("◇   SAR next step", lambda: self.open_window("sar_plan"))
+            nav("◈   Satellite analysis", lambda: self.open_window("satellite"))
         nav("◷   Timeline", lambda: self.open_window("timeline"))
         nav("◇   Map layers", lambda: self.open_window("layers"))
         nav("⚓   Port directory", lambda: self.open_window("ports"))
@@ -744,7 +748,7 @@ class ArgusApp:
             self._bottom_visible = False
 
     def open_window(self, key: str, destination: str = "right") -> None:
-        permission = {'evidence': 'evidence.share', 'sar_plan': 'evidence.share',
+        permission = {'evidence': 'evidence.share', 'sar_plan': 'evidence.share', 'satellite': 'evidence.share',
                       'decision': 'response.review', 'responses': 'response.review'}.get(key, 'map.view')
         if not self.require_tool(permission):
             return
@@ -784,6 +788,8 @@ class ArgusApp:
             self.tools.build_views(frame)
         elif key == "ais":
             self.ais_tracker.build(frame)
+        elif key == 'satellite':
+            self.satellite.build(frame)
         elif key == "sar_plan":
             text = tk.Text(frame, wrap="word", padx=15, pady=12, font=("Segoe UI", 11),
                            bg=CARD, fg=INK, insertbackground=INK, relief="flat")
@@ -1850,6 +1856,8 @@ class ArgusApp:
             self.tools.close()
         if hasattr(self, "ais_tracker"):
             self.ais_tracker.close()
+        if hasattr(self, 'satellite'):
+            self.satellite.close()
         self._tile_executor.shutdown(wait=False, cancel_futures=True)
         self._weather_executor.shutdown(wait=False, cancel_futures=True)
         # Cancel callbacks before Tk deletes their registered commands. This
@@ -2458,6 +2466,8 @@ class ArgusApp:
             self.map_attribution_label.configure(text="Natural Earth · Marine Atlas CC BY 4.0 · NGA · TeleGeography")
 
         self._draw_weather_overlay(width, height)
+        if hasattr(self, 'satellite'):
+            self.satellite.draw()
         if self.map_layers["Historical cable routes"].get():
             self._draw_world_cables(width, height)
         if self.map_layers["World ports"].get():

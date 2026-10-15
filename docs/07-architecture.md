@@ -148,3 +148,36 @@ Historical packs and fictional packs are separate. Real/reconstructed contacts
 cannot locally match fictional/simulated AIS; sourced dimensions expire after an assumed
 24 hours and cannot come from future observations. A page-local operator acknowledgement
 persists only until reload and never triggers a response.
+
+## Optional native satellite workspace — 15 October 2026 (D70)
+
+`desktop_satellite.py` adds catalogue search, bounded georeferenced image crops,
+historical AIS and manual TensorX review. `argus/satellite*.py` keeps acquisition
+geometry, archive joins, model validation, cost reservations and file caches apart
+from the stage contracts and Brain rules. Data lives in ignored `data/` locally
+or the private SOC's existing persistent volume. `argus/satellite_server.py` adds
+authenticated intelligence endpoints to that companion only; it creates no
+backend for the offline browser demo. The optional Docker image and Compose
+override reuse the existing account relay and forwarded-port transport.
+
+AI suggestions are assumptions and unreviewed; time/space associations never
+confirm identity or intent. No AI call runs from map redraws or UI status refresh.
+See [setup, evidence limits and open-source next steps](16-satellite-ai.md).
+
+D72 adds `argus/satellite_scan.py`: a persisted, opt-in coastal image queue with
+a single worker lease, 30-minute public catalogue discovery, quality-first optical
+triage (`satellite_screen.py`) and a separate 60-second AIS snapshot recorder
+(`satellite_capture.py`). The reproducible public-domain `argus/coastal_grid.json`
+is included in the optional Docker image. Queue state and compact status are
+atomic files under `data/satellite/scan/`; captures are dated private CSVs under
+the archive directory. AI failure/budget limits pause paid processing while AIS
+capture continues. The existing persistent ledger and exclusive AI lock remain
+authoritative. There is no backend added to the offline browser demo.
+
+`SatelliteWorkspace.contacts()` supplies a bounded map index; opening a contact
+rejoins actual archive evidence and current captured AIS locally, without AI
+tokens. A selected identity remains provisional. Stream epochs cannot be bridged,
+undated static fields cannot be backdated, and invalid motion fails matching.
+SOC read access requires `evidence.share`; starting/stopping shared cycles also
+requires administrator status. A local scan runs with the desktop, a shared scan
+with the existing private SOC host. Neither installs an OS scheduled task.

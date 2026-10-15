@@ -13,6 +13,15 @@ For two computers using a VS Code/GitHub forwarded link, start
 [the forwarded-port guide](soc/FORWARDED-PORT.md). Both native clients sign in
 to the same forwarded HTTPS URL with their existing SOC accounts.
 
+**Satellite analysis:** the native radar button opens public Sentinel catalogue
+search, small georeferenced optical/SAR crops, acquisition-time archived AIS and
+manual TensorX vision review. **Coast Watch → Start scan** enables rolling new-image
+screening around Ireland’s ~20 km coastal belt and continuous private AIS capture.
+Click an amber lead for its source pixels, image-time AIS candidates and latest
+received positions. AI contacts are unreviewed assumptions, with cached
+results and a conservative $20 pilot ceiling. Run `INSTALL-SATELLITE-WINDOWS.bat`
+once for optional image readers. See [setup and open-source accuracy plan](docs/16-satellite-ai.md).
+
 > *"Ireland can crew two ships. Argus Mara gives them a hundred eyes."*
 
 **What it is:** a rule-based early-warning demonstration for Ireland's undersea internet cables and gas and power lines. It works like this:

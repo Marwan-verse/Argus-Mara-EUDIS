@@ -86,9 +86,10 @@ class SOCClient:
             headers["Content-Type"] = "application/json"
         request = Request(self.url + path, data=raw, headers=headers, method=method)
         try:
-            with self.opener.open(request, timeout=8) as response:
-                raw = response.read(2 * 1024 * 1024 + 1)
-                if len(raw) > 2 * 1024 * 1024:
+            limit = 8 * 1024 * 1024 if path.startswith('/v1/satellite/') else 2 * 1024 * 1024
+            with self.opener.open(request, timeout=15 if path.startswith('/v1/satellite/') else 8) as response:
+                raw = response.read(limit + 1)
+                if len(raw) > limit:
                     raise ClientError("Server response exceeds limit")
                 try:
                     return json.loads(raw)

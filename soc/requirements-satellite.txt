@@ -1,0 +1,6 @@
+# Optional image extends the existing SOC host; offline desktop stays independent.
+-r requirements.txt
+Pillow==12.3.0
+rasterio==1.5.2
+numpy==2.5.4
+pyarrow==25.0.1

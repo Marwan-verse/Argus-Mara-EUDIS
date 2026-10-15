@@ -1,0 +1,222 @@
+"""File-based satellite workspace shared by the native client and optional SOC.
+
+No changes to the two-file exercise contract; all rasters, archives, results and
+cost records live under ignored/private data. Import is a host-side operation.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+
+from argus import satellite
+from argus.satellite_ais import ArchiveChanged, associate, attach_latest, historical_ais
+from argus.satellite_ai import PILOT_USD, get_key, read_ledger, visual_analysis
+
+DEFAULT_QUESTION = 'Find possible vessels in this image and describe the visible evidence and uncertainty.'
+
+
+class SatelliteWorkspace:
+    def __init__(self, root, archive_root=None):
+        self.root = Path(root)
+        self.scenes = self.root/'scenes'
+        self.archive_root = Path(archive_root or os.environ.get('ARGUS_SATELLITE_AIS_DIR') or self.root.parent/'ais')
+
+    def status(self):
+        from argus.satellite_scan import scan_status
+        scan = scan_status(self.root)
+        return {'configured': bool(get_key()), 'automatic': scan['enabled'], 'scan': scan, 'pilot_limit_usd': PILOT_USD,
+                'budget': read_ledger(self.root/'ai'),
+                'scene_count': len(self.list_scenes()),
+                'archive_available': self.archive_root.is_dir() and any(self.archive_root.rglob('*.parquet')) or
+                                     self.archive_root.is_dir() and any(self.archive_root.rglob('*.csv')) or
+                                     self.archive_root.is_dir() and any(self.archive_root.rglob('*.json'))}
+
+    def search(self, sensor, bbox, start, end):
+        scenes = satellite.search(sensor, bbox, start, end)
+        satellite.atomic_json(self.root/'catalogue.json', scenes)
+        return scenes
+
+    def prepare(self, product_id, bbox):
+        if not isinstance(product_id, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,200}', product_id):
+            raise ValueError('Invalid scene identifier')
+        catalogue = self.root/'catalogue.json'
+        rows = json.loads(catalogue.read_text(encoding='utf-8')) if catalogue.exists() else []
+        scene = next((r for r in rows if r['id'] == product_id), None)
+        if not scene:
+            raise ValueError('Search the catalogue again before loading this scene')
+        if scene['sensor'] != 'Sentinel-2' or not scene['asset']:
+            raise ValueError('SAR data needs calibrated, terrain-corrected GeoTIFF import on the host; a catalogue footprint is not usable radar pixels')
+        self.check_capacity()
+        return satellite.crop_scene(scene['asset'], bbox, self.scenes, scene_id=scene['id'],
+                                    acquired_utc=scene['acquired_utc'], sensor=scene['sensor'], quality_source=scene.get('quality_asset'))
+
+    def check_capacity(self):
+        if len(self.list_scenes()) >= 200:
+            raise ValueError('The workspace has reached its 200-crop limit; archive old crops on the host')
+        size = sum(p.stat().st_size for p in self.root.rglob('*') if p.is_file()) if self.root.exists() else 0
+        if size > 512*1024*1024:
+            raise ValueError('The satellite workspace has reached its 512 MB storage limit')
+
+    def import_raster(self, path, bbox, acquired_utc, sensor, label):
+        self.check_capacity()
+        return satellite.crop_scene(path, bbox, self.scenes, scene_id=Path(path).name,
+                                    acquired_utc=acquired_utc, sensor=sensor, label=label)
+
+    def import_ais(self, source):
+        source = Path(source)
+        if source.suffix.lower() not in {'.csv', '.parquet', '.json'} or source.stat().st_size > 256*1024*1024:
+            raise ValueError('Import AIS CSV, recorder Parquet or normalized JSON, at most 256 MB each')
+        current = sum(p.stat().st_size for p in self.archive_root.rglob('*') if p.is_file()) if self.archive_root.exists() else 0
+        if current + source.stat().st_size > 1024*1024*1024:
+            raise ValueError('The AIS import folder would exceed its 1 GB limit')
+        digest = hashlib.sha256()
+        with source.open('rb') as stream:
+            for chunk in iter(lambda: stream.read(1024*1024), b''):
+                digest.update(chunk)
+        self.archive_root.mkdir(parents=True, exist_ok=True)
+        target = self.archive_root/(digest.hexdigest()+source.suffix.lower())
+        if not target.exists():
+            temporary = target.with_suffix('.tmp')
+            shutil.copyfile(source, temporary)
+            temporary.replace(target)
+        return {'imported': True, 'sha256': digest.hexdigest(), 'bytes': source.stat().st_size}
+
+    def list_scenes(self):
+        if not self.scenes.exists():
+            return []
+        return sorted([json.loads(p.read_text(encoding='utf-8')) for p in self.scenes.glob('*.json')
+                       if re.fullmatch(r'[0-9a-f]{24}\.json', p.name)],
+                      key=lambda r: r['acquired_utc'], reverse=True)
+
+    def scene(self, identifier):
+        if not isinstance(identifier, str) or not re.fullmatch(r'[0-9a-f]{24}', identifier):
+            raise ValueError('Invalid crop identifier')
+        path = self.scenes/(identifier+'.json')
+        if not path.exists():
+            raise ValueError('Crop not found; load or import an image first')
+        return json.loads(path.read_text(encoding='utf-8'))
+
+    def image(self, identifier):
+        scene = self.scene(identifier)
+        data = (self.scenes/(identifier+'.png')).read_bytes()
+        if hashlib.sha256(data).hexdigest() != scene['image_sha256']:
+            raise ValueError('Satellite crop hash does not match its metadata')
+        return data
+
+    def analyse(self, identifier, question=DEFAULT_QUESTION, *, automatic=False):
+        scene = self.scene(identifier)
+        if automatic:
+            if not scene.get('quality_sha256'):
+                raise ValueError('Automatic optical reviews require a verified quality mask')
+            from argus.satellite_screen import water_mask
+            water_mask(scene, self.scenes)  # Validate before spending.
+        # Load and validate the archive before paying; AI receives no AIS metadata.
+        ais = self.ais_for_scene(scene)
+        if len(ais['vessels']) > 1000:
+            raise ValueError('Too many historical contacts; choose a smaller analysis area')
+        visual = visual_analysis(self.root/'ai', scene, self.image(identifier), question)
+        points = visual['contacts']
+        excluded = 0
+        if scene.get('quality_sha256'):
+            from argus.satellite_screen import retain_water_contacts
+            points, excluded = retain_water_contacts(scene, points, self.scenes)
+        elif automatic:
+            raise ValueError('Automatic optical reviews require a verified quality mask')
+        contacts = self.associate_current(points, ais, scene)
+        result = {'scene': scene, 'visual': visual, 'contacts': contacts, 'ais': ais,
+                  'budget': read_ledger(self.root/'ai'),
+                  'assumptions': {'association_radius_km': .3, 'max_interpolation_gap_s': 600,
+                                  'max_past_projection_age_s': 300},
+                  'review_status': 'unreviewed',
+                  'automatic': automatic, 'quality_excluded_contacts': excluded,
+                  'caveat': 'Possible visual contacts and AIS associations require operator review. Unmatched does not mean hostile or deliberately dark. No operational response is sent.'}
+        satellite.atomic_json(self.root/'reviews'/(identifier+'.json'), result)
+        return result
+
+    def associate_current(self, points, ais, scene):
+        from argus.satellite_capture import load_latest
+        return attach_latest(associate(points, ais), load_latest(self.root/'scan/latest_ais.json'), scene['acquired_utc'])
+
+    def contacts(self):
+        """Small map index; detailed AIS, image and latest positions load on click."""
+        rows = []
+        folder = self.root/'reviews'
+        for path in sorted(folder.glob('*.json')) if folder.exists() else []:
+            if not re.fullmatch(r'[0-9a-f]{24}\.json', path.name):
+                continue
+            review = json.loads(path.read_text(encoding='utf-8'))
+            if (review.get('visual') or {}).get('image_input_verified') is not True:
+                continue
+            scene = review['scene']
+            for point in review['contacts']:
+                rows.append({key: point[key] for key in ('id', 'lat', 'lon', 'confidence', 'label', 'description', 'ts', 'matched_mmsi')})
+                rows[-1].update(scene_id=scene['id'], sensor=scene['sensor'])
+        return sorted(rows, key=lambda r: r['ts'], reverse=True)[:5000]
+
+    def history(self, identifier):
+        scene = self.scene(identifier)
+        return {'scene': scene, 'contacts': [], 'visual': None,
+                'ais': self.ais_for_scene(scene),
+                'review_status': 'unreviewed', 'caveat': 'Historical AIS at image acquisition UTC; partial reception coverage.'}
+
+    def ais_for_scene(self, scene):
+        if scene['label'] not in {'real', 'reconstructed'}:
+            return {'vessels': [], 'archive_sha256': None,
+                    'coverage': {'status': 'unavailable', 'eligible_vessels': 0, 'files_scanned': 0,
+                                 'complete_regional_census': False,
+                                 'caveat': 'Synthetic or unverified imagery cannot be associated with real archived AIS.'}}
+        try:
+            return historical_ais(self.archive_root, scene['acquired_utc'], scene['bbox'])
+        except ArchiveChanged:
+            # Retry only the free file read, before visual_analysis is called.
+            return historical_ais(self.archive_root, scene['acquired_utc'], scene['bbox'])
+
+    def review(self, identifier):
+        self.scene(identifier)
+        path = self.root/'reviews'/(identifier+'.json')
+        if path.exists():
+            review = json.loads(path.read_text(encoding='utf-8'))
+            if (review.get('visual') or {}).get('image_input_verified') is True:
+                # No AI tokens: new archive imports/recordings can improve a
+                # previous match, and latest fixes change independently of images.
+                ais = self.ais_for_scene(review['scene'])
+                review['ais'] = ais
+                review['contacts'] = self.associate_current(review['contacts'], ais, review['scene'])
+                return review
+        return self.history(identifier)
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description='Host-side satellite imports; no paid AI calls')
+    parser.add_argument('--root', default=os.environ.get('ARGUS_SATELLITE_ROOT', 'data/satellite'))
+    commands = parser.add_subparsers(dest='command', required=True)
+    commands.add_parser('status')
+    ais = commands.add_parser('import-ais')
+    ais.add_argument('path', type=Path)
+    raster = commands.add_parser('import-raster')
+    raster.add_argument('path', type=Path)
+    raster.add_argument('--bbox', required=True, type=float, nargs=4, metavar=('WEST', 'SOUTH', 'EAST', 'NORTH'))
+    raster.add_argument('--acquired-utc', required=True)
+    raster.add_argument('--sensor', required=True, choices=['Sentinel-1', 'Sentinel-2'])
+    raster.add_argument('--label', required=True, choices=['real', 'reconstructed', 'simulated', 'fictional', 'assumption'])
+    args = parser.parse_args()
+    workspace = SatelliteWorkspace(args.root)
+    try:
+        if args.command == 'import-ais':
+            result = workspace.import_ais(args.path)
+        elif args.command == 'import-raster':
+            result = workspace.import_raster(args.path, args.bbox, args.acquired_utc, args.sensor, args.label)
+        else:
+            result = workspace.status()
+    except (ValueError, OSError) as error:
+        parser.exit(1, str(error)+'\n')
+    print(json.dumps(result, indent=2, allow_nan=False))
+
+
+if __name__ == '__main__':
+    main()

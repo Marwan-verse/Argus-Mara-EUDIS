@@ -15,6 +15,15 @@ For **two devices using a VS Code/GitHub forwarded HTTPS link**, follow
 `HOST-SOC-FORWARDED-WINDOWS.bat` (or its macOS/Linux equivalent) on the
 account-owning host; both desktop apps use the same forwarded URL and accounts.
 
+The optional [satellite analysis setup](../docs/16-satellite-ai.md) adds manual
+TensorX image review and private historical AIS on this same host, with its key
+kept server-side and access restricted to `evidence.share`. It is separate from
+end-to-end encrypted chat. Use the documented satellite Compose override.
+It also supports opt-in automatic coastal Sentinel-2 cycles and private AIS
+capture. Administrators start/stop shared cycles; authorised intelligence users
+click contacts for source imagery, acquisition-time candidates and latest fixes.
+The $20 pilot ceiling, coverage gaps and uncertain identities remain visible.
+
 The current SOC workspace guides users through Connect, Verify and Chat.
 Invitations are eight symbols displayed as `ABCD-EFGH`, with one-click copying.
 Choose **Team session (all groups)** to communicate across different groups;

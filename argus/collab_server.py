@@ -519,6 +519,8 @@ def create_app(config):
     app.router.add_put("/v1/admin/users/{user_id}", admin_user)
     app.router.add_put("/v1/admin/groups/{group}", admin_group)
     app.router.add_delete("/v1/admin/groups/{group}", admin_group)
+    from argus.satellite_server import install as install_satellite
+    install_satellite(app, require, body)
 
     async def lifecycle(application):
         async def expiry():
