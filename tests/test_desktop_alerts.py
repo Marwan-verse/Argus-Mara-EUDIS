@@ -55,9 +55,9 @@ class DesktopAlertBoardTests(unittest.TestCase):
         ranks = [RANK[board.by_id[key]['assessment']['level']] for key in order]
         self.assertEqual(ranks, sorted(ranks, reverse=True))
         # SIM-06, SIM-44 and SIM-48 are raised one level: no responder reaches them before their line ETA.
-        # Stories SIM-50 to SIM-52 are watched at T+90 (SIM-53 starts at T+95).
+        # Stories SIM-50 to SIM-52 and SIM-54 to SIM-56 are watched at T+90 (SIM-53 starts at T+95).
         self.assertEqual([board.tiles[f'{level}-count'].cget('text') for level in ('critical', 'high', 'medium', 'low')],
-                         ['6', '6', '10', '30'])
+                         ['6', '6', '10', '33'])
         self.assertEqual(board.cards['SIM-01']['stripe'].cget('bg'), STYLE['critical'][0])
         self.assertIn('In corridor', board.cards['SIM-01']['eta'].cget('text'))
         self.assertIn('22 new', app.alert_counts_label.cget('text'))
@@ -73,7 +73,7 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertIsNone(board.level_filter)
         board.set_filter('low')
         self.assertIn('SIM-40', self.packed_cards())
-        self.assertEqual(len(self.packed_cards()), 30)  # with stories SIM-50 to SIM-52
+        self.assertEqual(len(self.packed_cards()), 33)  # with stories SIM-50 to SIM-52 and SIM-54 to SIM-56
         self.assertEqual(self.flags('SIM-40'), ['Small craft · capped Low'])
         board.set_filter(None)
         board.toggle_watching()
