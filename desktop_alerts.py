@@ -1131,6 +1131,9 @@ class ReviewDialog:
         self.mode: str | None = None
         self.visible = False
         self.choice = tk.StringVar(app.root, value="")
+        self.position: tuple[float, float] | None = None  # (right edge, top) once the operator drags it
+        self.drag: tuple | None = None
+        self.drag_target: tuple[int, int] | None = None
         self.frame = ctk.CTkFrame(app.chart_host, width=self.WIDTH, height=620, fg_color=ui.CARD,
                                   corner_radius=8, border_width=1, border_color=ui.LINE)
         self.frame.pack_propagate(False)
@@ -1163,6 +1166,14 @@ class ReviewDialog:
         self.flags = tk.Label(self.frame, text="", bg=ui.CARD, fg=STYLE["medium"][0], font=(SANS, 10, "bold"),
                               anchor="w", justify="left", wraplength=round((self.WIDTH - 50) * self.px))
         self.flags.pack(fill="x", padx=20, pady=(4, 0))
+        for widget in (head, self.level, self.score, self.tag, self.name, self.meta, self.title, self.flags):
+            widget.configure(cursor="fleur")
+            widget.bind("<ButtonPress-1>", self.start_drag, add="+")
+            widget.bind("<B1-Motion>", self.move_drag, add="+")
+            widget.bind("<ButtonRelease-1>", self.end_drag, add="+")
+            widget.bind("<Double-Button-1>", lambda _event: self.dock(), add="+")
+            widget.bind("<Enter>", lambda _event: app.map_status_label.configure(
+                text="Drag to move this window · double-click to dock it"), add="+")
         self.scale = tk.Canvas(self.frame, height=44, bg=ui.CARD, highlightthickness=0)
         self.scale.pack(fill="x", padx=20, pady=(12, 0))
         self.scale.bind("<Configure>", lambda _event: self.draw_scale())
@@ -1202,12 +1213,70 @@ class ReviewDialog:
         width = app.chart_host.winfo_width() / scaling
         height = app.chart_host.winfo_height() / scaling
         bottom = 200 if app.exercise_visible.get() else 120
-        self.frame.configure(width=max(360, min(self.WIDTH, width - 110)), height=max(380, min(760, height - bottom)))
-        self.frame.place(relx=1, x=-70, y=16, anchor="ne")
+        dialog_width = max(360, min(self.WIDTH, width - 110))
+        dialog_height = max(380, min(760, height - bottom))
+        if self.position is None:
+            self.frame.configure(width=dialog_width, height=dialog_height)
+            self.frame.place(relx=1, x=-70, y=16, anchor="ne")
+        else:
+            right, top = self.clamp(dialog_width, width, height)
+            self.frame.configure(width=dialog_width, height=min(dialog_height, max(300, height - top - 16)))
+            self.frame.place(relx=0, x=right, y=top, anchor="ne")
         self.frame.lift()
+
+    def clamp(self, dialog_width: float, width: float, height: float) -> tuple[float, float]:
+        """Keep part of a moved window, and its whole header, inside the map."""
+        right, top = self.position
+        self.position = (max(min(dialog_width, 120), min(width + dialog_width - 120, right)),
+                         max(0, min(height - 48, top)))
+        return self.position
+
+    def start_drag(self, event) -> None:
+        host = self.board.app.chart_host
+        scaling = ctk.ScalingTracker.get_widget_scaling(self.frame)
+        right = (self.frame.winfo_rootx() + self.frame.winfo_width() - host.winfo_rootx()) / scaling
+        top = (self.frame.winfo_rooty() - host.winfo_rooty()) / scaling
+        self.drag = (event.x_root, event.y_root, right, top)
+        self.drag_target = None
+
+    def move_drag(self, event) -> None:
+        if not self.drag:
+            return
+        # Coalesce motion events into one move per idle so the map behind can repaint in time.
+        if self.drag_target is None:
+            self.board.app.root.after_idle(self.apply_drag)
+        self.drag_target = (event.x_root, event.y_root)
+
+    def apply_drag(self) -> None:
+        if not self.drag or self.drag_target is None:
+            return
+        x, y, right, top = self.drag
+        x_root, y_root = self.drag_target
+        self.drag_target = None
+        host = self.board.app.chart_host
+        scaling = ctk.ScalingTracker.get_widget_scaling(self.frame)
+        self.position = (right + (x_root - x) / scaling, top + (y_root - y) / scaling)
+        # Only move while dragging; resizing re-lays out the whole window and leaves trails.
+        right, top = self.clamp(self.frame.winfo_width() / scaling, host.winfo_width() / scaling,
+                                host.winfo_height() / scaling)
+        self.frame.place(relx=0, x=right, y=top, anchor="ne")
+
+    def end_drag(self, _event=None) -> None:
+        if self.drag:
+            self.apply_drag()
+            self.drag = None
+            self.place()
+
+    def dock(self) -> None:
+        self.drag = None
+        self.position = None
+        if self.visible:
+            self.place()
 
     def covered_width(self) -> float:
         scaling = ctk.ScalingTracker.get_widget_scaling(self.frame)
+        if self.position is not None:
+            return 70 * scaling  # moved by the operator: no longer a fixed strip on the right
         return (float(self.frame.cget("width")) + 90) * scaling
 
     # ----- content --------------------------------------------------------------------

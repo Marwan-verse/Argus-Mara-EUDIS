@@ -167,6 +167,7 @@ def build(app):
         fg_color="transparent", text_color=ui.MUTED, command=app.close_current_panel)
     app.close_panel_button.pack(side="right")
     app.tools.style_button(app.close_panel_button, 'Close the selected tab')
+    app.tools.make_movable((panel_head, app.panel_caption))
     app.right_notebook = ttk.Notebook(app.floating_panel, style="Dock.TNotebook")
     app.right_notebook.pack(fill="both", expand=True, padx=8, pady=(2, 8))
     app._bind_dock(app.right_notebook)

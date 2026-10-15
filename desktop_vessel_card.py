@@ -62,6 +62,7 @@ class VesselCard:
         self.visible = False
         self.position = None
         self.drag = None
+        self.drag_target = None
         self.photo_mmsi = None
         self.photo_image = None
         self.labels = {}
@@ -90,7 +91,7 @@ class VesselCard:
             widget.configure(cursor='fleur')
             widget.bind('<ButtonPress-1>', self.start_drag, add='+')
             widget.bind('<B1-Motion>', self.move_drag, add='+')
-            widget.bind('<ButtonRelease-1>', lambda _: setattr(self, 'drag', None), add='+')
+            widget.bind('<ButtonRelease-1>', self.end_drag, add='+')
 
         self.body = ctk.CTkScrollableFrame(self.frame, fg_color=WHITE, corner_radius=0,
             scrollbar_button_color='#c4ced6', scrollbar_button_hover_color='#9daab6')
@@ -186,14 +187,35 @@ class VesselCard:
     def start_drag(self, event):
         scaling = self.frame._get_widget_scaling()
         self.drag = (event.x_root, event.y_root, self.frame.winfo_x() / scaling, self.frame.winfo_y() / scaling)
+        self.drag_target = None
 
     def move_drag(self, event):
         if self.drag:
-            x, y, initial_x, initial_y = self.drag
-            scaling = self.frame._get_widget_scaling()
-            self.position = (initial_x + (event.x_root - x) / scaling, initial_y + (event.y_root - y) / scaling)
-            self.resize()
+            # Coalesce fast motion events into one move per idle so the map can keep up.
+            if self.drag_target is None:
+                self.app.root.after_idle(self.apply_drag)
+            self.drag_target = (event.x_root, event.y_root)
         return 'break'
+
+    def apply_drag(self):
+        if not self.drag or self.drag_target is None:
+            return
+        x, y, initial_x, initial_y = self.drag
+        x_root, y_root = self.drag_target
+        self.drag_target = None
+        scaling = self.frame._get_widget_scaling()
+        width, height = self.parent.winfo_width() / scaling, self.parent.winfo_height() / scaling
+        card_width, card_height = self.frame.winfo_width() / scaling, self.frame.winfo_height() / scaling
+        x = max(8, min(initial_x + (x_root - x) / scaling, width - card_width - 8))
+        y = max(8, min(initial_y + (y_root - y) / scaling, height - card_height - 42))
+        self.position = (x, y)
+        # Only move the card while dragging; resizing it every event makes the map leave trails.
+        self.frame.place(x=x, y=y)
+
+    def end_drag(self, _event=None):
+        if self.drag:
+            self.apply_drag()
+            self.drag = None
 
     def draw_voyage_arrow(self, _event=None):
         canvas = self.voyage_arrow
