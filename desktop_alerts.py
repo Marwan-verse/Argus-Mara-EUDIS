@@ -31,7 +31,7 @@ import customtkinter as ctk
 from argus import responders
 from argus.alert_board import inside, line_path, sort_key
 from argus.brain_board import build_board, update
-from argus.explain import explain, source
+from argus.explain import data_issues, explain, source
 from argus.incident_board import OPEN_RANK, Replay
 from argus.incidents import QUIET_CLOSE_S, REASONS, STATUSES
 from argus.levels import LEVEL_NAMES, RANK
@@ -735,10 +735,12 @@ class AlertBoard:
             self.summary.configure(text=f"{shown} {LEVEL_NAMES[self.level_filter].lower()} ·")
         else:
             self.summary.configure(text=f"{open_count} open · {counts['Escalated']} escalated")
+        issues = sum(1 for item in self.items if self.replay.present(item) and data_issues(item))
         self.app.alert_counts_label.configure(
             text=f"{counts['New']} new · {counts['Reviewed']} reviewed · {counts['Acknowledged']} acknowledged · "
                  f"{counts['Escalated']} escalated · {counts['Rejected']} rejected\n"
-                 "Brain: {} contacts scored in {:.0f} ms at this replay step".format(*self.replay.scored))
+                 "Brain: {} contacts scored in {:.0f} ms at this replay step".format(*self.replay.scored)
+                 + (f" · {issues} vessel{'s' if issues != 1 else ''} with data issues" if issues else ""))
         if self.app.vessel_reports.entries:
             self.app.alert_counts_label.configure(text=self.app.alert_counts_label.cget("text") +
                 f"\n{len(self.app.vessel_reports.grouped())} reported vessels · analyst review")
@@ -999,7 +1001,7 @@ class AlertBoard:
                 halo = app.map.create_oval(x - radius, y - radius, x + radius, y + radius, outline=colour,
                                            width=2, tags=tags)
                 self.halos.append((halo, x, y))
-            if item["sog_kn"] >= 0.5:
+            if (item["sog_kn"] or 0) >= 0.5:
                 angle = math.radians(item["cog_deg"] or 0)
                 shape = []
                 for across, along in ((0, -7), (5, 5), (0, 2.5), (-5, 5)):
@@ -1360,7 +1362,8 @@ class ReviewDialog:
         meta = [item["vessel_type"]]
         if item.get("length_m"):
             meta.append(f"{item['length_m']:.0f} m")
-        meta += [f"SOG {item['sog_kn']:.1f} kn", f"COG {item['cog_deg']:03.0f}°"]
+        meta += ["SOG n/a" if item["sog_kn"] is None else f"SOG {item['sog_kn']:.1f} kn",
+                 "COG n/a" if item["cog_deg"] is None else f"COG {item['cog_deg']:03.0f}°"]
         if not item.get("exercise"):
             minutes = int(board.age_min(item))
             meta.append("raised now" if minutes < 1 else f"raised {minutes} min ago" if minutes < 60
@@ -1603,6 +1606,8 @@ class ReviewDialog:
         head.pack(fill="x", padx=(6, 0), pady=(4, 6))
         tk.Label(head, text="WHY THIS LEVEL", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 8, "bold")).pack(side="left")
         tk.Label(head, text=why["basis"], bg=ui.CARD, fg=ui.MUTED, font=(MONO, 9)).pack(side="right")
+        for issue in why["data_issues"]:  # first, so the reviewer reads the level knowing the data was faulty
+            self.line("!", issue, wrap, STYLE["medium"][0])
         for group in why["groups"]:
             row = tk.Frame(self.body, bg=ui.CARD)
             row.pack(fill="x", padx=(6, 0), pady=(6, 1))

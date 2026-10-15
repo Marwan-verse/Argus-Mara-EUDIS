@@ -20,6 +20,11 @@ hand except the track: an anchor-drag approach to EWIC without an AIS gap
 (SIM-50), a ship holding beside the North Dublin cable cluster and then
 anchoring (SIM-51), and two innocent ones, a ship at anchor in Dublin Bay
 outside every corridor (SIM-52) and a fast ferry crossing the lines (SIM-53).
+SIM-55 is an innocent transit whose AIS feed is deliberately corrupted (missing
+and "not available" positions, repeated and out-of-order times, "not
+available" speed and course, numbers as text): Brain cleans it, scores it
+without failing and reports what it ignored. The map and the card show the
+cleaned track; Brain reads the track as received.
 
 ``update`` is a pure function of the board time, so a replay can move the
 board forwards or backwards; ``rescore_exercise`` re-scores the exercise
@@ -35,7 +40,7 @@ import math
 
 from argus import alert_board
 from argus.alert_board import LINES, _item, sort_key
-from argus.assemble import apply_relevance, assess_vessel, context_from_scenario
+from argus.assemble import apply_relevance, assess_vessel, clean_vessel, context_from_scenario
 from argus.countdown import step
 from argus.detectors import ais_spoofing
 from argus.levels import assess
@@ -200,6 +205,26 @@ def _ferry_story() -> list[dict]:
     return _timed_track(95 * 60, (53.33, -6.00), [(70, 19.0, 60, None)])
 
 
+def _dirty_feed_story() -> list[dict]:
+    """A steady 11 kn transit through the North Channel approach, as a faulty AIS feed delivers it.
+
+    Damage, by fix: three positions missing or "not available" (lat 91 / lon 181), one 0,0
+    default, two fixes received twice, one pair out of time order, speed "not available"
+    (102.3) on one, course "not available" (360) on another, and speeds sent as text.
+    """
+    track = _timed_track(40 * 60, (53.62, -5.75), [(150, 11.0, 20, None)])
+    track[12]["lat"] = None
+    track[30].update(lat=91, lon=181)
+    track[47]["lon"] = None
+    track[60].update(lat=0, lon=0)
+    track[75]["sog_kn"] = 102.3
+    track[90]["cog_deg"] = 360
+    for fix in track[100:110]:
+        fix["sog_kn"] = str(fix["sog_kn"])
+    track[120], track[121] = track[121], track[120]
+    return track[:20] + [dict(track[19])] + track[20:80] + [dict(track[79])] + track[80:]
+
+
 # Stories on the replay clock: (alert_board._item row, AIS class, track builder). The row's position,
 # course and speed are replaced by the track at each replay time; observations come only from detectors.
 STORY_ITEMS = [
@@ -219,6 +244,10 @@ STORY_ITEMS = [
       "Fast ferry crossing the cable corridors at a steady speed",
       "Normal transit; no action.",
       {}), "A", _ferry_story),
+    (("SIM-55", "KESTREL MOOR", "General cargo", 150, "north-dublin", 0, 0, 0, 0, 0, "line",
+      "Steady transit; its AIS feed has missing positions, repeated times and 'not available' values",
+      "Normal transit; Brain ignored the faulty fixes and lists them in the review. Check the AIS receiver.",
+      {}), "A", _dirty_feed_story),
 ]
 STORY_TRAIL_S = 3 * 3600  # the map trail shows the window the detectors read
 
@@ -281,18 +310,29 @@ def _rescore(item: dict, result: dict) -> None:
     item.update(observations=result["observations"], assessment=_with_notes(result["assessment"], notes),
                 relevance=result["relevance"], cable_id=result["cable_id"], detector_notes=notes,
                 detectors=[f["detector"] for f in result["findings"]],
-                findings=[_finding_summary(f) for f in result["findings"]])
+                findings=[_finding_summary(f) for f in result["findings"]],
+                data_quality=result.get("data_quality"), detector_errors=result.get("detector_errors", []))
 
 
-def story_vessel(item: dict) -> dict:
-    """The fictional AIS vessel behind a story item, as the detectors read it."""
-    return {**_vessel(item, item.get("ais_class", "A")), "track": item["story"]["track"]}
+def _received_by(fix, now) -> bool:
+    """A received fix is in the feed by replay time ``now`` unless its numeric time is later."""
+    t = fix.get("t") if isinstance(fix, dict) else None
+    return not (isinstance(t, (int, float)) and not isinstance(t, bool) and t > now)
+
+
+def story_vessel(item: dict, now: float | None = None) -> dict:
+    """The fictional AIS vessel behind a story item, as the detectors read it: the track as received,
+    up to replay time ``now`` when given."""
+    received = item["story"].get("received", item["story"]["track"])
+    if now is not None:
+        received = [fix for fix in received if _received_by(fix, now)]
+    return {**_vessel(item, item.get("ais_class", "A")), "track": received}
 
 
 def rescore_story(item: dict, now: float) -> None:
     """Score a story on its track up to replay time ``now`` with the registered detectors; move it on the map."""
     track = item["story"]["track"]
-    _rescore(item, assess_vessel(story_vessel(item), {"now": int(now), "cables": STORY_LINES}))
+    _rescore(item, assess_vessel(story_vessel(item, now), {"now": int(now), "cables": STORY_LINES}))
     seen = [fix for fix in track if fix["t"] <= now]
     if seen:
         last = seen[-1]
@@ -307,12 +347,13 @@ def rescore_story(item: dict, now: float) -> None:
         distance = item["observations"].get("distance_nm")
         where = f"{distance:.1f} nm from {item['line_name']}" if distance is not None else "far from every line"
         doing = ("At anchor" if seen and last.get("nav_status") == "at anchor"
-                 else f"Under way at {last['sog_kn']:.0f} kn" if seen else "Not seen yet")
+                 else "Not seen yet" if not seen else "Under way, speed not available" if last["sog_kn"] is None
+                 else f"Under way at {last['sog_kn']:.0f} kn")
         item["title"] = f"{doing}, {where}: no behaviour cue"
 
 
 def build_board(scenario: dict | None = None, alerts: list | None = None) -> list[dict]:
-    """Same items as ``alert_board.build_board`` plus twelve extras, scored through ``argus.assemble``.
+    """Same items as ``alert_board.build_board`` plus fourteen extras, scored through ``argus.assemble``.
 
     Story items are scored at the end of their track here; a replay scores them at its own time.
     """
@@ -333,9 +374,10 @@ def build_board(scenario: dict | None = None, alerts: list | None = None) -> lis
                                      title_then)}
         items.append(item)
     for row, ais_class, make_track in STORY_ITEMS:
-        track = make_track()
+        received = make_track()
+        track = clean_vessel({"track": received})[0]["track"]  # what the map and card show
         items.append({**_item(*row), "ais_class": ais_class, "source": "track",
-                      "story": {"track": track, "start_s": track[0]["t"], "title": row[11]}})
+                      "story": {"track": track, "received": received, "start_s": track[0]["t"], "title": row[11]}})
     context = context_from_scenario(scenario) if scenario else {}
     for item in items:
         if item.get("story"):

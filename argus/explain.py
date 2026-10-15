@@ -2,7 +2,8 @@
 
 Everything here is read from a scored board item (``argus.brain_board``): the
 ``argus.levels`` factors by group, the rules that capped or raised the level,
-the detectors' findings, the small-vessel rule and the threatened line. Each
+the detectors' findings, the small-vessel rule, the threatened line and any AIS
+data Brain ignored or detector that failed on the vessel. Each
 part carries a data label (simulated, exercise, real, illustrative, assumption)
 so a reviewer can see what is invented, what is public data and what is our
 own assumption. No tkinter here.
@@ -11,6 +12,7 @@ own assumption. No tkinter here.
 from __future__ import annotations
 
 from argus.alert_board import LINES
+from argus.assemble import describe_data_quality
 from argus.levels import BEHAVIOUR_CAP, CONTEXT_CAP, IDENTITY_CAP
 
 GROUPS = (("B", "behaviour", "Behaviour", BEHAVIOUR_CAP), ("I", "identity", "Identity and data", IDENTITY_CAP),
@@ -143,8 +145,16 @@ def labels(item: dict) -> list[tuple[str, str]]:
     return found
 
 
+def data_issues(item: dict) -> list[str]:
+    """Review lines: the fixes Brain ignored when cleaning the track, then each detector that failed on it."""
+    found = [describe_data_quality(item.get("data_quality"))]
+    found += [f"Detector {error['detector']} failed on this vessel — not scored by it ({error['error']})"
+              for error in item.get("detector_errors") or ()]
+    return [line for line in found if line]
+
+
 def explain(item: dict) -> dict:
     """Everything the review window shows under "Why this level"."""
     return {"basis": item["assessment"]["basis"], "groups": groups(item), "rules": rules(item),
             "findings": findings(item), "small_vessel": small_vessel(item), "line": threatened_line(item),
-            "labels": labels(item), "source": source(item)}
+            "labels": labels(item), "source": source(item), "data_issues": data_issues(item)}

@@ -55,10 +55,10 @@ class DesktopAlertBoardTests(unittest.TestCase):
         ranks = [RANK[board.by_id[key]['assessment']['level']] for key in order]
         self.assertEqual(ranks, sorted(ranks, reverse=True))
         # SIM-06, SIM-44 and SIM-48 are raised one level: no responder reaches them before their line ETA.
-        # Stories SIM-50 to SIM-52 are watched at T+90 (SIM-53 starts at T+95).
+        # Stories SIM-50 to SIM-52 and the corrupted-feed story SIM-55 are watched at T+90 (SIM-53 starts at T+95).
         # Site contacts SIM-61 and SIM-64 are High, SIM-62 and SIM-63 Medium; SIM-54 is a Low stop (D63).
         self.assertEqual([board.tiles[f'{level}-count'].cget('text') for level in ('critical', 'high', 'medium', 'low')],
-                         ['6', '8', '12', '31'])
+                         ['6', '8', '12', '32'])
         self.assertEqual(board.cards['SIM-01']['stripe'].cget('bg'), STYLE['critical'][0])
         self.assertIn('In corridor', board.cards['SIM-01']['eta'].cget('text'))
         self.assertIn('26 new', app.alert_counts_label.cget('text'))
@@ -74,7 +74,7 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertIsNone(board.level_filter)
         board.set_filter('low')
         self.assertIn('SIM-40', self.packed_cards())
-        self.assertEqual(len(self.packed_cards()), 31)  # with stories SIM-50 to SIM-52 and the stop SIM-54
+        self.assertEqual(len(self.packed_cards()), 32)  # with stories SIM-50 to SIM-52, SIM-55 and the stop SIM-54
         self.assertEqual(self.flags('SIM-40'), ['Small craft · capped Low'])
         board.set_filter(None)
         board.toggle_watching()
@@ -196,6 +196,27 @@ class DesktopAlertBoardTests(unittest.TestCase):
         board.open('SIM-44')
         self.assertEqual(dialog.body._parent_canvas.yview()[0], 0)
         self.assertTrue(any(text.startswith('Also named: Gas interconnector IC2') for text in texts()))
+
+    def test_corrupted_feed_is_scored_and_its_data_quality_shown(self):
+        board, dialog = self.board, self.board.dialog
+
+        def texts():
+            found, stack = [], list(dialog.body.winfo_children())
+            while stack:
+                widget = stack.pop(0)
+                stack.extend(widget.winfo_children())
+                if isinstance(widget, tk.Label):
+                    found.append(widget.cget('text'))
+            return found
+
+        # SIM-55's feed so far (T+90): three fixes without a position and one received twice.
+        self.assertIn('· 1 vessel with data issues', self.app.alert_counts_label.cget('text'))
+        board.open('SIM-55')
+        shown = texts()
+        self.assertIn('Data quality: 4 fixes ignored (no position 3, repeated time 1)', shown)
+        self.assertFalse([text for text in shown if text.startswith('Detector ')])  # no detector failed
+        board.open('SIM-01')
+        self.assertFalse([text for text in texts() if text.startswith('Data quality')])
 
     def test_who_can_reach_it_shows_on_card_window_and_map_and_a_storm_grounds_drones(self):
         board, dialog = self.board, self.board.dialog
