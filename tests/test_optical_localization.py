@@ -11,7 +11,7 @@ from argus.satellite_ais import associate
 from argus.satellite_compare import compare_review
 from test_satellite import WHEN
 from test_satellite_compare import vessel
-from test_satellite_scan import image_fixture
+from test_satellite_scan import RASTERS_AVAILABLE, image_fixture
 
 
 class OpticalLocalizationTests(unittest.TestCase):
@@ -74,6 +74,7 @@ class OpticalLocalizationTests(unittest.TestCase):
         result = compare_review(self.scene, uncertain, ais, {'image_input_verified': True}, self.workspace.scenes)
         self.assertEqual(result['leads'], [])
 
+    @unittest.skipUnless(RASTERS_AVAILABLE, 'Optional satellite raster readers not installed')
     def test_free_rejoin_rebuilds_from_raw_model_output_without_compounding_anchors(self):
         atomic_json(self.workspace.root/'reviews'/(self.scene['id']+'.json'), {
             'scene': self.scene, 'visual': {'image_input_verified': True, 'contacts': [self.hint]},
