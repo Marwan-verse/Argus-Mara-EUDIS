@@ -13,6 +13,11 @@ earliest time the vessel can reach the line (``deadline_s``).
   the patrol ship, drones) decide ``no_response_in_time``. A VHF hail and the
   next satellite look are listed but never count: a hail is not an intercept
   and a satellite only looks.
+* The next satellite look comes from ESA's published Sentinel-1 acquisition
+  plan (``argus.s1_plan``, D90): the first planned swath that covers where the
+  vessel is predicted to be when the satellite passes (at most ``HORIZON_S``
+  ahead; a later pass uses that position). Replay seconds count from the
+  scenario's ``t0_utc``, which ``load_fleet`` hands to the plan.
 * Drones are grounded above their wind limit; the wind is an exercise value,
   never live weather (``argus.weather`` does not change ETAs).
 * An asset assigned to another incident is unavailable ("assigned to INC-...").
@@ -30,6 +35,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from argus import s1_plan
 from argus.countdown import nm_between, step
 
 FLEET_PATH = Path(__file__).with_name("fleet.json")
@@ -40,8 +46,14 @@ KIND_SHORT = {"aircraft": "Aircraft", "helicopter": "Helicopter", "ship": "Patro
               "hail": "VHF", "satellite": "Satellite"}
 
 
-def load_fleet(path: Path = FLEET_PATH) -> dict:
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+def load_fleet(path: Path = FLEET_PATH, t0_utc: str | None = None) -> dict:
+    """The fleet file; ``t0_utc`` (the replay clock's start) lets a planned satellite look use real UTC."""
+    fleet = json.loads(Path(path).read_text(encoding="utf-8"))
+    if t0_utc:
+        for asset in fleet["assets"]:
+            if asset["kind"] == "satellite" and asset.get("plan"):
+                asset["t0_utc"] = t0_utc
+    return fleet
 
 
 def dead_reckoning(lat: float, lon: float, cog_deg, sog_kn, t0: float):
@@ -113,7 +125,21 @@ def assess_asset(asset: dict, position, now: float, deadline_s=None, wind_kn: fl
         return _row(asset, status="unavailable",
                     reason=f"wind {wind_kn:g} kn above the {asset['max_wind_kn']:g} kn drone limit")
     start = dispatched_t if owner is not None and dispatched_t is not None else now
-    if asset["kind"] == "satellite":
+    named = {}
+    if asset["kind"] == "satellite" and asset.get("plan"):
+        if not asset.get("t0_utc"):
+            return _row(asset, status="unavailable", reason="no replay clock for the Sentinel-1 plan")
+        # Where the vessel is predicted to be when the satellite passes, at most HORIZON_S ahead like
+        # every other asset; a later pass uses that position, not days of dead reckoning.
+        look = s1_plan.replay_look(lambda t: position(min(t, start + HORIZON_S)), now, asset["t0_utc"])
+        if look is None:
+            return _row(asset, status="unavailable",
+                        reason=s1_plan.no_look_reason(s1_plan.epoch(asset["t0_utc"]) + now))
+        arrive, meet = look["t_s"], (look["lat"], look["lon"])
+        named = {"name": s1_plan.row_name(look, s1_plan.epoch(asset["t0_utc"]) + now), "label": s1_plan.LABEL,
+                 "look": {key: look[key] for key in ("satellite", "mode", "time_utc", "swath", "edge_km",
+                                                     "frames_online_utc", "plan_file")}}
+    elif asset["kind"] == "satellite":
         passes = [t for t in asset.get("pass_times_s", []) if t >= now]
         if not passes:
             return _row(asset, status="unavailable", reason="no pass scheduled")
@@ -139,10 +165,10 @@ def assess_asset(asset: dict, position, now: float, deadline_s=None, wind_kn: fl
     eta = max(0, int(arrive - now))
     meet = [round(meet[0], 5), round(meet[1], 5)] if meet else None
     if deadline_s is None:
-        return _row(asset, status="assigned" if owner is not None else "eyes_on", eta_s=eta, meet=meet)
+        return _row(asset, status="assigned" if owner is not None else "eyes_on", eta_s=eta, meet=meet, **named)
     margin = int(deadline_s - arrive)
     status = "assigned" if owner is not None else ("in_time" if margin >= 0 else "late")
-    return _row(asset, status=status, eta_s=eta, meet=meet, in_time=margin >= 0, margin_s=margin)
+    return _row(asset, status=status, eta_s=eta, meet=meet, in_time=margin >= 0, margin_s=margin, **named)
 
 
 def assess_fleet(fleet: dict, position, now: float, deadline_s=None, wind_kn: float = 0,
@@ -202,7 +228,8 @@ def row_text(row: dict) -> str:
     """One review-window line for an asset."""
     if row["status"] == "unavailable":
         return f"{row['id']}  {row['name']}: unavailable, {row['reason']}"
-    text = f"{row['id']}  {row['name']}: eyes on in {minutes(row['eta_s'])} min"
+    wait = s1_plan.duration(row["eta_s"]) if row["kind"] == "satellite" else f"{minutes(row['eta_s'])} min"
+    text = f"{row['id']}  {row['name']}: eyes on in {wait}"
     if row["margin_s"] is not None:
         verdict = (f"in time (+{minutes(row['margin_s'])} min)" if row["in_time"]
                    else f"too late ({minutes(-row['margin_s'])} min after the earliest line ETA)")
