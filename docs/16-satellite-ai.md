@@ -385,3 +385,6 @@ review leads. Republish saved verified reviews after applying the migration. SQL
 uses deterministic greedy associations; the native Python path uses global
 assignment, so individual provisional associations can differ in crowded scenes.
 Both paths withhold silence claims for competing contacts and ineligible motion.
+
+Global Fishing Watch radar contacts compared with team AIS (D84) are described in
+[19-gfw-radar.md](19-gfw-radar.md).
