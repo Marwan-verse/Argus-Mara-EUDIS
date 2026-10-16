@@ -81,6 +81,25 @@ def install_touchpad_scroll(root) -> bool:
     return True
 
 
+def speed_up_scrollbars() -> None:
+    """Stop CustomTkinter scrollbars from forcing a full window redraw on every scroll step.
+
+    CTkScrollbar._draw ends with update_idletasks(), so each step of a long list redrew every
+    pending widget in the window at once (about 56 ms a step on the incident panel, under
+    20 frames a second). Tk redraws the scrollbar at the next idle moment anyway.
+    """
+    original = ctk.CTkScrollbar.__init__
+    if getattr(original, "argus_fast", False):
+        return
+
+    def init(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        self._canvas.update_idletasks = lambda: None
+
+    init.argus_fast = True
+    ctk.CTkScrollbar.__init__ = init
+
+
 class PinchZoom:
     """Apply macOS trackpad pinches to the map, one zoom level per STEP of magnification."""
     STEP = 0.2
