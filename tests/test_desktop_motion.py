@@ -55,7 +55,8 @@ class MapMotionTests(unittest.TestCase):
             self.assertFalse(app.motion.busy)
             self.assertFalse(app.motion.pending_redraw)
             self.assertGreaterEqual(draw.call_count, 2)
-        self.assertEqual(canvas.coords(fixed), before_fixed)
+        # The release redraws everything, so the title is a new item; it is still where it was.
+        self.assertEqual(canvas.coords(canvas.find_withtag('map_title')[0]), before_fixed)
 
     def test_animated_zoom_ends_at_the_same_zoom_and_centre_as_an_instant_zoom(self):
         from run_gui import world_to_geo
