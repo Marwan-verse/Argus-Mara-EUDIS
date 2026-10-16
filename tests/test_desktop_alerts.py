@@ -238,6 +238,7 @@ class DesktopAlertBoardTests(unittest.TestCase):
         contact = board.by_id['SIM-02']
         app._change_map_center((contact['lat'], contact['lon']))
         app._zoom_by(3)
+        app.motion.finish_zoom()  # Mid-glide the chart is one moving picture; markers return when it lands
         self.root.update()
         marker = next(item for item in app.map.find_withtag('sim-alert:SIM-02')
                       if app.map.type(item) in ('oval', 'polygon'))
