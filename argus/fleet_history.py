@@ -142,7 +142,7 @@ class FleetHistoryWorker:
                 return False
             if self.thread and self.thread.is_alive():
                 return True
-            if not supabase_ais.linked(self.root):
+            if not supabase_ais.readable(self.root):
                 self.publish('unlinked', 'Link the team database to check every vessel history.')
                 return False
             self.halt.clear()
@@ -180,13 +180,21 @@ class FleetHistoryWorker:
         return value
 
     def step(self):
-        if not supabase_ais.linked(self.root):
+        if not supabase_ais.readable(self.root):
             return self.publish('unlinked', 'Link the team database to check every vessel history.')
         try:
             with self.lock() as acquired:
                 if not acquired:
                     return {'state': 'busy', 'message': 'Another local worker is checking the vessel history.'}
-                result = self._step()
+                cache = json.loads(self.index_path.read_text(encoding='utf-8')) if self.index_path.exists() else {}
+                if supabase_ais.linked(self.root):
+                    result = self._step()
+                else:
+                    # D108: without the secret key this computer only reads the team's results;
+                    # the checks themselves run on the computer that holds the key.
+                    result = self.publish('checking' if not cache.get('inventory_complete') else 'read_only',
+                                          'Showing the team database results (read only); vessel checks run '
+                                          'on the computer that holds the team key.')
                 cache = json.loads(self.index_path.read_text(encoding='utf-8')) if self.index_path.exists() else {}
                 if not cache.get('inventory_complete') or time.time()-timestamp(cache.get('inventory_page_utc') or '1970-01-01T00:00:00Z') >= 30:
                     self.refresh_index()

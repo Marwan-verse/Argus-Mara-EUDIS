@@ -54,8 +54,9 @@ class KeyAndTransportTests(unittest.TestCase):
             self.assertFalse(supabase_ais.configured())
             with tempfile.TemporaryDirectory() as temp:
                 self.assertFalse(supabase_ais.linked(temp))
+            # D108: reads may use the publishable key, but writing still needs the secret one.
             with self.assertRaisesRegex(ValueError, 'not configured'):
-                supabase_ais.status(transport=FakeDatabase({}))
+                supabase_ais.rpc('argus_save_scene', {}, transport=FakeDatabase({}))
         self.assertFalse(supabase_ais.valid_key('anon-or-random-text'))
         self.assertTrue(supabase_ais.valid_key(SECRET) and supabase_ais.valid_key(LEGACY))
         with self.assertRaisesRegex(ValueError, 'HTTPS'):
@@ -201,6 +202,71 @@ class ProjectAddressTests(unittest.TestCase):
         supabase_ais.link(self.root)
         self.assertEqual(json.loads((self.root/supabase_ais.LINK_FILE).read_text())['url'], supabase_ais.DEFAULT_URL)
 
+
+
+class ReadKeyTests(unittest.TestCase):
+    """D108: reading the team database needs no secret key; writing still does."""
+
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.root = Path(self.folder.name)
+        self.env = patch.dict(os.environ, {'ARGUS_SATELLITE_ROOT': str(self.root)})
+        self.env.start()
+        for name in ('ARGUS_SUPABASE_URL', 'ARGUS_SUPABASE_LINK'):
+            os.environ.pop(name, None)
+        self.no_secret = patch.object(supabase_ais, 'get_key', return_value='')
+        self.no_secret.start()
+        os.environ.pop('ARGUS_SUPABASE_READ', None)
+        supabase_ais.enable_keyless_read()  # as run_gui.main does
+
+    def tearDown(self):
+        self.no_secret.stop()
+        self.env.stop()
+        self.folder.cleanup()
+
+    def test_without_a_secret_the_team_project_is_read_with_the_publishable_key(self):
+        self.assertEqual(supabase_ais.read_key(), supabase_ais.PUBLISHABLE_KEY)
+        self.assertTrue(supabase_ais.PUBLISHABLE_KEY.startswith('sb_publishable_'))
+        with patch.dict(os.environ, {'ARGUS_SUPABASE_URL': 'https://otherprojectref.supabase.co'}):
+            self.assertEqual(supabase_ais.read_key(), '')  # never another project's data with the team key
+
+    def test_only_the_apps_own_workspace_reads_without_a_link(self):
+        self.assertTrue(supabase_ais.readable(self.root))
+        self.assertFalse(supabase_ais.linked(self.root))
+        with tempfile.TemporaryDirectory() as other:
+            self.assertFalse(supabase_ais.readable(other))  # test folders stay offline
+        with patch.dict(os.environ, {'ARGUS_SUPABASE_READ': '0'}):
+            self.assertFalse(supabase_ais.readable(self.root))
+
+    def test_keyless_reading_is_off_until_an_entry_point_turns_it_on(self):
+        os.environ.pop('ARGUS_SUPABASE_READ')
+        self.assertFalse(supabase_ais.readable(self.root))  # tests and servers that set ARGUS_SATELLITE_ROOT stay offline
+        os.environ['ARGUS_SUPABASE_READ'] = '0'
+        supabase_ais.enable_keyless_read()
+        self.assertFalse(supabase_ais.readable(self.root))  # an explicit 0 wins
+
+    def test_read_functions_use_the_publishable_key_and_writes_need_the_secret(self):
+        calls = []
+        transport = lambda url, payload, key: calls.append((url.rsplit('/', 1)[-1], key)) or {}
+        for name in sorted(supabase_ais.READ_FUNCTIONS):
+            supabase_ais.rpc(name, {}, transport=transport)
+        self.assertEqual({key for _, key in calls}, {supabase_ais.PUBLISHABLE_KEY})
+        for name in ('argus_save_scene', 'argus_compare_scene', 'argus_history_claim', 'argus_history_finish'):
+            with self.assertRaisesRegex(ValueError, 'not configured'):
+                supabase_ais.rpc(name, {}, transport=transport)
+        self.assertEqual(len(calls), len(supabase_ais.READ_FUNCTIONS))
+
+    def test_fleet_history_without_a_key_only_reads_the_team_results(self):
+        from argus.fleet_history import FleetHistoryWorker
+        names = []
+        def call(name, payload):
+            names.append(name)
+            return {'vessels': [], 'next_after': None, 'summary': {'total_vessels': 0}}
+        worker = FleetHistoryWorker(self.root, call=call)
+        result = worker.step()
+        self.assertEqual(names, ['argus_history_index'])  # never a claim or a result write
+        self.assertIn(result['state'], {'checking', 'read_only'})
+        self.assertIn('read only', result['message'])
 
 if __name__ == '__main__':
     unittest.main()

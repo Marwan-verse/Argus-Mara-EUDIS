@@ -26,6 +26,10 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 # D106: the one team database is argus-mara in the Argus Mara organisation.
 DEFAULT_URL = 'https://lcpgnzvkntqdhejrsgpa.supabase.co'
 ROOT = Path(__file__).resolve().parents[1]
+# D108: the team project's publishable key may ship in this private repository. The database
+# lets it run only these read-only functions; every write still needs the secret key.
+PUBLISHABLE_KEY = 'sb_publishable_kpSx9M-p6dLzdJVy7KADXA_IDrgi8Sl'
+READ_FUNCTIONS = frozenset({'argus_ais_status', 'argus_ais_rows', 'argus_recent_tracks', 'argus_history_index'})
 SERVICE, ACCOUNT = 'ArgusMara.Supabase', 'secret-key'
 LIMIT = 16 * 1024 * 1024
 KEY_FORMAT = re.compile(r'sb_secret_[A-Za-z0-9_-]{16,200}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+')
@@ -178,10 +182,48 @@ def http_rpc(url, payload, key, timeout=30):
         raise ValueError('Cannot read the Supabase response') from None
 
 
+def read_key():
+    """This computer's secret key, else the team project's publishable read key (D108)."""
+    try:
+        key = get_key()
+    except ValueError:
+        key = ''
+    return key or (PUBLISHABLE_KEY if base_url() == DEFAULT_URL else '')
+
+
+def own_workspace(root):
+    """The app's own workspace (or a host's ARGUS_SATELLITE_ROOT), never a test's temporary folder."""
+    try:
+        return Path(root).resolve() == Path(os.environ.get('ARGUS_SATELLITE_ROOT') or ROOT/'data/satellite').resolve()
+    except OSError:
+        return False
+
+
+def enable_keyless_read():
+    """Called by the real entry points (run_gui.main, SATELLITE-WATCH, live_alerts), never by tests.
+
+    An explicit ``ARGUS_SUPABASE_READ=0`` keeps keyless reading off.
+    """
+    os.environ.setdefault('ARGUS_SUPABASE_READ', '1')
+
+
+def readable(root):
+    """Team data can be read here: a linked workspace, or the app's own workspace with the publishable key.
+
+    Writing still needs a linked workspace and the secret key (``linked``). Keyless reading
+    is on only after ``enable_keyless_read()``, so tests and servers stay offline unless linked.
+    """
+    if linked(root):
+        return True
+    return os.environ.get('ARGUS_SUPABASE_READ') == '1' and own_workspace(root) and bool(read_key())
+
+
 def rpc(name, payload, *, transport=http_rpc):
     if not re.fullmatch(r'argus_[a-z_]{3,40}', name):
         raise ValueError('Unknown database function')
     key = get_key()
+    if not key and name in READ_FUNCTIONS:
+        key = read_key()
     if not key:
         raise ValueError('Supabase is not configured; run python scripts/configure_supabase.py')
     return transport(base_url() + '/rest/v1/rpc/' + name, payload, key)

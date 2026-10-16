@@ -195,6 +195,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='Print the real alerts the rules give right now (read only).')
     parser.add_argument('--json', action='store_true', help='print the items as JSON')
     args = parser.parse_args(argv)
+    supabase_ais.enable_keyless_read()  # D108
     tracks = LiveTracks()
     stats = tracks.refresh()
     vessels = tracks.vessels()
