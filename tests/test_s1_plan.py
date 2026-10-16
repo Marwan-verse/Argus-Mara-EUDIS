@@ -1,6 +1,7 @@
 """Next Sentinel-1 look from ESA acquisition plans: parsing, the swath polygon test, the cache and the responder row."""
 import json
 import math
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -269,6 +270,148 @@ class BundledPlanTests(unittest.TestCase):
         first = s1_plan.upcoming(s1_plan.epoch("2026-10-16T12:30:00Z"), 7, self.plans)[0]
         self.assertEqual((first["satellite"], first["mode"], s1_plan.span(first)), ("S1D", "IW", "18:05-18:06"))
         self.assertEqual(first["label"], "real")
+
+
+def stac_page(*frames):
+    """A CDSE STAC search answer with the fields the check reads."""
+    return {"type": "FeatureCollection", "features": [
+        {"id": identifier, "properties": {"platform": platform, "sar:instrument_mode": "IW", "eopf:datatake_id": take,
+                                          "start_datetime": start, "end_datetime": end, "published": published,
+                                          "sat:absolute_orbit": 5044}}
+        for identifier, platform, take, start, end, published in frames]}
+
+
+# Data-take 988E of the newer fixture plan is 39054 in the catalogue's decimal datatake ids.
+ONLINE = [("S1D_IW_GRDH_1SDV_20261021T180210_A", "sentinel-1d", "39054", "2026-10-21T18:02:10.5Z",
+           "2026-10-21T18:02:35.5Z", "2026-10-21T19:03:30Z"),
+          ("S1D_IW_GRDH_1SDV_20261021T180235_B", "sentinel-1d", 39054, "2026-10-21T18:02:35.5Z",
+           "2026-10-21T18:03:00Z", "2026-10-21T19:01:00Z")]
+NOT_IT = [("S1C_same_time_other_satellite", "sentinel-1c", "39054", "2026-10-21T18:02:10Z", "2026-10-21T18:02:35Z",
+           "2026-10-21T19:00:00Z"),
+          ("S1D_other_datatake", "sentinel-1d", "39055", "2026-10-21T18:02:10Z", "2026-10-21T18:02:35Z",
+           "2026-10-21T19:00:00Z"),
+          ("S1D_hours_later", "sentinel-1d", "39054", "2026-10-21T21:00:00Z", "2026-10-21T21:00:25Z",
+           "2026-10-21T22:00:00Z")]
+
+
+class Catalogue:
+    """Fake STAC search: records each request, answers with the frames it holds, or fails."""
+
+    def __init__(self, frames=(), fail=False):
+        self.frames, self.fail, self.requests = list(frames), fail, []
+
+    def __call__(self, url, payload):
+        self.requests.append((url, payload))
+        if self.fail:
+            raise ValueError("Cannot read a secure provider response")
+        return stac_page(*self.frames)
+
+
+class CatalogueTests(unittest.TestCase):
+    """After a pass: are the frames of exactly that data-take in the public catalogue?"""
+
+    def setUp(self):
+        self.plans = [s1_plan.plan_record(OLDER_KML, OLDER, "2026-10-19T00:00:00Z"),
+                      s1_plan.plan_record(NEWER_KML, NEWER, "2026-10-20T00:00:00Z")]
+        self.item = next(item for item in s1_plan.recent_passes(s1_plan.epoch("2026-10-21T18:30:00Z"), 36, self.plans)
+                         if item["datatake"] == "988E")
+        self.temp = tempfile.TemporaryDirectory()
+        self.cache = Path(self.temp.name)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_only_frames_of_that_datatake_count(self):
+        catalogue = Catalogue(ONLINE + NOT_IT)
+        frames = s1_plan.catalogue_frames(self.item, catalogue)
+        self.assertEqual([frame["id"] for frame in frames],
+                         ["S1D_IW_GRDH_1SDV_20261021T180210_A", "S1D_IW_GRDH_1SDV_20261021T180235_B"])
+        url, body = catalogue.requests[0]
+        self.assertEqual(url, "https://stac.dataspace.copernicus.eu/v1/search")
+        self.assertEqual((body["collections"], body["bbox"]), (["sentinel-1-grd"], s1_plan.coastal_bbox()))
+        self.assertEqual(body["datetime"], "2026-10-21T17:59:00Z/2026-10-21T18:06:00Z")
+        answer = s1_plan.verdict(self.item, frames, s1_plan.epoch("2026-10-21T19:10:00Z"))
+        self.assertEqual((answer["status"], answer["frames"], answer["first_online_utc"], answer["delay_min"]),
+                         ("online", 2, "2026-10-21T19:01:00Z", 58))  # 19:01:00 is 58 min after its frame's end
+
+    def test_no_frames_is_pending_then_possibly_not_acquired_and_errors_are_unknown(self):
+        verdict = lambda when, error=None: s1_plan.verdict(self.item, [], s1_plan.epoch(when), error)["status"]
+        self.assertEqual(verdict("2026-10-21T17:00:00Z"), "planned")
+        self.assertEqual(verdict("2026-10-21T19:10:00Z"), "pending")
+        self.assertEqual(verdict("2026-10-21T21:06:00Z"), "missing")  # 3 h after the data-take ended at 18:05
+        self.assertEqual(verdict("2026-10-21T19:10:00Z", ValueError("offline")), "unknown")
+
+    def test_answers_are_kept_and_a_confirmed_pass_is_never_asked_again(self):
+        at = lambda when: s1_plan.epoch(when)
+        empty = Catalogue()
+        first = s1_plan.check_recent(at("2026-10-21T18:30:00Z"), empty, self.cache, self.plans)
+        self.assertEqual([answer["status"] for _, answer in first], ["pending"])
+        s1_plan.check_recent(at("2026-10-21T18:40:00Z"), empty, self.cache, self.plans)
+        self.assertEqual(len(empty.requests), 1)  # asked again only after RECHECK_S
+        online = Catalogue(ONLINE)
+        s1_plan.check_recent(at("2026-10-21T19:10:00Z"), online, self.cache, self.plans)
+        s1_plan.check_recent(at("2026-10-21T23:00:00Z"), online, self.cache, self.plans)
+        self.assertEqual(len(online.requests), 1)
+        saved = s1_plan.catalogue_state(self.cache)[s1_plan.pass_key(self.item)]
+        self.assertEqual((saved["status"], saved["frames"]), ("online", 2))
+        line = "\n".join(s1_plan.summary(at("2026-10-21T19:20:00Z"), 7, self.plans, s1_plan.catalogue_state(self.cache)))
+        self.assertIn("Passes of the last 36 h in the Copernicus catalogue:", line)
+        self.assertIn("frames online 19:01 UTC (2 frames, 58 min after sensing)", line)
+
+    def test_an_unreachable_catalogue_is_said_and_asked_again_later(self):
+        offline = Catalogue(fail=True)
+        results = s1_plan.check_recent(s1_plan.epoch("2026-10-21T19:10:00Z"), offline, self.cache, self.plans)
+        self.assertEqual(results[0][1]["status"], "unknown")
+        self.assertIn("catalogue not reachable at 19:10 UTC", s1_plan.check_line(results[0][1]))
+        later = Catalogue(ONLINE)
+        s1_plan.check_recent(s1_plan.epoch("2026-10-21T19:30:00Z"), later, self.cache, self.plans)
+        self.assertEqual(len(later.requests), 1)
+        self.assertIn("not checked yet", s1_plan.check_line(None))
+
+
+class ServiceTests(unittest.TestCase):
+    """The app's background service: the plan at most daily, quiet offline, never in tests unless asked."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.cache = Path(self.temp.name)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_the_plan_is_downloaded_at_most_about_once_a_day(self):
+        s1_plan.store(NEWER_KML, NEWER, self.cache, "2026-10-21T08:00:00Z")
+        log = []
+        self.assertIsNone(s1_plan.refresh_if_stale(s1_plan.epoch("2026-10-21T12:00:00Z"), self.cache, fake_esa(log)))
+        self.assertEqual(log, [])
+        result = s1_plan.refresh_if_stale(s1_plan.epoch("2026-10-22T06:00:00Z"), self.cache, fake_esa(log))
+        self.assertEqual((result["fetched"], log), ([], [s1_plan.PAGE]))  # nothing new, but the check counts
+        self.assertIsNone(s1_plan.refresh_if_stale(s1_plan.epoch("2026-10-22T12:00:00Z"), self.cache, fake_esa(log)))
+        self.assertEqual(len(log), 1)
+
+    def test_offline_the_attempt_is_remembered_and_repeated_an_hour_later(self):
+        calls = []
+
+        def offline(url, limit):
+            calls.append(url)
+            raise ValueError("Cannot reach ESA Sentinel Online")
+        self.assertIsNone(s1_plan.refresh_if_stale(s1_plan.epoch("2026-10-21T12:00:00Z"), self.cache, offline))
+        saved = json.loads((self.cache / s1_plan.REFRESH_FILE).read_text(encoding="utf-8"))
+        self.assertEqual((saved["attempt_utc"], saved["error"]), ("2026-10-21T12:00:00Z", "Cannot reach ESA Sentinel Online"))
+        s1_plan.refresh_if_stale(s1_plan.epoch("2026-10-21T12:20:00Z"), self.cache, offline)
+        self.assertEqual(len(calls), 1)
+        s1_plan.refresh_if_stale(s1_plan.epoch("2026-10-21T13:05:00Z"), self.cache, offline)
+        self.assertEqual(len(calls), 2)
+
+    def test_one_round_never_raises_and_the_switch_keeps_the_app_offline(self):
+        def broken(*args):
+            raise ValueError("offline")
+        with mock.patch.object(s1_plan, "CACHE", self.cache), mock.patch.object(s1_plan, "SNAPSHOT", self.cache / "none"):
+            report = s1_plan.service_once(s1_plan.epoch("2026-10-21T19:10:00Z"), self.cache, broken, broken)
+        self.assertEqual(report.get("refreshed"), None)
+        self.assertNotIn("check_error", report)
+        with mock.patch.dict(os.environ, {"ARGUS_S1_PLAN_NETWORK": "0"}):
+            self.assertIsNone(s1_plan.start_service())
 
 
 if __name__ == "__main__":

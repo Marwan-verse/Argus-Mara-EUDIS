@@ -22,10 +22,17 @@ bundled snapshot of real plans (``s1_plan_snapshot.json``) when nothing is cache
 * GRD frames reached the public Copernicus catalogue 36-85 min after the pass in
   checks on 15-16 Oct 2026, so frames are shown as online about 1 h later.
 
-A plan is not an acquisition: ESA re-plans (for example for emergency requests) and
-nothing here confirms that an image was taken. Label: real (published plan).
-Run ``python -m argus.s1_plan refresh`` to download, ``python -m argus.s1_plan next``
-to print the countdown.
+A plan is not an acquisition: ESA re-plans (for example for emergency requests). After
+a pass, ``check_recent`` asks the public Copernicus STAC catalogue (keyless) for the GRD
+frames of exactly that data-take: the catalogue's datatake id is the plan's hexadecimal
+DatatakeId (38996 = 0x9854). A pass is then "frames online", "not in the catalogue yet",
+or, 3 h after the pass with nothing, "possibly not acquired". Label: real.
+
+The desktop app starts ``start_service`` from ``run_gui.main``: a daemon thread that
+downloads the plan at most about once a day and asks the catalogue every 30 min. The
+replay, the responder rows and the SAR next-step window only read files. Run
+``python -m argus.s1_plan refresh`` to download, ``confirm`` to ask the catalogue now,
+``next`` to print the countdown. ``ARGUS_S1_PLAN_NETWORK=0`` keeps the app offline.
 """
 from __future__ import annotations
 
@@ -40,13 +47,14 @@ import os
 from pathlib import Path
 import re
 import tempfile
-from time import monotonic
+import threading
+from time import monotonic, sleep
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import Request, build_opener
 import xml.etree.ElementTree as ET
 
-from argus.satellite import IRISH_BBOX, NoRedirect
+from argus.satellite import IRISH_BBOX, SAR_CATALOGUE, NoRedirect, json_http
 
 PAGE = 'https://sentinels.copernicus.eu/copernicus/sentinel-1/acquisition-plans'
 DOCUMENTS = 'https://sentinels.copernicus.eu/documents/d/sentinel/'
@@ -68,6 +76,16 @@ R_KM = 6371.0088
 CENTRE = (53.4, -8.0)   # lat, lon: the island centre argus.satellite_scan.coast_for_bounds uses
 FAR_COS = math.cos(math.radians(80))
 HORIZON_DAYS = 21
+STAC = SAR_CATALOGUE    # public Copernicus STAC (CDSE), keyless search
+COLLECTION = 'sentinel-1-grd'
+RECENT_H = 36           # passes asked about after they happen
+MISSING_AFTER_S = 3*3600  # nothing this long after a pass: possibly not acquired (NRT target is 3 h)
+RECHECK_S = 15*60       # an unconfirmed pass is asked about again at most this often
+CATALOGUE_KEEP_S = 7*86400
+REFRESH_EVERY_S = 20*3600  # the plan is downloaded at most about once a day
+RETRY_S = 3600          # after a failed download (offline), wait this long
+SERVICE_EVERY_S = 30*60
+CATALOGUE_FILE, REFRESH_FILE = 'catalogue.json', 'refresh.json'
 CAVEAT = ('Planned Sentinel-1 data-takes from ESA acquisition plans, not confirmed images: ESA re-plans, and '
           'swath edges are uncertain by about %d km. Frames usually reach the public Copernicus catalogue about '
           '1 h after a pass (36-85 min measured on 15-16 Oct 2026).' % EDGE_KM)
@@ -404,7 +422,14 @@ def _publish(path, data):
     try:
         with os.fdopen(handle, 'wb') as stream:
             stream.write(data)
-        os.replace(name, path)
+        for attempt in range(8):
+            try:
+                os.replace(name, path)
+                break
+            except PermissionError:  # a Windows reader holds the target for a moment
+                if attempt == 7:
+                    raise
+                sleep(.05*(attempt+1))
     except BaseException:
         Path(name).unlink(missing_ok=True)
         raise
@@ -670,6 +695,198 @@ def replay_look(position, now_s, t0_utc, plans=None):
     return look
 
 
+# Did the planned pass happen? The public Copernicus catalogue, and the app's background service.
+
+def pass_key(item):
+    return '%s %s %s' % (item['satellite'], item['start_utc'], item['mode'])
+
+
+@lru_cache(maxsize=1)
+def coastal_bbox():
+    """West, south, east, north of the Coast Watch grid, for catalogue searches."""
+    boxes = [tile['bbox'] for tile in json.loads(GRID.read_text(encoding='utf-8'))['tiles']]
+    return [round(min(b[0] for b in boxes), 4), round(min(b[1] for b in boxes), 4),
+            round(max(b[2] for b in boxes), 4), round(max(b[3] for b in boxes), 4)]
+
+
+def _plan_datatake(value):
+    try:
+        return int(str(value).strip(), 16)  # ESA's plan writes it in hexadecimal: '9854'
+    except (TypeError, ValueError):
+        return None
+
+
+def catalogue_frames(item, transport=None):
+    """Published GRD frames of one planned data-take over the coastal grid (CDSE STAC search, keyless).
+
+    A frame belongs to the data-take when its platform matches and the catalogue's
+    datatake id equals the plan's (decimal 38996 = hexadecimal 9854). Without an id
+    the instrument mode and absolute orbit must match. ``ValueError`` when the
+    catalogue cannot be read.
+    """
+    transport = transport or json_http
+    start, stop = epoch(item['start_utc'])-60, epoch(item['stop_utc'])+60
+    page = transport(STAC+'/search', {'collections': [COLLECTION], 'bbox': coastal_bbox(),
+                                      'datetime': '%s/%s' % (iso(start), iso(stop)), 'limit': 100})
+    features = page.get('features') if isinstance(page, dict) else None
+    if not isinstance(features, list):
+        raise ValueError('Unexpected Copernicus catalogue response')
+    platform, wanted_take = 'sentinel-' + item['satellite'][1:].lower(), _plan_datatake(item.get('datatake'))
+    frames = {}
+    for feature in features[:200]:
+        try:
+            props = feature['properties']
+            first, last = epoch(props['start_datetime']), epoch(props['end_datetime'])
+            if str(props.get('platform', '')).lower() != platform or last < start or first > stop:
+                continue
+            take = props.get('eopf:datatake_id')
+            if take is not None and wanted_take is not None:
+                if int(str(take)) != wanted_take:
+                    continue
+            elif props.get('sar:instrument_mode') != item['mode'] or (
+                    props.get('sat:absolute_orbit') is not None and item.get('orbit_absolute') is not None
+                    and int(props['sat:absolute_orbit']) != int(item['orbit_absolute'])):
+                continue
+            published = epoch(props['published']) if props.get('published') else None
+            identifier = re.sub(r'[^0-9A-Za-z_.-]', '', str(feature.get('id', '')))[:120]
+        except (KeyError, TypeError, ValueError, AttributeError, OverflowError):
+            continue
+        frames[identifier] = {'id': identifier, 'start': first, 'end': last, 'published': published}
+    return sorted(frames.values(), key=lambda frame: frame['start'])
+
+
+def verdict(item, frames, now, error=None):
+    """Where one pass stands: online, pending, missing, unknown (catalogue not read) or planned."""
+    result = {'key': pass_key(item), 'checked_utc': iso(now)}
+    if now < epoch(item['start_utc']):
+        return {**result, 'status': 'planned'}
+    if error is not None:
+        return {**result, 'status': 'unknown', 'reason': str(error)[:160]}
+    if frames:
+        published = [frame for frame in frames if frame['published'] is not None]
+        first = min(published, key=lambda frame: frame['published']) if published else None
+        return {**result, 'status': 'online', 'frames': len(frames),
+                'first_online_utc': iso(first['published']) if first else None,
+                'delay_min': round((first['published']-first['end'])/60) if first else None,
+                'frame_ids': [frame['id'] for frame in frames[:3]]}
+    if now < epoch(item['stop_utc'])+MISSING_AFTER_S:
+        return {**result, 'status': 'pending'}
+    return {**result, 'status': 'missing'}
+
+
+def recent_passes(now=None, hours=RECENT_H, plans=None):
+    """Coastal passes that left the coast within the last ``hours``, oldest first."""
+    now = now_epoch() if now is None else now
+    result = []
+    for take in _takes(plans):
+        if take['stop'] < now-hours*3600-3600 or take['start'] > now:
+            continue
+        summary = coast_pass(take)
+        if summary and now-hours*3600 <= epoch(summary['over_coast_to_utc']) < now:
+            result.append(summary)
+    return result
+
+
+def catalogue_state(cache=None):
+    """Saved catalogue answers by pass key; empty when none or unreadable."""
+    try:
+        state = json.loads((Path(CACHE if cache is None else cache)/CATALOGUE_FILE).read_text(encoding='utf-8'))
+    except (OSError, UnicodeError, ValueError):
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def check_recent(now=None, transport=None, cache=None, plans=None, hours=RECENT_H, force=False):
+    """Ask the catalogue about recent coastal passes that are not confirmed yet; keep the answers.
+
+    A pass with frames online is never asked about again; any other answer is
+    asked again after RECHECK_S. Returns (pass, answer) pairs, oldest first.
+    """
+    now = now_epoch() if now is None else now
+    cache = Path(CACHE if cache is None else cache)
+    known, changed, results = catalogue_state(cache), False, []
+    for item in recent_passes(now, hours, plans):
+        key, old = pass_key(item), known.get(pass_key(item))
+        if old and not force and (old.get('status') == 'online' or now-epoch(old['checked_utc']) < RECHECK_S):
+            results.append((item, old))
+            continue
+        try:
+            frames, error = catalogue_frames(item, transport), None
+        except ValueError as problem:
+            frames, error = [], problem
+        known[key], changed = verdict(item, frames, now, error), True
+        results.append((item, known[key]))
+    for key in list(known):
+        try:
+            stale = now-epoch(key.split(' ')[1]) > CATALOGUE_KEEP_S
+        except (IndexError, ValueError):
+            stale = True  # not a key this module wrote
+        if stale:
+            del known[key]
+            changed = True
+    if changed:
+        _publish(cache/CATALOGUE_FILE, (json.dumps(known, indent=1, sort_keys=True)+'\n').encode())
+    return results
+
+
+def refresh_if_stale(now=None, cache=None, transport=None):
+    """Download the plan when the last good download is older than REFRESH_EVERY_S; quiet when offline.
+
+    A failed attempt is kept in refresh.json and not repeated for RETRY_S.
+    Returns the refresh result, or None when nothing was due or it failed.
+    """
+    now = now_epoch() if now is None else now
+    cache = Path(CACHE if cache is None else cache)
+    try:
+        state = json.loads((cache/REFRESH_FILE).read_text(encoding='utf-8'))
+    except (OSError, UnicodeError, ValueError):
+        state = {}
+    state = state if isinstance(state, dict) else {}
+    done = [epoch(record['fetched_utc']) for record in map(_load_record, cache.glob('s1?_mp_user_*.json'))
+            if record and record.get('fetched_utc')]
+    if state.get('ok_utc'):
+        done.append(epoch(state['ok_utc']))
+    if done and now-max(done) < REFRESH_EVERY_S:
+        return None
+    if state.get('attempt_utc') and 0 <= now-epoch(state['attempt_utc']) < RETRY_S:
+        return None
+    try:
+        result = refresh(cache, transport, now)
+        state = {'attempt_utc': iso(now), 'ok_utc': iso(now), 'fetched': result['fetched']}
+    except (ValueError, OSError) as error:
+        result, state = None, {**state, 'attempt_utc': iso(now), 'error': str(error)[:160]}
+    _publish(cache/REFRESH_FILE, (json.dumps(state)+'\n').encode())
+    return result
+
+
+def service_once(now=None, cache=None, plan_transport=None, catalogue_transport=None):
+    """One round of the app's background service: the plan at most daily, then the catalogue."""
+    report = {}
+    try:
+        report['refreshed'] = refresh_if_stale(now, cache, plan_transport)
+    except Exception as error:  # a background thread must never die
+        report['refresh_error'] = type(error).__name__
+    try:
+        report['checked'] = len(check_recent(now, catalogue_transport, cache))
+    except Exception as error:
+        report['check_error'] = type(error).__name__
+    return report
+
+
+def start_service(every_s=SERVICE_EVERY_S):
+    """Daemon thread for the desktop app; ARGUS_S1_PLAN_NETWORK=0 turns it off. Returns the thread or None."""
+    if os.environ.get('ARGUS_S1_PLAN_NETWORK', '1').strip().lower() in ('0', 'false', 'no', 'off'):
+        return None
+
+    def loop():
+        while True:
+            service_once()
+            sleep(every_s)
+    thread = threading.Thread(target=loop, name='argus-s1-plan', daemon=True)
+    thread.start()
+    return thread
+
+
 # Text for people.
 
 def short(seconds):
@@ -698,19 +915,44 @@ def span(item):
     return first if first == last else '%s-%s' % (first, last)
 
 
-def pass_line(item):
+def pass_line(item, tail=None):
     first = epoch(item['over_coast_from_utc'])
     coasts = ', '.join('%s %d' % (coast, count) for coast, count in item['coasts'].items())
-    return '%s %s UTC  %s %s %s  %s cells (%s)  frames ~%s UTC' % (
+    return '%s %s UTC  %s %s %s  %s cells (%s)  %s' % (
         datetime.fromtimestamp(first, timezone.utc).strftime('%a %d %b'), span(item), item['satellite'], item['mode'],
-        item['polarisation'], item['cells'], coasts, clock(epoch(item['frames_online_utc'])))
+        item['polarisation'], item['cells'], coasts,
+        tail or 'frames ~%s UTC' % clock(epoch(item['frames_online_utc'])))
 
 
-def summary(now=None, days=7, plans=None):
-    """Lines for the desktop app: the countdown to the next look at the coast, the passes, the plans used."""
+def check_line(answer):
+    """A recent pass as the catalogue answered, e.g. 'frames online 19:04 UTC (6 frames, 58 min after sensing)'."""
+    if not answer:
+        return 'not checked yet (the app asks every 30 min; python -m argus.s1_plan confirm)'
+    checked, status = clock(epoch(answer['checked_utc'])), answer['status']
+    if status == 'online':
+        text = 'frames online'
+        if answer.get('first_online_utc'):
+            text += ' %s UTC' % clock(epoch(answer['first_online_utc']))
+        text += ' (%d frame%s' % (answer['frames'], '' if answer['frames'] == 1 else 's')
+        if answer.get('delay_min') is not None:
+            text += ', %d min after sensing' % answer['delay_min']
+        return text + ')'
+    if status == 'pending':
+        return 'not in the catalogue yet (checked %s UTC; usually about 1 h after a pass)' % checked
+    if status == 'missing':
+        return 'no frames %d h after the pass (checked %s UTC): possibly not acquired' % (MISSING_AFTER_S//3600, checked)
+    if status == 'unknown':
+        return 'catalogue not reachable at %s UTC' % checked
+    return status
+
+
+def summary(now=None, days=7, plans=None, answers=None):
+    """Lines for the desktop app: the countdown to the next look at the coast, the recent passes as the
+    catalogue answered (``answers``, default the saved ones), the coming passes and the plans used."""
     now = now_epoch() if now is None else now
     plans = load_plans() if plans is None else plans
-    lines = ['SENTINEL-1 RADAR LOOKS AT THE IRISH COAST · real ESA acquisition plan (planned, not confirmed)']
+    answers = catalogue_state() if answers is None else answers
+    lines = ['SENTINEL-1 RADAR LOOKS AT THE IRISH COAST · real ESA acquisition plan, checked in the Copernicus catalogue']
     if not plans:
         return lines+['No plan loaded. Run: python -m argus.s1_plan refresh']
     passes = upcoming(now, days, plans)
@@ -723,17 +965,23 @@ def summary(now=None, days=7, plans=None):
                         first['cells_total']))
         lines.append('Frames usually online about 1 h after a pass (~%s UTC); 36-85 min measured on 15-16 Oct 2026.'
                      % clock(epoch(first['frames_online_utc'])))
-        lines += ['', 'Upcoming passes over the coastal grid, next %d days:' % days]
-        lines += ['  ' + pass_line(item) for item in passes]
     else:
         lines.append('No planned look at the coast in the next %d days (%s).' % (days, no_look_reason(now, plans)))
+    recent = recent_passes(now, RECENT_H, plans)
+    if recent:
+        lines += ['', 'Passes of the last %d h in the Copernicus catalogue:' % RECENT_H]
+        lines += ['  ' + pass_line(item, check_line(answers.get(pass_key(item)))) for item in recent]
+    if passes:
+        lines += ['', 'Upcoming passes over the coastal grid, next %d days:' % days]
+        lines += ['  ' + pass_line(item) for item in passes]
     lines.append('')
     for satellite, row in sorted(coverage(plans).items()):
         lines.append('%s plan %s to %s (%s): %s' % (satellite, short(epoch(row['from_utc'])),
                                                      short(epoch(row['to_utc'])), ', '.join(row['sources']),
                                                      row['files'][-1]))
     lines.append(CAVEAT)
-    lines.append('Refresh: python -m argus.s1_plan refresh · source: ' + PAGE)
+    lines.append('Refresh: python -m argus.s1_plan refresh · check frames: python -m argus.s1_plan confirm · '
+                 'sources: ESA acquisition plans and the Copernicus STAC catalogue')
     return lines
 
 
@@ -781,6 +1029,8 @@ def main(argv=None):
     show.add_argument('--lat', type=float)
     show.add_argument('--lon', type=float)
     commands.add_parser('snapshot', help='rebuild the bundled snapshot from the cache')
+    ask = commands.add_parser('confirm', help='ask the Copernicus catalogue about the recent passes now')
+    ask.add_argument('--hours', type=int, default=RECENT_H)
     args = parser.parse_args(argv)
     if args.command == 'refresh':
         print(json.dumps(refresh(), indent=1))
@@ -788,6 +1038,10 @@ def main(argv=None):
         for record in import_files(args.files):
             print('%s: %d of %d data-takes over Irish waters' % (record['file'], len(record['datatakes']),
                                                                  record['datatakes_in_file']))
+    elif args.command == 'confirm':
+        results = check_recent(hours=args.hours, force=True)
+        print('\n'.join(pass_line(item, check_line(answer)) for item, answer in results)
+              or 'No coastal pass in the last %d h.' % args.hours)
     elif args.command == 'snapshot':
         print('%d plans written to %s' % (len(snapshot()['plans']), SNAPSHOT))
     else:
