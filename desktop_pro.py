@@ -41,6 +41,18 @@ def apply_palette() -> None:
     for name in ("CTkButton", "CTkEntry", "CTkFrame", "CTkOptionMenu", "CTkComboBox"):
         if name in ctk.ThemeManager.theme:
             ctk.ThemeManager.theme[name]["corner_radius"] = 3
+    # Check boxes and switches in the console accent instead of the default blue.
+    accent, accent_hover = "#1f8f86", "#26a89d"
+    for name in ("CTkCheckBox", "CTkSwitch", "CTkRadioButton"):
+        theme = ctk.ThemeManager.theme.get(name)
+        if theme is None:
+            continue
+        for key, value in (("fg_color", accent), ("hover_color", accent_hover), ("progress_color", accent),
+                           ("border_color", PALETTE["LINE"])):
+            if key in theme:
+                theme[key] = [value, value]
+        if "corner_radius" in theme and name == "CTkCheckBox":
+            theme["corner_radius"] = 2
 
 
 def _banner(root, before, side: str):

@@ -61,8 +61,8 @@ class FleetHistoryDesktopTests(unittest.TestCase):
                     app.alert_board.refresh_history(satellite.workspace.fleet.page(only_leads=True))
                     self.assertTrue(app.alert_board.history_frame.winfo_manager())
                     self.assertIn('1 vessel histories require review', app.alert_counts_label.cget('text'))
-                    buttons = [w for w in app.alert_board.history_frame.winfo_children() if isinstance(w, tk.Button)]
-                    buttons[0].invoke()
+                    entries = [link for link in app.alert_board.history_frame.links if link.kind == 'entry']
+                    entries[0].invoke()
                     self.assertEqual(satellite.pending_fleet, MMSI)
                     self.assertEqual(satellite.tabs.select(), str(satellite.fleet_tab))
                     self.assertEqual(app.alert_board.visible_items(), [])
@@ -72,7 +72,7 @@ class FleetHistoryDesktopTests(unittest.TestCase):
                         app.alert_board.refresh_history(packet)
                     with patch('argus.fleet_history.time.time', return_value=START.timestamp()+600):
                         app.alert_board.refresh_history(packet)
-                        labels = [w.cget('text') for w in app.alert_board.history_frame.winfo_children() if isinstance(w, tk.Label)]
+                        labels = app.alert_board.history_frame.texts()
                         self.assertTrue(any('Database sync: stale' in text for text in labels))
                     # Secret entry is native and masked; the key is neither sent
                     # to an AI model nor included in UI messages or fixture files.

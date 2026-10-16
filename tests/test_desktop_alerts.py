@@ -34,8 +34,7 @@ class DesktopAlertBoardTests(unittest.TestCase):
             self.app.close()
 
     def packed_cards(self):
-        cards = {card['frame']: key for key, card in self.board.cards.items()}
-        return [cards[widget] for widget in self.board.list.pack_slaves() if widget in cards]
+        return list(self.board.order)
 
     def map_tags(self, prefix):
         return {tag for item in self.app.map.find_all() for tag in self.app.map.gettags(item) if tag.startswith(prefix)}
@@ -129,13 +128,12 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertTrue(board.evidence_frame.winfo_manager())
         self.assertEqual(self.packed_cards(), [])
         self.assertIn('51 satellite / AIS leads', self.app.alert_counts_label.cget('text'))
-        buttons = [w for w in board.evidence_frame.winfo_children() if isinstance(w, tk.Button)]
-        self.assertEqual(len(buttons), 50)
-        controls = board.evidence_frame.winfo_children()[-1]
-        next_button = next(w for w in controls.winfo_children() if w.cget('text') == 'Next')
-        next_button.invoke()
+        entries = [link for link in board.evidence_frame.links if link.kind == 'entry']
+        self.assertEqual(len(entries), 50)
+        next_link = next(link for link in board.evidence_frame.links if link.text == 'Next')
+        next_link.invoke()
         self.assertEqual(board.evidence_page, 1)
-        self.assertEqual(len([w for w in board.evidence_frame.winfo_children() if isinstance(w, tk.Button)]), 1)
+        self.assertEqual(len([link for link in board.evidence_frame.links if link.kind == 'entry']), 1)
         self.assertTrue(all(v == 0 for v in board.counts().values()))
 
     def test_satellite_analyst_outcome_is_saved_and_can_be_shown_again(self):
@@ -159,12 +157,11 @@ class DesktopAlertBoardTests(unittest.TestCase):
                 time.sleep(.02)
             self.assertFalse(form.window.winfo_exists())
             self.assertEqual(self.board.evidence_leads[0]['review_status'], 'reviewed_no_concern')
-            self.assertFalse(any(isinstance(w, tk.Button) and 'Open image evidence' in w.cget('text')
-                                 for w in self.board.evidence_frame.winfo_children()))
+            self.assertFalse(any('Open image evidence' in link.text for link in self.board.evidence_frame.links))
             self.board.show_reviewed_evidence.set(True)
             self.board.paint_evidence()
-            self.assertTrue(any(isinstance(w, tk.Button) and 'Reviewed — no concern identified' in w.cget('text')
-                                for w in self.board.evidence_frame.winfo_children()))
+            self.assertTrue(any('Reviewed — no concern identified' in link.text
+                                for link in self.board.evidence_frame.links))
             self.assertEqual(self.errors, [])
 
     def test_review_escalate_withdraw_and_reject_go_through_incidents(self):

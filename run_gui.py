@@ -342,6 +342,8 @@ class ArgusApp:
         return False
 
     def _configure_window(self) -> None:
+        from desktop_gestures import speed_up_scrollbars
+        speed_up_scrollbars()  # Before any panel creates a scrollable list
         self.root.title("Argus Mara — maritime intelligence")
         ctk.set_appearance_mode("dark")
         ctk.ThemeManager.theme['CTkFont']['family'] = 'Segoe UI'
