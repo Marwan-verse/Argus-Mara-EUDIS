@@ -279,6 +279,9 @@ the answer is "after the hackathon". ([plan §4.6](docs/04-work-plan.md))
 
 ## What's in this repo
 
+For a short, plain-English list of app functions and where to find them, open
+the [feature guide by category](docs/features/README.md).
+
 | Path | What |
 |---|---|
 | [recorder/](recorder/) | The ship recorder — double-click to start — plus a health check and a map preview |
