@@ -19,7 +19,7 @@ import customtkinter as ctk
 from PIL import Image, ImageTk
 
 from argus.satellite import atomic_json, bounds
-from argus.satellite_ai import choose_model, read_ledger, save_key
+from argus.satellite_ai import choose_model, get_key, read_ledger, save_key
 from argus.satellite_workspace import DEFAULT_QUESTION, SatelliteWorkspace
 from argus.satellite_scan import CoastalScan, read_state, grid
 from argus.space import timestamp
@@ -210,6 +210,24 @@ class DesktopSatellite:
             self.watch_at = 0
             self.message('Coastal scan started · $20 shared pilot ceiling' if action == 'start' else 'Stopping after the current request')
         self.task(work, done)
+
+    def start_watch(self):
+        """SATELLITE-WATCH launchers: start Coast Watch once TensorX is connected.
+
+        A scan left enabled is resumed by resume_local, so it is not started twice.
+        """
+        if self.closed or self.remote:
+            return
+        try:
+            connected = bool(get_key())
+        except ValueError:
+            connected = False
+        if not connected:
+            self.message('Connect TensorX to start Coast Watch. "AIS at image time · free" works without it.')
+        elif self.busy:
+            self.app.root.after(1000, self.start_watch)
+        elif not read_state(self.workspace.root).get('enabled'):
+            self.scan_control('start')
 
     def coast_view(self):
         boxes = [t['bbox'] for t in grid()['tiles']]

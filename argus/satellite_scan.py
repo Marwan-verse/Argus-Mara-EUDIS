@@ -68,6 +68,23 @@ def grid():
     return json.loads(Path(__file__).with_name('coastal_grid.json').read_text(encoding='utf-8'))
 
 
+FRESH_DEFAULT_H = 36  # run_gui.py --coast-watch (SATELLITE-WATCH launchers)
+
+
+def max_image_age():
+    """Optional fresh-image window; run_gui.py --coast-watch sets it, unset keeps seven days."""
+    raw = os.environ.get('ARGUS_SATELLITE_MAX_IMAGE_AGE_H', '').strip()
+    if not raw:
+        return None
+    try:
+        hours = float(raw)
+    except ValueError:
+        raise ValueError('ARGUS_SATELLITE_MAX_IMAGE_AGE_H must be a number of hours') from None
+    if not 6 <= hours <= 168:
+        raise ValueError('ARGUS_SATELLITE_MAX_IMAGE_AGE_H must be between 6 and 168 hours')
+    return timedelta(hours=hours)
+
+
 def scan_status(root):
     path = Path(root)/'scan/summary.json'
     if path.exists():
@@ -171,6 +188,11 @@ class CoastalScan:
         now = now or datetime.now(timezone.utc)
         last = self.state.get('last_discovery_utc')
         start = max(now-timedelta(days=7), datetime.fromtimestamp(timestamp(last), timezone.utc)-timedelta(days=2)) if last else now-timedelta(days=7)
+        # A fresh window keeps a first start from paying for older images that
+        # predate the AIS history they would be compared with.
+        fresh = max_image_age()
+        if fresh:
+            start = max(start, now-fresh)
         boxes = [tile['bbox'] for tile in self.layout['tiles']]
         region = [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
         rows = search('Sentinel-2', region, start.isoformat(), now.isoformat(), all_pages=True)
@@ -208,8 +230,9 @@ class CoastalScan:
                         self.state['jobs'][key] = {'tile': tile['id'], 'bbox': tile['bbox'], 'product': row,
                                                   'status': 'queued', 'revision': REVISION}
                         added += 1
+            window = f' · images from the last {fresh.total_seconds()/3600:g} h' if fresh else ''
             self.state.update(last_discovery_utc=now.isoformat(), tiles_without_image=missing,
-                              message=f'{added} new image areas queued; working around the coast')
+                              message=f'{added} new image areas queued; working around the coast{window}')
             self.publish()
         return added
 

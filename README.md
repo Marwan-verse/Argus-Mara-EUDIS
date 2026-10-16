@@ -16,11 +16,14 @@ to the same forwarded HTTPS URL with their existing SOC accounts.
 **Satellite analysis:** the native radar button opens public Sentinel catalogue
 search, small georeferenced optical/SAR crops, acquisition-time archived AIS and
 manual TensorX vision review. **Coast Watch → Start scan** enables rolling new-image
-screening around Ireland’s ~20 km coastal belt and continuous private AIS capture.
+screening around Ireland’s ~40 km coastal belt and continuous private AIS capture.
 Click an amber lead for its source pixels, image-time AIS candidates and latest
 received positions. AI contacts are unreviewed assumptions, with cached
 results and a conservative $20 pilot ceiling. Run `INSTALL-SATELLITE-WINDOWS.bat`
-once for optional image readers. See [setup and open-source accuracy plan](docs/16-satellite-ai.md).
+once for optional image readers. **One click:** `SATELLITE-WATCH-MAC.command` or
+`SATELLITE-WATCH-WINDOWS.bat` installs the readers, asks once for the TensorX and team
+database keys and opens the app with Coast Watch running on images from the last 36 h
+(D83). See [setup and open-source accuracy plan](docs/16-satellite-ai.md).
 
 **Team database (optional):** the Supabase project `argus-mara` copies the shared
 Railway AIS feed every 30 seconds by itself, so Coast Watch can compare any image
