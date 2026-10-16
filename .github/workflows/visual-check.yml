@@ -1,0 +1,40 @@
+name: Visual motion check
+
+# Screenshots of the map before, during and after a zoom and a drag, on a real Windows desktop,
+# so changes to map motion can be seen without opening the app on a teammate's computer.
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - desktop_motion.py
+      - desktop_flatten.py
+      - desktop_basemap.py
+      - run_gui.py
+      - scripts/visual_motion_check.py
+      - .github/workflows/visual-check.yml
+
+permissions:
+  contents: read
+
+jobs:
+  screenshots:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install desktop dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Zoom and drag the map, saving screenshots
+        run: python scripts/visual_motion_check.py visual-check
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: map-motion-screenshots
+          path: visual-check
+          retention-days: 7

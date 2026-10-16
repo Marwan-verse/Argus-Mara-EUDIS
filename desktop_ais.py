@@ -529,12 +529,12 @@ class DesktopAIS:
         if not self.positions():
             self.app.map.create_text(width / 2, height / 2, fill="#d9bb47", font=("Consolas", 15),
                 text="CONNECTING TO IRISH AIS" if self.poller else "AIS DISCONNECTED",
-                tags="received_ais")
+                tags=("received_ais", "chart-fixed"))
         elif self.filter_error or not self.filtered():
             self.app.map.create_text(width / 2, height / 2, fill='#d9bb47',
-                text=self.filter_error or 'No contacts match these filters', tags='received_ais')
+                text=self.filter_error or 'No contacts match these filters', tags=('received_ais', 'chart-fixed'))
         if not getattr(self.app, "console_layout", False):
-            self.app.map.create_text(12, 34, anchor="nw", fill="#00dce8", tags="received_ais",
+            self.app.map.create_text(12, 34, anchor="nw", fill="#00dce8", tags=("received_ais", "chart-fixed"),
                 text=f"Received AIS: {len(self.positions())} positions · {self.status}")
 
     def select_on_map(self, mmsi):

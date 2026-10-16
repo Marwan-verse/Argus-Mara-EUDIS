@@ -256,6 +256,7 @@ class ArgusApp:
         self.chart_margin = desktop_basemap.MARGIN if UI_EDITION == "pro" else 0
         self._cursor_geo = (None, None)
         self._tile_fallback: dict[tuple[int, int, int], tk.PhotoImage] = {}
+        self._tile_fallback_pixels: dict[tuple[int, int, int], Image.Image] = {}  # Their pixels, for motion pictures
         self.motion = MapMotion(self)  # Smooth pan and animated zoom (desktop_motion.py)
         self._tile_pixels: OrderedDict = OrderedDict()  # Decoded tiles, so a zoom animation starts at once
         self.map_layers = {name: tk.BooleanVar(value=True) for name in ("AIS track", "Dark prediction", "Radar contacts", "Cable", "Anchor reach", "Response assets", "World ports", "Historical cable routes", "Simulated alerts", "Rain and cloud", "Wind")}
@@ -1271,11 +1272,12 @@ class ArgusApp:
             box = ((target[0] - x0) / (x1 - x0) * columns, (target[1] - y0) / (y1 - y0) * rows,
                    (target[2] - x0) / (x1 - x0) * columns, (target[3] - y0) / (y1 - y0) * rows)
             layers = [image.resize(size, Image.BILINEAR, box=box) for image in field["images"]]
-            overlay = {"key": (field["key"], z, x0), "image": ImageTk.PhotoImage(weather.colorize(*layers), master=self.map),
-                       "rect": (target[0], target[1], target[0] + size[0], target[1] + size[1])}
+            colours = weather.colorize(*layers)
+            overlay = {"key": (field["key"], z, x0), "image": ImageTk.PhotoImage(colours, master=self.map),
+                       "pil": colours, "rect": (target[0], target[1], target[0] + size[0], target[1] + size[1])}
             self._weather_overlay = overlay
         self.map.create_image(overlay["rect"][0] - view[0], overlay["rect"][1] - view[1],
-                              image=overlay["image"], anchor="nw")
+                              image=overlay["image"], anchor="nw", tags=("weather-overlay",))
 
     def _draw_wind_arrows(self, width: int, height: int) -> None:
         if not self._weather_map_active() or not self.map_layers["Wind"].get() or not self._weather_grid:
@@ -1854,6 +1856,9 @@ class ArgusApp:
         self._ping_after = self.root.after(250 if reduced else 80, self._animate_map_ping)
 
     def _draw_map_ping(self) -> None:
+        motion = getattr(self, "motion", None)
+        if motion is not None and motion.busy:
+            return  # The ping is part of the moving picture; it is drawn again when the motion ends
         self.map.delete('map_ping')
         if getattr(self, '_map_ping', None) is None:
             return
@@ -2164,6 +2169,7 @@ class ArgusApp:
             self._tile_images.clear()
             self._tile_pixels.clear()
             self._tile_fallback.clear()
+            self._tile_fallback_pixels.clear()
             self._tile_retry_after.clear()
             self.map_zoom = min(self.map_zoom, max_zoom_for(mode))
             source = desktop_basemap.SOURCES.get(mode)
@@ -2238,7 +2244,10 @@ class ArgusApp:
 
     def _map_motion(self, event) -> None:
         if UI_EDITION == "pro":
-            desktop_basemap.update_readout(self, *world_to_geo(*self._world_at(event.x, event.y), self.map_zoom))
+            motion = getattr(self, "motion", None)
+            # Mid-glide the screen is not yet the target view; read the position the pointer will land on.
+            seen = motion.to_target(event.x, event.y) if motion is not None and motion.animating else (event.x, event.y)
+            desktop_basemap.update_readout(self, *world_to_geo(*self._world_at(*seen), self.map_zoom))
         if self.map_tool:
             lat, lon = world_to_geo(*self._world_at(event.x, event.y), self.map_zoom)
             self.map_status_label.configure(text=f"{self.map_tool.title()} · {coordinates(lat, lon)}")
@@ -2354,7 +2363,6 @@ class ArgusApp:
         if new_zoom == self.map_zoom:
             return
         continuing = animate and motion.animating  # This step joins a zoom that is still gliding
-        raster = motion.snapshot() if animate and not continuing else None  # The chart as drawn, before it changes
         # The geography the operator points at: mid-glide, what is on screen is not yet the target view.
         anchor = motion.to_target(screen_x, screen_y) if continuing else (screen_x, screen_y)
         under_cursor = world_to_geo(*self._world_at(*anchor), self.map_zoom)
@@ -2364,7 +2372,7 @@ class ArgusApp:
         center_y = point_y - (screen_y - self._map_size[1] / 2)
         self.map_center = world_to_geo(center_x, center_y, new_zoom)
         if animate:
-            motion.zoom(2 ** (new_zoom - old_zoom), screen_x, screen_y, raster)  # Ends with the same full draw
+            motion.zoom(2 ** (new_zoom - old_zoom), screen_x, screen_y)  # Ends with the same full draw
         else:
             self._draw_map(force_static=True)
             self._schedule_tile_refresh()
@@ -2558,7 +2566,7 @@ class ArgusApp:
                 sx = x_absolute * TILE_SIZE - center_x + width / 2
                 sy = y_absolute * TILE_SIZE - center_y + height / 2
                 if image:
-                    self.map.create_image(sx, sy, image=image, anchor="nw", tags=(TILE,))
+                    self.map.create_image(sx, sy, image=image, anchor="nw", tags=(TILE, f"tile:{z}:{x}:{y}"))
             self.map.create_text(title_at, title_at, text=source.title if source else "NASA BLUE MARBLE · DISPLAY ONLY", anchor="nw",
                                  fill=desktop_basemap.RULER_INK if source else "#1e3550",
                                  font=desktop_basemap.FONT_BOLD if pro else ("Segoe UI Semibold", 9), tags=("map_title", FIXED))
@@ -2640,7 +2648,8 @@ class ArgusApp:
                                             f"±{dark['position']['uncertainty_nm']:.1f} nm", x, y))
             self._prediction_banner = prediction
         elif not fix_at(self.vessel["track"], self.position_s) and self.position_s < self.vessel["track"][-1]["t"]:
-            self.map.create_text(width / 2, 42, text="AIS RECEPTION GAP · marker withdrawn", fill=AMBER, font=("Segoe UI Semibold", 10))
+            self.map.create_text(width / 2, 42, text="AIS RECEPTION GAP · marker withdrawn", fill=AMBER, font=("Segoe UI Semibold", 10),
+                                 tags=(FIXED,))
         for index, (lat, lon) in enumerate(self.map_note_points, 1):
             x, y = self._project(lat, lon)
             self.map.create_oval(x - 8, y - 8, x + 8, y + 8, fill="#d7be70", outline="white", width=2)
@@ -2714,12 +2723,15 @@ class ArgusApp:
             try:
                 with Image.open(path) as parent:
                     crop = parent.convert("RGB").crop((left, top, left + part, top + part))
-                image = ImageTk.PhotoImage(crop.resize((TILE_SIZE, TILE_SIZE), Image.Resampling.BILINEAR), master=self.map)
+                pixels = crop.resize((TILE_SIZE, TILE_SIZE), Image.Resampling.BILINEAR)
+                image = ImageTk.PhotoImage(pixels, master=self.map)
             except (OSError, ValueError, tk.TclError):
                 continue
             if len(self._tile_fallback) > 400:
                 self._tile_fallback.clear()
+                self._tile_fallback_pixels.clear()
             self._tile_fallback[key] = image
+            self._tile_fallback_pixels[key] = pixels
             return image
         return None
 
