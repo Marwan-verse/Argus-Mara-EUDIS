@@ -20,6 +20,7 @@ import customtkinter as ctk
 from PIL import Image, ImageTk
 
 from argus import gfw_sar
+from argus.optical_localization import pixel_feature
 from argus.satellite import atomic_json, bounds
 from argus.satellite_ai import choose_model, get_key, read_ledger, save_key
 from argus.satellite_workspace import DEFAULT_QUESTION, SatelliteWorkspace
@@ -31,6 +32,7 @@ RADAR, RADAR_MUTED = '#c88cff', '#9d8bb5'  # Global Fishing Watch radar contacts
 RADAR_LABELS = {'no_team_ais': 'no team AIS', 'team_ais_match': 'AIS match', 'nearby_ais_review': 'AIS nearby · review',
                 'no_contemporaneous_ais': 'no team AIS history', 'time_unresolved': 'time unresolved',
                 'ais_unavailable': 'AIS lookup failed'}
+SPOT_LABEL_LIMIT = 12  # Above this many bright spots in one image, draw them as small unlabelled marks (D109).
 
 
 class DesktopSatellite:
@@ -685,9 +687,13 @@ class DesktopSatellite:
         lines = [f"{scene['sensor']} · {scene['label'].upper()} pixels", f"Acquired {scene['acquired_utc']}",
                  f"Historical AIS: {ais['coverage']['status']} · {len(ais['vessels'])} eligible ships", '']
         if visual:
+            observations = [p for p in result['contacts'] if not pixel_feature(p)]
+            spots = len(result['contacts'])-len(observations)
             lines += [f"AI ASSUMPTION · UNREVIEWED · {visual['model']}", visual['summary'],
-                      f"{len(result['contacts'])} possible contacts · {'cached' if visual.get('cached') else 'new request'}", '']
-            lines.extend(f"{p['id']} · {p['confidence']} confidence: {p['association'].replace('_', ' ')} · {p['description']}" for p in result['contacts'])
+                      f"{len(observations)} possible contacts · {'cached' if visual.get('cached') else 'new request'}", '']
+            lines.extend(f"{p['id']} · {p['confidence']} confidence: {p['association'].replace('_', ' ')} · {p['description']}" for p in observations)
+            if spots:
+                lines.append(f"{spots} unclassified bright spots on the water (OPT-n): pixel features for review, not AI vessel observations")
             cost_label = 'Reported cost of completed image requests' if visual.get('adaptive_version') else 'Reported cost of this answer'
             lines += ['', f"{cost_label}: ${visual['reported_cost_usd']:.6f}"]
             lines += [''] + visual['limitations']
@@ -1140,13 +1146,17 @@ class DesktopSatellite:
                 canvas.create_oval(x-5, y-5, x+5, y+5, fill='#14354e', outline='#80bcf1', width=2, tags=tag)
                 canvas.tag_bind(tag, '<Button-1>', lambda event, v=vessel: self.show_vessel(v))
         if self.show_ai.get():
+            crowded = sum(map(pixel_feature, self.current['contacts'])) > SPOT_LABEL_LIMIT
             for point in self.current['contacts']:
                 x, y = self.app._project(point['lat'], point['lon'])
                 tag = 'satellite-contact-'+point['id']
-                canvas.create_rectangle(x-8, y-8, x+8, y+8, outline='#e1b164', width=2, dash=(3, 2), tags=tag)
-                canvas.create_text(x+11, y-8, anchor='nw', fill='#e1b164',
-                                   text=point['id']+' · '+point['confidence']+' confidence · '+
-                                   ('unclassified optical feature' if point['id'].startswith('OPT-') else 'AI assumption'), font=('Segoe UI', 9), tags=tag)
+                if crowded and pixel_feature(point):
+                    canvas.create_rectangle(x-3, y-3, x+3, y+3, outline='#8f7a55', width=1, tags=tag)
+                else:
+                    canvas.create_rectangle(x-8, y-8, x+8, y+8, outline='#e1b164', width=2, dash=(3, 2), tags=tag)
+                    canvas.create_text(x+11, y-8, anchor='nw', fill='#e1b164',
+                                       text=point['id']+' · '+point['confidence']+' confidence · '+
+                                       ('unclassified optical feature' if point['id'].startswith('OPT-') else 'AI assumption'), font=('Segoe UI', 9), tags=tag)
                 canvas.tag_bind(tag, '<Button-1>', lambda event, p=point: self.show_contact(p))
         self.draw_coastal_contacts()
 

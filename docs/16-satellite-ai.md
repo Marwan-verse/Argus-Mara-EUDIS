@@ -159,6 +159,8 @@ The wording is **not detected**, never absent or confirmed false AIS.
 
 The fields are added after the analyst evidence key is computed, so recorded outcomes are not reopened. On the 13 Oct Dublin Bay run, 24 of the 26 leads are `low`, mostly glint or waves. Priority is a sorting aid for the analyst, not a threat level.
 
+Since D109, a lead from a busy image, one with over 100 bright spots, adds "busy water, position not pixel-confirmed" to its `priority_reason`. Its `pixel_support` is `unavailable_busy_water`. On the 16 Oct re-check of the same 13 Oct images, all 22 leads are of this kind: 21 `low` and 1 `medium`. See docs/20 "Busy water and the coastal map".
+
 A free background pass checks one saved image per status cycle, prioritising
 unchecked images. Checks are saved and become eligible for refresh after five
 minutes. It never submits another paid image request. The linked database supplies
