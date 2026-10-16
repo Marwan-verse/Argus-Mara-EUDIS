@@ -61,15 +61,15 @@ class DesktopAlertBoardTests(unittest.TestCase):
         # SIM-06, SIM-44 and SIM-48 are raised one level: no responder reaches them before their line ETA.
         # Stories SIM-50 to SIM-52 and the corrupted-feed story SIM-49 are watched at T+90 (SIM-53 starts at T+95).
         # Site contacts SIM-61 and SIM-64 are High, SIM-62 and SIM-63 Medium; SIM-54 is a Low stop (D63).
-        # SIM-56 runs survey lines over EWIC but is named in the exercise Marine Notice: Low (SIM-57 starts at T+100).
+        # SIM-56 runs survey lines over EWIC but is named in the exercise Marine Notice: Low (SIM-60 starts at T+100).
         self.assertEqual([board.tiles[f'{level}-count'].cget('text') for level in ('critical', 'high', 'medium', 'low')],
-                         ['6', '8', '12', '33'])
+                         ['6', '8', '12', '36'])
         self.assertEqual(board.cards['SIM-01']['stripe'].cget('bg'), STYLE['critical'][0])
         self.assertIn('In corridor', board.cards['SIM-01']['eta'].cget('text'))
         self.assertIn('26 new', app.alert_counts_label.cget('text'))
         self.assertEqual(board.summary.cget('text'), '26 open · 0 escalated')
         self.assertEqual(self.flags('SIM-45'), ['AIS spoofing?'])
-        self.assertEqual(len(self.map_tags('sim-alert:')), len(board.items) - 3)  # SIM-53 starts at T+95, SIM-57 at T+100, SIM-55 at T+140
+        self.assertEqual(len(self.map_tags('sim-alert:')), len(board.items) - 3)  # SIM-53 starts at T+95, SIM-60 at T+100, SIM-55 at T+140
         badge = next(item for item in app.map.find_withtag('sim-badge') if app.map.type(item) == 'text')
         self.assertIn('SIMULATED', app.map.itemcget(badge, 'text'))
         board.set_filter('critical')
@@ -79,11 +79,11 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertIsNone(board.level_filter)
         board.set_filter('low')
         self.assertIn('SIM-40', self.packed_cards())
-        self.assertEqual(len(self.packed_cards()), 33)  # with stories SIM-50 to SIM-52, SIM-49, SIM-56 and the stop SIM-54
+        self.assertEqual(len(self.packed_cards()), 36)  # with stories SIM-50 to SIM-52, SIM-49, SIM-56 and the new detector stories and stop SIM-54
         self.assertEqual(self.flags('SIM-40'), ['Small craft · capped Low'])
         board.set_filter(None)
         board.toggle_watching()
-        self.assertEqual(len(self.packed_cards()), len(board.items) - 3)  # SIM-53, SIM-57, SIM-55 wait for T+95, T+100, T+140
+        self.assertEqual(len(self.packed_cards()), len(board.items) - 3)  # SIM-53, SIM-60, SIM-55 wait for T+95, T+100, T+140
         board.sort_mode.set('Time to asset')
         board.relayout(top=True)
         self.assertEqual(len(self.packed_cards()), len(board.items) - 3)

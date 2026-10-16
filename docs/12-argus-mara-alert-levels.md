@@ -292,9 +292,9 @@ their tracks like SIM-50 to SIM-53:
 
 | ID | Vessel | Story | Level over time |
 |---|---|---|---|
-| SIM-54 | MOURNE SHADE | AIS silent from T+80 to T+125 on the approach to the Dublin–Holyhead cable; a simulated Sentinel-1 contact at T+110 fits its track | None → Medium at T+110 (I1, I3, worst-case ETA) → Critical at T+132 (AIS back, slow and yawing) |
-| SIM-55 | CALLOW BAY | Declares `IEDUB>GBLIV`, turns north-west, then reports "at anchor" while making 4 kn over the North Dublin cluster | C3 alone at T+145 (None) → Medium at T+164 → High at T+170 (B9) → Critical at T+173 |
-| SIM-56 | TUSKAR CALM | Stops for 2.5 h about 4 nm from both EWIC and the North Dublin cluster, away from any port or anchorage | Low at T+109 → Medium at T+135 (B12) |
+| SIM-57 | MOURNE SHADE | AIS silent from T+80 to T+125 on the approach to the Dublin–Holyhead cable; a simulated Sentinel-1 contact at T+110 fits its track | None → Medium at T+110 (I1, I3, worst-case ETA) → Critical at T+132 (AIS back, slow and yawing) |
+| SIM-58 | CALLOW BAY | Declares `IEDUB>GBLIV`, turns north-west, then reports "at anchor" while making 4 kn over the North Dublin cluster | C3 alone at T+145 (None) → Medium at T+164 → High at T+170 (B9) → Critical at T+173 |
+| SIM-59 | TUSKAR CALM | Stops for 2.5 h about 4 nm from both EWIC and the North Dublin cluster, away from any port or anchorage | Low at T+109 → Medium at T+135 (B12) |
 
 ## Limits
 
@@ -337,6 +337,6 @@ their tracks like SIM-50 to SIM-53:
 | `tests/test_desktop_alerts.py` | Panel, decisions, filters, map markers and hiding the panel |
 | `tests/test_desktop_gestures.py` | Trackpad scrolling of the queue and pinch zoom steps |
 | `tests/test_stop_off_port.py`, `tests/test_dark_vessel.py`, `tests/test_declared_vs_actual.py` | The three detectors, their thresholds and what they must not flag |
-| `tests/test_detector_stories.py` | SIM-54 to SIM-56 over time, and the innocent stories staying quiet |
+| `tests/test_detector_stories.py` | SIM-57 to SIM-59 over time, and the innocent stories staying quiet |
 
 Run them with `python -m unittest discover -s tests`.

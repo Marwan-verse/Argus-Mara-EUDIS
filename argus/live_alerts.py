@@ -1,4 +1,4 @@
-"""Real alerts: the exercise's alert rules applied to live ships near Irish cables (D95).
+"""Real alerts: the exercise's alert rules applied to live ships near Irish cables (D104).
 
 The team AIS database copies the Railway feed every 30 s. ``LiveTracks.refresh``
 reads it through ``public.argus_recent_tracks``. The first call loads the last

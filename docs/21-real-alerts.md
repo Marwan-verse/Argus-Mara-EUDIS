@@ -1,4 +1,4 @@
-# Real alerts from live AIS (D95)
+# Real alerts from live AIS (D104)
 
 The exercise's alert rules now also run on **real ships**. `argus/live_alerts.py` reads the team AIS database. The database copies the Railway feed every 30 seconds, so this works even when no laptop was recording.
 

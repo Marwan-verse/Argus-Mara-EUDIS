@@ -164,6 +164,10 @@ def clean_vessel(vessel: dict) -> tuple[dict, dict]:
             else:
                 track.append(fix)
     result = {**vessel, "track": track}
+    # Keep normalized receipt-time collisions available to the source-quality
+    # detector; the generic cleanup must not hide contradictory observations.
+    if repeats:
+        result["_source_track"] = fixes
     for key in ("ship_type", "ais_length_m"):
         if key not in vessel:
             continue
@@ -462,7 +466,9 @@ def assess_vessel(vessel: dict, context: dict, detectors: list | None = None) ->
     findings: list[dict] = []
     errors: list[dict] = []
     for detector in registered(context) if detectors is None else detectors:
-        findings.extend(_run_guarded(detector, vessel, context, errors))
+        detector_vessel = ({**vessel, "track": vessel["_source_track"]}
+                          if detector is ais_spoofing.detect and "_source_track" in vessel else vessel)
+        findings.extend(_run_guarded(detector, detector_vessel, context, errors))
     observations = merge_observations(findings)
     work = declared_work(findings, observations)
     if work["applied"]:

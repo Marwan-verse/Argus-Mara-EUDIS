@@ -41,7 +41,7 @@ Two more show the Marine Notice rule (``argus.detectors.marine_notice``). A
 survey vessel runs slow lines along EWIC and is named in a fictional exercise
 notice, so Brain caps it at Low (SIM-56). A ship circles inside the work area of
 the real Marine Notice 49/2026 off Rush, which names other vessels, so nothing
-is explained and its level stands (SIM-57).
+is explained and its level stands (SIM-60).
 
 ``update`` is a pure function of the board time, so a replay can move the
 board forwards or backwards; ``rescore_exercise`` re-scores the exercise
@@ -369,7 +369,7 @@ STORY_EXTRAS = {
 
 STORY_DESTINATIONS = {"SIM-55": "GBFIS"}
 # Fictional AIS call signs (Message 5) that the Marine Notice check reads.
-STORY_CALL_SIGNS = {"SIM-56": "EXSIM56", "SIM-57": "EXSIM57"}
+STORY_CALL_SIGNS = {"SIM-56": "EXSIM56", "SIM-60": "EXSIM57"}
 STORY_TRAIL_S = 3 * 3600  # the map trail shows the window the detectors read
 
 # Board-only detectors whose reasons are already the item's title; other detectors' reasons become notes.
@@ -453,7 +453,8 @@ def story_vessel(item: dict, now: float | None = None) -> dict:
     received = item["story"].get("received", item["story"]["track"])
     if now is not None:
         received = [fix for fix in received if _received_by(fix, now)]
-    return {**_vessel(item, item.get("ais_class", "A")), "track": received, "destination": item["story"].get("destination")}
+    return {**_vessel(item, item.get("ais_class", "A")), "track": received,
+            "destination": item["story"].get("destination", item.get("destination"))}
 
 
 def rescore_story(item: dict, now: float) -> None:
