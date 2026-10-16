@@ -98,6 +98,8 @@ class LoaderTests(unittest.TestCase):
     def tearDown(self):
         sw.urlopen = self._urlopen
         self.folder.cleanup()
+
+    def weather(self, fetch, **paths):
         return sw.SpaceWeather(fetch=fetch, cache_path=self.cache, refresh_s=3600, **paths)
 
     def test_no_network_falls_back_to_snapshot_without_waiting(self):

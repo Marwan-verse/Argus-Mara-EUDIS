@@ -417,15 +417,16 @@ def assess_vessel(vessel: dict, context: dict, detectors: list | None = None) ->
             "data_quality": quality, "detector_errors": errors}
 
 
-def context_from_scenario(scenario: dict, now: int | None = None) -> dict:
+def context_from_scenario(scenario: dict, now: int | None = None, space_weather: dict | None = None) -> dict:
+    """Detector context. ``space_weather`` is an ``argus.space_weather.status`` dict (None: not known)."""
     return {"now": now, "cables": scenario.get("cables", []), "ports": scenario.get("ports", []),
             "anchorages": scenario.get("anchorages", []), "detections": scenario.get("detections", []),
-            "weather": scenario.get("weather"), "assets": scenario.get("assets", [])}
+            "weather": scenario.get("weather"), "assets": scenario.get("assets", []), "space_weather": space_weather}
 
 
-def build_assessments(scenario: dict, now: int | None = None) -> dict:
+def build_assessments(scenario: dict, now: int | None = None, space_weather: dict | None = None) -> dict:
     validate_scenario(scenario)
-    context = context_from_scenario(scenario, now)
+    context = context_from_scenario(scenario, now, space_weather)
     vessels = []
     for vessel in scenario["vessels"]:
         result = assess_vessel(vessel, context)
