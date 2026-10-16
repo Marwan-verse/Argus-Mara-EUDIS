@@ -1,5 +1,10 @@
 # Anchor Watch: offline operator demo
 
+The separate private SOC [browser admin panel](../soc/ADMIN-PANEL.md) lives at
+`/admin/` on the SOC server. Its Svelte source is `ui/src/Admin.svelte` and the
+committed bundle is `ui/admin/app.mjs`. The offline static server does not provide
+account administration.
+
 The static HTML/CSS/JavaScript console reads `demo/scenario.json` and
 `demo/alerts.json`. It starts paused at the alert so the assessment is immediately
 reviewable. Press Restart, then Play, for the complete seven-beat story. The v1

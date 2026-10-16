@@ -13,7 +13,10 @@ from argon2.exceptions import VerificationError, InvalidHashError
 PERMISSIONS = frozenset({"map.view", "chat", "ping", "contact.share", "evidence.share",
                          "alert.review", "response.review"})
 DEFAULT_GROUPS = {"user": ["map.view", "chat", "ping", "contact.share"],
-                  "intelligence": sorted(PERMISSIONS)}
+                  "intelligence": sorted(PERMISSIONS),
+                  "observer": ["map.view"],
+                  "analyst": ["map.view", "chat", "ping", "contact.share", "evidence.share", "alert.review"],
+                  "response-coordinator": ["map.view", "chat", "ping", "contact.share", "alert.review", "response.review"]}
 
 
 def name(value):
@@ -45,6 +48,8 @@ class Store:
                 expires REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, at REAL NOT NULL, actor TEXT,
                 action TEXT NOT NULL, target TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS browser_sessions(hash TEXT PRIMARY KEY REFERENCES tokens(hash) ON DELETE CASCADE,
+                last_seen REAL NOT NULL);
         """)
         for group, perms in DEFAULT_GROUPS.items():
             self.db.execute("INSERT OR IGNORE INTO groups VALUES (?,?)", (group, json.dumps(perms)))
@@ -126,8 +131,16 @@ class Store:
         with self.db:
             self.db.execute("DELETE FROM tokens WHERE hash=?", (self.token_hash(token),))
 
+    def revoke_user(self, user_id, actor):
+        row = self.db.execute("SELECT username,admin,disabled FROM users WHERE id=?", (user_id,)).fetchone()
+        if row is None or row["admin"]:
+            raise ValueError("Unknown user or protected administrator")
+        with self.db:
+            self.db.execute("DELETE FROM tokens WHERE user_id=?", (user_id,))
+            self.audit(actor, "user.revoke_sessions", row["username"])
+
     def change_user(self, user_id, groups, disabled, hashed, actor):
-        row = self.db.execute("SELECT username,admin FROM users WHERE id=?", (user_id,)).fetchone()
+        row = self.db.execute("SELECT username,admin,disabled FROM users WHERE id=?", (user_id,)).fetchone()
         if row is None:
             raise ValueError("Unknown user")
         if row["admin"]:
@@ -144,6 +157,10 @@ class Store:
                 self.db.execute("UPDATE users SET password_hash=? WHERE id=?", (hashed, user_id))
             self.db.execute("DELETE FROM tokens WHERE user_id=?", (user_id,))
             self.audit(actor, "user.update_and_revoke", row["username"])
+            if bool(row["disabled"]) != disabled:
+                self.audit(actor, "user.ban" if disabled else "user.reinstate", row["username"])
+            if hashed:
+                self.audit(actor, "user.password_reset", row["username"])
 
     def set_group(self, group, permissions, actor):
         group = name(group)
@@ -165,6 +182,10 @@ class Store:
         for r in self.db.execute("SELECT id,username,admin,disabled FROM users ORDER BY username"):
             user = dict(r)
             user["groups"] = [m[0] for m in self.db.execute("SELECT group_name FROM memberships WHERE user_id=? ORDER BY group_name", (r["id"],))]
+            user["status"] = "banned" if r["disabled"] else "active" if r["admin"] or user["groups"] else "pending"
+            user["permissions"] = (self.user(r["id"]) or {}).get("permissions", [])
+            user["active_sessions"] = self.db.execute("SELECT COUNT(*) FROM tokens WHERE user_id=? AND expires>?", (r["id"], time.time())).fetchone()[0]
             users.append(user)
         return {"users": users, "groups": [{"name": r[0], "permissions": json.loads(r[1])} for r in self.db.execute("SELECT name,permissions FROM groups ORDER BY name")],
-                "available_permissions": sorted(PERMISSIONS)}
+                "available_permissions": sorted(PERMISSIONS), "protected_groups": sorted(DEFAULT_GROUPS),
+                "audit": [dict(r) for r in self.db.execute("SELECT a.id,a.at,COALESCE(u.username,'system') AS actor,a.action,a.target FROM audit a LEFT JOIN users u ON u.id=a.actor ORDER BY a.id DESC LIMIT 100")]}

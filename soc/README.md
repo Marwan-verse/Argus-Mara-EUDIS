@@ -1,5 +1,10 @@
 # Private SOC communication
 
+**Browser administration:** open `/admin/` on your SOC HTTPS server (local demo:
+`https://localhost:8443/admin/`). Approve registrations, ban/reinstate accounts,
+change groups, reset passwords, revoke sign-ins and inspect the permission matrix
+and audit log. Requires an existing administrator. See [the panel guide](ADMIN-PANEL.md).
+
 Up to 16 native Argus Mara applications share a room through one private Python HTTPS relay.
 The public AIS collector is a separate service and receives no SOC credentials,
 room codes, private keys or chat messages. The offline demonstration stays available.
@@ -173,7 +178,9 @@ send retries, automatic URL opening, executable attachments or remote actions.
 
 ## Groups and tools
 
-Administrator status is separate from group membership. Two groups are seeded:
+Administrator status is separate from group membership. Five groups are seeded.
+The original `user` and `intelligence` profiles are below; `observer`, `analyst`
+and `response-coordinator` are described in [the panel guide](ADMIN-PANEL.md#standard-groups).
 
 | Permission | `user` | `intelligence` |
 | --- | --- | --- |
