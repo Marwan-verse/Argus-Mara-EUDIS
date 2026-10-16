@@ -836,7 +836,7 @@ class ArgusApp:
             text.configure(yscrollcommand=scrollbar.set)
             scrollbar.pack(side="right", fill="y")
             text.pack(fill="both", expand=True)
-            from argus import s1_plan  # real Sentinel-1 looks first (D90, D91); reads files, never downloads
+            from argus import s1_plan  # real Sentinel-1 looks first (D90, D92); reads files, never downloads
             notes = (ROOT / "docs/08-sar-next-step.md").read_text(encoding="utf-8")
             plan_job = {}
 
@@ -3070,7 +3070,7 @@ def main() -> int:
             # After the satellite panel's own resume check (1.5 s) has run.
             root.after(2500, app.start_coast_watch)
     from argus import s1_plan
-    s1_plan.start_service()  # D91: ESA plan at most daily, Copernicus catalogue every 30 min, in the background
+    s1_plan.start_service()  # D92: ESA plan at most daily, Copernicus catalogue every 30 min, in the background
     root.mainloop()
     return 0
 
