@@ -329,7 +329,7 @@ class DesktopAlertBoardTests(unittest.TestCase):
         window.window.destroy()
 
     def real_check(self, *tracks):
-        """A live AIS check as the feed hands it to the board (D106), from synthetic tracks, without network."""
+        """A live AIS check as the feed hands it to the board (D107), from synthetic tracks, without network."""
         from argus.live_alerts import LiveTracks
         from desktop_real_alerts import check
         from test_live_alerts import NOW, STATIC, FakeDatabase, packet
@@ -351,7 +351,7 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.root.update()
 
     def test_real_alerts_from_live_ais_rank_first_open_for_review_and_are_signed(self):
-        """D106: a real alert joins its level's band ahead of the simulated contacts, on the map as NAME · REAL."""
+        """D107: a real alert joins its level's band ahead of the simulated contacts, on the map as NAME · REAL."""
         from desktop_alerts import HeaderRow, LeadRow
         from test_live_alerts import LOITERER, TRANSIT
         board, dialog, alert = self.board, self.board.dialog, 'REAL-250000001'

@@ -85,7 +85,7 @@ def _board_pack(vessel: dict, item: dict, context: dict) -> dict:
     assessment = item["assessment"]
     tag = DATA_TAGS.get(item.get("label"), str(item.get("label") or "").upper())
     facts = _Facts()
-    real = item.get("label") == "real"  # D106: a live AIS alert
+    real = item.get("label") == "real"  # D107: a live AIS alert
     kind = "Real ship from live AIS" if real else "Exercise contact" if item.get("exercise") else "Simulated contact"
     ids = item["id"] if vessel["id"] == item["id"] else f"{item['id']}, MMSI {vessel['id']}"
     details = [item["vessel_type"]] + ([f"{item['length_m']:.0f} m"] if item.get("length_m") else [])

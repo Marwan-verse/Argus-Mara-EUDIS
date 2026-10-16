@@ -3059,7 +3059,7 @@ def main() -> int:
         import desktop_pro
         desktop_pro.apply_palette()
     import desktop_real_alerts
-    desktop_real_alerts.allow_network()  # D106: live AIS alerts every 5 min; tests never call main, so stay offline
+    desktop_real_alerts.allow_network()  # D107: live AIS alerts every 5 min; tests never call main, so stay offline
     root = ctk.CTk()
     if not args.offline:
         from desktop_soc import login_screen

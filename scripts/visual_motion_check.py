@@ -155,7 +155,7 @@ def main() -> int:
     panel_shot("12-incidents-low-open")
     app.alert_board.toggle_low()
 
-    # D106: real alerts from live AIS, here from synthetic tracks (no network): their band, the map and the review.
+    # D107: real alerts from live AIS, here from synthetic tracks (no network): their band, the map and the review.
     from unittest.mock import patch
     from argus.live_alerts import LiveTracks
     from desktop_real_alerts import check

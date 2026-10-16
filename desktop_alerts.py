@@ -19,7 +19,7 @@ Send and Recall (permission ``response.review``) record a simulated human
 decision: a sent asset is busy for every other incident, so one that relied
 on it can rise, and the review window warns before that happens.
 
-Real alerts from live AIS (``desktop_real_alerts``, D106) join the same bands
+Real alerts from live AIS (``desktop_real_alerts``, D107) join the same bands
 as leads tagged AIS · REAL, ahead of the simulated contacts. They keep real
 times, never pass through the replay, open the same review window (without
 the simulated responders) and are signed into the same decision log.
@@ -486,7 +486,7 @@ class AlertBoard:
         self.flashing: dict[str, str] = {}
         self.decision_log = DecisionLog()
         self.log_window: DecisionLogWindow | None = None
-        self.real = RealAlerts()  # D106: live AIS alerts, restored from the signed log
+        self.real = RealAlerts()  # D107: live AIS alerts, restored from the signed log
         self.real.restore(self.decision_log)
         app.alert_board = self
         self.dialog = ReviewDialog(self)
@@ -740,7 +740,7 @@ class AlertBoard:
                                                                ('Next', 1, start+50 < len(visible))]])
 
     def paint_real(self, relayout: bool = True) -> None:
-        """Live AIS alerts (D106): one lead per ship in its level's band; what was checked goes to SOURCES."""
+        """Live AIS alerts (D107): one lead per ship in its level's band; what was checked goes to SOURCES."""
         real, section = self.real, self.real_frame
         section.clear()
         section.add('title', f"LIVE AIS ALERTS · {real.open_count()}")
@@ -1008,7 +1008,7 @@ class AlertBoard:
         record = {"operator": self.operator(), "action": action, "detail": text,
                   **{key: value for key, value in details.items() if value}}
         if item is not None and item.get("label") == "real":
-            # A real alert: real times only, no replay clock (D106).
+            # A real alert: real times only, no replay clock (D107).
             assessment = item["assessment"]
             record.update(real=True, simulated=False, alert=item["id"], vessel=item["name"], mmsi=item["mmsi"],
                           level=assessment["level"], score=assessment["score"], raised=iso(item["raised_t"]))
@@ -1611,7 +1611,7 @@ class AlertBoard:
         self.draw_real(occupied)  # On top: real ships are what an operator acts on
 
     def draw_real(self, occupied) -> None:
-        """Live AIS alerts (D106): recent track, ship and a NAME · REAL label; the selected one with its route."""
+        """Live AIS alerts (D107): recent track, ship and a NAME · REAL label; the selected one with its route."""
         app, ui = self.app, self.ui
         layer = app.map_layers.get("Real alerts")
         if layer is not None and not layer.get():

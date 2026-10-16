@@ -1,4 +1,4 @@
-"""D106: real alerts between live AIS checks: bands, decisions, episodes and the signed log (no window)."""
+"""D107: real alerts between live AIS checks: bands, decisions, episodes and the signed log (no window)."""
 import copy
 from pathlib import Path
 import tempfile

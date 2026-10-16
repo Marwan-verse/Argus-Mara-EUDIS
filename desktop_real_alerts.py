@@ -1,4 +1,4 @@
-"""Real alerts from live AIS in the Incidents panel (D106).
+"""Real alerts from live AIS in the Incidents panel (D107).
 
 ``argus.live_alerts`` (D104) runs the alert rules on real ships near the cable
 routes. ``RealAlertFeed`` asks it every five minutes on a worker thread, and

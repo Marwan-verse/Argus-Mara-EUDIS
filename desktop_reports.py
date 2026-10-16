@@ -46,7 +46,7 @@ def sharing_problem(app):
 def board_context(board, item):
     """Incident, status and who can reach it, as the Incidents panel shows them (replay clock)."""
     identifier = item["id"]
-    real = item.get("label") == "real"  # D106: a live AIS alert keeps real times, never the replay clock
+    real = item.get("label") == "real"  # D107: a live AIS alert keeps real times, never the replay clock
     now = None if real else board.replay.now
     context = {"replay_time": None if now is None else board.stamp(int(now)), "status": board.status(identifier)}
     if real or (not item.get("exercise") and now is not None):

@@ -26,7 +26,7 @@ Every result is labelled **real** and worded *for review*. A level is a rule out
 3. `assess()` runs the detectors and turns every level above None into an item. Items have the same shape as `argus.brain_board` items, with `label: "real"`, id `REAL-<MMSI>`, the threatened route and the latest position.
 4. `python -m argus.live_alerts` prints the real alerts the rules give right now. It only reads; `--json` prints the items.
 
-## In the app (D106)
+## In the app (D107)
 
 The desktop app checks every 5 minutes on a background thread, on a computer linked to the team database (`desktop_real_alerts.py`). Set `ARGUS_REAL_ALERTS=0` to turn it off.
 
