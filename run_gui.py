@@ -324,6 +324,12 @@ class ArgusApp:
         from desktop_soc import DesktopSOC
         self.soc = DesktopSOC(self)
 
+    def start_coast_watch(self) -> None:
+        """SATELLITE-WATCH launchers: show Satellite analysis on all Ireland and start Coast Watch."""
+        self.open_window("satellite")
+        self.satellite.coast_view()
+        self.satellite.start_watch()
+
     def allowed(self, permission: str) -> bool:
         """Offline exercises use public demo files; SOC tools follow server grants."""
         client = getattr(self, 'soc_client', None)
@@ -2898,10 +2904,16 @@ def main() -> int:
     parser.add_argument('--soc-login', action='store_true', help='open the SOC sign-in screen even if no address is configured')
     parser.add_argument('--soc-dev-http', action='store_true', help='allow HTTP only to localhost for development tests')
     parser.add_argument('--old', action='store_true', help='open the original (classic) look instead of the tactical chart console')
+    parser.add_argument('--coast-watch', action='store_true',
+                        help='open offline on Satellite analysis and start Coast Watch (used by the SATELLITE-WATCH launchers)')
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument('--offline', action='store_true', help='open one offline window without login or Docker')
     modes.add_argument('--soc-client', action='store_true', help='sign-in only; do not offer local server startup')
     args = parser.parse_args()
+    if args.coast_watch:
+        args.offline = True  # Coast Watch runs in this computer's private workspace.
+        from argus.satellite_scan import FRESH_DEFAULT_H
+        os.environ.setdefault('ARGUS_SATELLITE_MAX_IMAGE_AGE_H', str(FRESH_DEFAULT_H))
     if args.offline and (args.soc_login or args.soc_client):
         parser.error('--offline cannot be combined with SOC sign-in flags')
     try:
@@ -2937,7 +2949,10 @@ def main() -> int:
                      lambda: ArgusApp(root, scenario, alerts, coastline),
                      local_launcher=not args.soc_client, remember=not args.soc_client)
     else:
-        ArgusApp(root, scenario, alerts, coastline)
+        app = ArgusApp(root, scenario, alerts, coastline)
+        if args.coast_watch:
+            # After the satellite panel's own resume check (1.5 s) has run.
+            root.after(2500, app.start_coast_watch)
     root.mainloop()
     return 0
 
