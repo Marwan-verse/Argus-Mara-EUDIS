@@ -68,6 +68,66 @@ class DesktopReportTests(unittest.TestCase):
         board.dialog.report_button.invoke()
         self.assertEqual(self.app.report_dialog.vessel, board_snapshot(board.by_id["SIM-40"]))
 
+    def settle(self, dialog):
+        for _ in range(200):
+            self.root.update()
+            if not dialog.busy:
+                return
+            time.sleep(.01)
+        self.fail("the report tool did not finish")
+
+    def notes(self, dialog):
+        return dialog.notes.get("1.0", "end")
+
+    def test_review_window_report_drafts_from_brain_evidence_and_checks_it(self):
+        board = self.app.alert_board
+        board.open("SIM-41", reveal=False)
+        board.dialog.report_button.invoke()
+        dialog = self.app.report_dialog
+        self.assertEqual(dialog.pack["kind"], "board")
+        self.assertEqual(dialog.pack["item_id"], "SIM-41")
+        self.assertEqual(dialog.pack["level"]["level"], board.by_id["SIM-41"]["assessment"]["level"])
+        dialog.reason.insert("1.0", "My own first note.")
+        dialog.draft_button.invoke()
+        self.assertTrue(dialog.busy)
+        self.settle(dialog)
+        text = dialog.reason.get("1.0", "end")
+        self.assertIn("SEA LARK", text)
+        self.assertIn("Template draft from system data · reviewed by analyst", text)
+        self.assertEqual(dialog.category.get(), dialog.pack["category"])
+        self.assertIn("no AI used", self.notes(dialog))
+        self.assertEqual(dialog.generation["method"], "template")
+        dialog.check_button.invoke()
+        self.settle(dialog)
+        self.assertIn("Report is consistent with system data", self.notes(dialog))
+        dialog.reason.insert("1.0", "Brain level Critical. ")
+        dialog.check_button.invoke()
+        self.settle(dialog)
+        self.assertIn("Level differs from Brain", self.notes(dialog))
+        dialog.reason.edit_undo()
+        dialog.reason.edit_undo()
+        self.assertIn("My own first note.", dialog.reason.get("1.0", "end"))
+        dialog.reason.delete("1.0", "end")
+        dialog.reason.insert("1.0", text.strip())
+        dialog.submit()
+        self.root.update()
+        self.assertEqual(self.app.vessel_reports.entries[0]["report"]["reason"], text.strip())
+        self.assertEqual(set(self.app.vessel_reports.entries[0]["report"]), {"id", "vessel", "category", "reason",
+                                                                             "created_utc"})
+
+    def test_report_without_brain_item_drafts_with_placeholders_offline(self):
+        dialog = open_report(self.app, VESSEL)
+        self.assertEqual(dialog.pack["kind"], "minimal")
+        dialog.draft_button.invoke()
+        self.settle(dialog)
+        self.assertIn("No Brain assessment", dialog.reason.get("1.0", "end"))
+        dialog.check_button.invoke()
+        self.settle(dialog)
+        self.assertIn("Placeholder left in the text", self.notes(dialog))
+        dialog.pdf_button.invoke()
+        self.assertIn("coming in the next step", self.notes(dialog))
+        dialog.close()
+
     def test_soc_success_and_peer_receive_create_incidents_without_echo(self):
         client = self.connect()
         dialog = open_report(self.app, VESSEL)

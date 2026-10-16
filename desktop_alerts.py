@@ -1550,7 +1550,7 @@ class ReviewDialog:
     def report_vessel(self):
         from desktop_reports import board_snapshot, open_report
         if self.item:
-            open_report(self.board.app, board_snapshot(self.item))
+            open_report(self.board.app, board_snapshot(self.item), self.item)
 
     # ----- layout ---------------------------------------------------------------------
     def place(self) -> None:
