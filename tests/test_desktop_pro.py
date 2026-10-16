@@ -97,6 +97,74 @@ class ProLookTests(unittest.TestCase):
         self.assertTrue(app._tile_images)
         self.assertLessEqual(app.map_zoom, desktop_basemap.SOURCES[desktop_basemap.HD_IMAGERY].max_zoom)
 
+    def test_a_drag_shows_cached_chart_beyond_the_view_edges(self):
+        from types import SimpleNamespace
+        from desktop_motion import margins
+        app = self.app
+        self.wait_for_tiles()
+        app._draw_map()
+        ring = margins(app._map_size)
+        red = Image.new('RGB', (256, 256), (200, 40, 40))
+        for z, x, y, *_rest in app._visible_tiles(ring):
+            app._tile_pixels[(z, x, y)] = red
+        app._pan_start(SimpleNamespace(x=300, y=300))
+        app._pan_move(SimpleNamespace(x=310, y=300))
+        picture = app.motion.picture
+        self.assertEqual(picture.size, (app._map_size[0] + 2 * ring[0], app._map_size[1] + 2 * ring[1]))
+        samples = [picture.getpixel((ring[0] // 2, picture.height * share)) for share in (0.3, 0.5, 0.7)]
+        self.assertIn((200, 40, 40), samples, 'the ring left of the view is not filled with chart tiles')
+        app._pan_end(SimpleNamespace(x=310, y=300))
+        self.assertFalse(app.motion.busy)
+
+    def test_a_zoom_picture_holds_the_tiles_that_were_drawn_not_the_target_level(self):
+        app = self.app
+        self.wait_for_tiles()
+        app._draw_map()
+        zoom = app.map_zoom
+        width, height = app._map_size
+        app._zoom_at(1, width / 2, height / 2)  # The map already holds the next level when the picture is made
+        picture, (mx, my) = app.motion.picture, app.motion.margin
+        samples = [picture.getpixel((mx + int(width * fx), my + int(height * fy)))
+                   for fx in (.3, .5, .7) for fy in (.3, .5, .7)]
+        self.assertIn((10 + zoom, 20, 30), samples, f'no level-{zoom} tile in the picture: {samples}')
+        app.motion.finish_zoom()
+
+    def test_zooming_out_shows_the_target_levels_tiles_around_the_shrinking_picture(self):
+        app = self.app
+        self.wait_for_tiles()
+        app._draw_map()
+        width, height = app._map_size
+        coarse = Image.new('RGB', (256, 256), (77, 88, 99))
+        for z, x, y, *_rest in app._visible_tiles(center=app.map_center, zoom=app.map_zoom - 1):
+            app._tile_pixels[(z, x, y)] = coarse
+        app._zoom_at(-1, width / 2, height / 2)  # About the centre, so the target centre is the same
+        motion = app.motion
+        self.assertIsNotNone(motion.backdrop)
+        state = motion.zoom_state
+        landed = motion.frame(state['A'], state['TX'], state['TY'])
+        self.assertEqual(landed.getpixel((2, 2)), (77, 88, 99), 'the corner the picture left is not chart')
+        motion.finish_zoom()
+
+    def test_cached_tiles_around_the_view_are_decoded_in_the_background(self):
+        import time
+        from desktop_basemap import SOURCES, TACTICAL_MAP
+        from desktop_motion import margins
+        app = self.app
+        self.wait_for_tiles()
+        ring = [key[:3] for key in app._visible_tiles(margins(app._map_size))
+                if key[:3] not in app._tile_pixels][:4]
+        self.assertTrue(ring)
+        for key in ring:
+            path = app._tile_path(key)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(fake_tile(SOURCES[TACTICAL_MAP], *key))
+        app._warm_ring(app.map_mode.get())
+        deadline = time.monotonic() + 5
+        while not all(key in app._tile_pixels for key in ring) and time.monotonic() < deadline:
+            self.root.update()
+            time.sleep(0.05)
+        self.assertTrue(all(key in app._tile_pixels for key in ring), 'ring tiles were not decoded')
+
     @unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Only macOS and Windows ship a known monospace family')
     def test_the_chart_font_exists_on_this_platform(self):
         import desktop_basemap
