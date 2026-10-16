@@ -1,4 +1,5 @@
 """Dragging slides the drawn map without full redraws; an animated zoom lands exactly where an instant one did."""
+import gc
 from types import SimpleNamespace
 import time
 import tkinter as tk
@@ -12,6 +13,9 @@ class MapMotionTests(unittest.TestCase):
     def setUp(self):
         import customtkinter as ctk
         from run_gui import ArgusApp, load_demo
+        # Collect earlier tests' Tk objects here, on the main thread. If a tile or weather worker
+        # collects them instead, a Font.__del__ waits forever on its destroyed interpreter.
+        gc.collect()
         try:
             self.root = ctk.CTk()
         except tk.TclError as error:
@@ -32,6 +36,7 @@ class MapMotionTests(unittest.TestCase):
             self.root.update()
             self.assertEqual(self.errors, [])
             self.app.close()
+            gc.collect()  # This test's Tk objects too, before any worker thread runs
 
     def event(self, x, y):
         return SimpleNamespace(x=x, y=y)
