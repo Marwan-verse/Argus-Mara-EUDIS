@@ -9,7 +9,7 @@ from unittest.mock import patch
 from argus.satellite import atomic_json
 from argus.satellite_compare import compare_review
 from test_satellite import WHEN, fixture
-from test_satellite_scan import image_fixture
+from test_satellite_scan import RASTERS_AVAILABLE, image_fixture
 
 
 def vessel(mmsi='123456789', lon=-6.12, **fields):
@@ -30,6 +30,7 @@ class ComparisonTests(unittest.TestCase):
     def compare(self, contacts=()):
         return compare_review(self.scene, list(contacts), self.ais, self.visual, self.workspace.scenes)
 
+    @unittest.skipUnless(RASTERS_AVAILABLE, 'Optional satellite raster readers not installed')
     def test_clear_water_missing_large_ship_is_review_lead_and_all_ships_are_listed(self):
         self.ais['vessels'].append(vessel('987654321', lon=-6.13, length_m={'value': 12}))
         result = self.compare()
@@ -88,6 +89,7 @@ class ComparisonTests(unittest.TestCase):
         self.scene['label'] = 'simulated'
         self.assertIn('Synthetic', self.compare()['not_checked'])
 
+    @unittest.skipUnless(RASTERS_AVAILABLE, 'Optional satellite raster readers not installed')
     def test_review_backlog_is_free_persisted_and_skips_already_checked_images(self):
         review = {'scene': self.scene, 'ais': self.ais, 'contacts': [], 'visual': self.visual}
         path = self.workspace.root/'reviews'/(self.scene['id']+'.json')
