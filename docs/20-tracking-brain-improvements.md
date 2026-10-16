@@ -175,6 +175,33 @@ localization JSON, and hosted match/dark-contact gates enforce eligibility while
 all nearby image evidence still vetoes image-absence claims. Isolated PostGIS
 checks cover eligibility, metadata retention, source types and public-role denial.
 
+### Busy water and the coastal map (D109)
+
+`compact_features` stops at 101 bright spots and marks the image as clutter. In
+such a busy image the pixel check above cannot run. On 16 Oct this left the ten
+13 Oct Dublin Bay images with no leads at all. The AI had made 47 observations
+there; the earlier v2 rules gave 25 leads, v5 gave 0. The coastal map also drew
+692 unclassified spots as diamonds.
+
+Comparison v6 treats a clutter observation as **not pixel-confirmed**, not as
+unsupported:
+
+- It can still raise an `image_without_ais` review lead. The lead carries
+  `pixel_support: unavailable_busy_water` and a sentence in `reason` and
+  `priority_reason`.
+- It never claims an AIS identity. Within 300 m of an AIS position it stays
+  `nearby_ais_review`, and it never counts as a vessel's match.
+- Unsupported, ambiguous and contested observations keep the D100 gate.
+
+The coastal map, the Coast Watch list and the SOC `contacts` index show AI
+observations only. Unclassified spots stay in each image's own review. When an
+image has more than 12, they are drawn as small marks without labels.
+
+The free background pass re-checks saved reviews under v6 without new AI calls.
+On the same ten images it gives 22 leads: 21 low and 1 medium. The hosted SQL
+comparison (`argus.contact_position_eligible`) still applies the stricter D100
+gate to clutter observations.
+
 ## Acceptance work still required for the full objective
 
 | Area | Evidence required before calling it improved end to end |

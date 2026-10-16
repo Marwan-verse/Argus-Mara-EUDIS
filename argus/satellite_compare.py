@@ -9,10 +9,12 @@ import math
 from argus.satellite import mercator
 from argus.space import distance_km, timestamp
 
-VERSION = 'image-ais-review-v5'
+VERSION = 'image-ais-review-v6'
 MIN_LENGTH_M = 50
 VISIBILITY_RADIUS_M = 100
 ALTERNATIVE_KM = 1
+BUSY_WATER_NOTE = (' Pixel check unavailable: over 100 bright spots in this image (waves, glint or boats),'
+                   ' so the AI position is not pixel-confirmed.')
 
 
 def visibility(scene, position, mask, radius_m=VISIBILITY_RADIUS_M):
@@ -142,13 +144,17 @@ def compare_review(scene, contacts, ais, visual, folder):
                           'reason': 'At image acquisition UTC, AIS places this vessel inside a clear-water footprint; no image contact within 1 km. Detection misses remain possible.',
                           'label': 'assumption', 'review_status': 'unreviewed'})
     for contact in contacts:
+        # D109: over 100 bright spots ("clutter") means the D100 pixel check could not run,
+        # which is no evidence against the AI position. Such an observation may still be a
+        # review lead, marked as not pixel-confirmed, but it never claims an AIS identity.
+        busy = (contact.get('localization') or {}).get('status') == 'clutter'
         if not verified:
             state = 'image_not_analysed'
         elif visual.get('image_status') == 'unusable':
             state = 'image_unusable'
-        elif not position_eligible(contact):
+        elif not position_eligible(contact) and not busy:
             state = 'optical_feature_unclassified' if contact['localization'].get('status') == 'feature_only' else 'image_location_unverified'
-        elif contact.get('matched_mmsi'):
+        elif contact.get('matched_mmsi') and not busy:
             state = 'provisional_match'
         elif contact.get('overlap_ambiguous'):
             state = 'duplicate_or_overlapping_observation'
@@ -170,10 +176,12 @@ def compare_review(scene, contacts, ais, visual, folder):
         if state == 'image_without_ais':
             leads.append({'id': scene['id']+':image:'+contact['id'], 'kind': 'image_without_ais',
                           'title': 'Image contact without a nearby AIS association',
-                          'reason': 'No eligible AIS position within 300 m at acquisition UTC. Reception and image interpretation are incomplete.',
+                          'reason': 'No eligible AIS position within 300 m at acquisition UTC. Reception and image interpretation are incomplete.'
+                                    + (BUSY_WATER_NOTE if busy else ''),
                           'lat': contact['lat'], 'lon': contact['lon'], 'mmsi': None,
                           'name': contact['id'], 'contact_id': contact['id'],
-                          'label': 'assumption', 'review_status': 'unreviewed'})
+                          'label': 'assumption', 'review_status': 'unreviewed',
+                          **({'pixel_support': 'unavailable_busy_water'} if busy else {})})
     for lead in leads:
         lead.update(scene_id=scene['id'], acquired_utc=scene['acquired_utc'], sensor=scene['sensor'],
                     source_label=scene['label'], identity_confirmed=False)

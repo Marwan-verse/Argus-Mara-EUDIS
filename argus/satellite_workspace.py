@@ -17,6 +17,7 @@ from argus import satellite, supabase_ais
 from argus.satellite_ais import ArchiveChanged, associate, attach_latest, historical_ais
 from argus.satellite_ai import PILOT_USD, get_key, read_ledger, visual_analysis, mark_duplicate_contacts
 from argus.fleet_history import FleetHistoryWorker
+from argus.optical_localization import pixel_feature
 from argus.satellite_disposition import Dispositions, evidence_key
 
 DEFAULT_QUESTION = 'Find possible vessels in this image and describe the visible evidence and uncertainty.'
@@ -39,6 +40,8 @@ def with_priority(lead, confidences):
     elif confidence in CONFIDENCE_PRIORITY:
         priority = CONFIDENCE_PRIORITY[confidence]
         reason = f'AI rated this image contact {confidence} confidence; no AIS within 300 m'
+        if lead.get('pixel_support') == 'unavailable_busy_water':
+            reason += '; busy water, position not pixel-confirmed'
     else:
         priority, reason = None, 'Priority unknown'
     return {**lead, 'confidence': confidence, 'priority': priority, 'priority_reason': reason}
@@ -230,7 +233,7 @@ class SatelliteWorkspace:
                     continue
                 reviewed += 1
                 partial += bool(review.get('visual', {}).get('analysis_incomplete'))
-                image_contacts += len(review.get('contacts', []))
+                image_contacts += sum(not pixel_feature(c) for c in review.get('contacts', []))
                 no_ais += not bool(review.get('ais', {}).get('vessels'))
                 ais_conflicts += bool(review.get('ais', {}).get('coverage', {}).get('excluded_vessels'))
                 confidences = {c.get('id'): c.get('confidence') for c in review.get('contacts', [])}
@@ -285,7 +288,11 @@ class SatelliteWorkspace:
         return contacts
 
     def contacts(self):
-        """Small map index; detailed AIS, image and latest positions load on click."""
+        """Small map index of AI observations; detailed AIS, image and latest positions load on click.
+
+        Unclassified bright spots (OPT-n, D100) stay in each image's own review: one busy
+        image holds up to 101 of them, which buried the coastal map (D109).
+        """
         rows = []
         folder = self.root/'reviews'
         for path in sorted(folder.glob('*.json')) if folder.exists() else []:
@@ -296,6 +303,8 @@ class SatelliteWorkspace:
                 continue
             scene = review['scene']
             for point in review['contacts']:
+                if pixel_feature(point):
+                    continue
                 # Compact map/list index; full descriptions are loaded on click.
                 rows.append({key: point[key] for key in ('id', 'lat', 'lon', 'confidence', 'label', 'ts', 'matched_mmsi')})
                 rows[-1].update(scene_id=scene['id'], sensor=scene['sensor'])

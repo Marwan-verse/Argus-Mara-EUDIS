@@ -141,3 +141,37 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(index['reviews_pending'], 0)
         self.assertEqual(len(index['vessel_checks']), 1)
         self.assertEqual(len(index['leads']), 1)
+
+    def test_busy_water_observation_without_ais_is_a_marked_lead_but_never_a_match(self):
+        busy = {'status': 'clutter', 'water_mask_verified': True}
+        far = {'id': 'AI-1', 'lat': 53.36, 'lon': -6.12, 'localization': dict(busy)}
+        result = self.compare([far])
+        self.assertEqual(result['contact_checks'][0]['status'], 'image_without_ais')
+        lead = next(lead for lead in result['leads'] if lead['kind'] == 'image_without_ais')
+        self.assertEqual(lead['pixel_support'], 'unavailable_busy_water')
+        self.assertIn('not pixel-confirmed', lead['reason'])
+        near = {'id': 'AI-2', 'lat': 53.33, 'lon': -6.12, 'matched_mmsi': '123456789', 'localization': dict(busy)}
+        result = self.compare([near])
+        self.assertEqual(result['contact_checks'][0]['status'], 'nearby_ais_review')
+        self.assertEqual(result['vessel_checks'][0]['status'], 'nearby_image_contact_review')
+        self.assertFalse(any(lead['kind'] == 'image_without_ais' for lead in result['leads']))
+        # A pixel check that ran and found no bright spot still withholds the lead (D100).
+        far['localization'] = {'status': 'unsupported', 'water_mask_verified': True}
+        result = self.compare([far])
+        self.assertEqual(result['contact_checks'][0]['status'], 'image_location_unverified')
+        self.assertFalse(any(lead['kind'] == 'image_without_ais' for lead in result['leads']))
+
+    def test_coastal_map_lists_ai_observations_not_unclassified_bright_spots(self):
+        ai = {'id': 'AI-Q0-AI-1', 'lat': 53.36, 'lon': -6.12, 'confidence': 'medium', 'label': 'assumption',
+              'ts': WHEN, 'matched_mmsi': None, 'localization': {'status': 'clutter', 'water_mask_verified': True}}
+        spots = [{**ai, 'id': f'OPT-{i}', 'confidence': 'low', 'localization': {'status': 'feature_only'}}
+                 for i in range(1, 102)]
+        review = {'scene': self.scene, 'ais': self.ais, 'contacts': [ai, *spots], 'visual': self.visual}
+        review['comparison'] = self.compare(review['contacts'])
+        atomic_json(self.workspace.root/'reviews'/(self.scene['id']+'.json'), review)
+        self.assertEqual([row['id'] for row in self.workspace.contacts()], ['AI-Q0-AI-1'])
+        index = self.workspace.comparison_index()
+        self.assertEqual(index['image_contacts'], 1)
+        lead = next(lead for lead in index['leads'] if lead['kind'] == 'image_without_ais')
+        self.assertEqual((lead['confidence'], lead['priority']), ('medium', 'medium'))
+        self.assertIn('not pixel-confirmed', lead['priority_reason'])

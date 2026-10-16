@@ -20,6 +20,13 @@ def position_eligible(point):
             and quality.get('water_mask_verified') is True)
 
 
+def pixel_feature(point):
+    """An unclassified bright spot (OPT-n) kept for review, not an AI observation of a vessel."""
+    quality = point.get('localization')
+    return (str(point.get('id', '')).startswith('OPT-')
+            or isinstance(quality, dict) and quality.get('status') == 'feature_only')
+
+
 def anchor_observations(scene, points, features, *, water_verified=False):
     width, height = scene['width'], scene['height']
     candidates = features.get('candidates', [])
