@@ -118,6 +118,40 @@ def main() -> int:
     pump(1.5)
     shot("09-zoom-out-end")
 
+    # The incidents panel (D94) with leads shaped like a real run: 1 high, 1 medium and 24 low priority.
+    def panel_shot(name: str) -> None:
+        root.update()
+        panel = app.alerts_panel
+        x, y = panel.winfo_rootx(), panel.winfo_rooty()
+        try:
+            ImageGrab.grab(bbox=(x, y, x + panel.winfo_width(), y + panel.winfo_height())).save(output / f"{name}.png")
+        except Exception as error:
+            report["events"].append(f"{name}: screen grab failed: {error}")
+
+    def lead(index: int, kind: str, priority, title: str) -> dict:
+        return {"id": f"synthetic-{index}", "kind": kind, "name": "Unidentified contact" if kind != "ais_not_detected"
+                else "SYNTHETIC SHIP", "mmsi": "123456789" if kind == "ais_not_detected" else None,
+                "title": title, "acquired_utc": f"2026-10-13T12:{index:02d}:00Z", "source_label": "synthetic",
+                "reason": "Synthetic lead for the screenshot only.", "scene_id": "a" * 24, "priority": priority,
+                "priority_reason": f"Synthetic {priority} priority"}
+    leads = [lead(0, "ais_not_detected", "high", "AIS vessel not detected in clear-water image"),
+             lead(1, "image_without_ais", "medium", "Image contact without AIS")]
+    leads += [lead(2 + i, "image_without_ais", "low", "Image contact without AIS") for i in range(24)]
+    app.alert_board.refresh_evidence({"leads": leads, "reviews_checked": 26, "reviews_pending": 0})
+    # Keep the synthetic leads: the satellite poll would replace them with this machine's (empty) results.
+    app.alert_board.refresh_evidence = lambda *args, **kwargs: None
+    pump(1.0)
+    panel_shot("10-incidents-panel")
+    app.alert_board.list.see("header:high", margin=0)
+    pump(0.4)
+    panel_shot("11-incidents-high-band")
+    app.alert_board.toggle_low()
+    pump(0.6)
+    app.alert_board.list.see("header:low", margin=0)
+    pump(0.4)
+    panel_shot("12-incidents-low-open")
+    app.alert_board.toggle_low()
+
     report["flatten_ms"] = [round(value * 1000, 1) for value in app.motion.timings]
     report["prepare_ms"] = round(app.motion.prepare_seconds * 1000, 1)
     (output / "timings.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
