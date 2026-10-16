@@ -148,6 +148,17 @@ The 50 m, 100 m and 1 km thresholds are assumptions. SCL excludes cloud, shadow,
 land and missing data, but does not certify freedom from glint, haze or rough sea.
 The wording is **not detected**, never absent or confirmed false AIS.
 
+**Lead priority (for D87).** `comparison_index()` gives every lead a `confidence`, a `priority` (`high`, `medium`, `low` or `null`) and a `priority_reason`, so alert lists can sort leads and collapse the minor ones:
+
+| Lead | `confidence` | `priority` |
+|---|---|---|
+| `ais_not_detected` (AIS vessel not detected on clear water) | `null` | `high` |
+| `radar_without_ais` (D84 radar contact) | `null` | `medium` |
+| `image_without_ais` | the AI contact's own `low` / `medium` / `high` | the same as its confidence |
+| anything else, or a contact without confidence | `null` | `null`, shown and never collapsed |
+
+The fields are added after the analyst evidence key is computed, so recorded outcomes are not reopened. On the 13 Oct Dublin Bay run, 24 of the 26 leads are `low`, mostly glint or waves. Priority is a sorting aid for the analyst, not a threat level.
+
 A free background pass checks one saved image per status cycle, prioritising
 unchecked images. Checks are saved and become eligible for refresh after five
 minutes. It never submits another paid image request. The linked database supplies
