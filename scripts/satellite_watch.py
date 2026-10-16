@@ -214,6 +214,7 @@ def main(argv=None):
     parser.add_argument('--root', default=str(ROOT/'data/satellite'), help='satellite workspace')
     parser.add_argument('--check', action='store_true', help='print readiness without asking for keys')
     args = parser.parse_args(argv)
+    supabase_ais.enable_keyless_read()  # D108
     try:
         fresh = max_image_age()
     except ValueError as error:

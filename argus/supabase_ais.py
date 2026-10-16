@@ -199,15 +199,23 @@ def own_workspace(root):
         return False
 
 
-def readable(root):
-    """Team data can be read here without a key: the app's own workspace reads with the publishable key.
+def enable_keyless_read():
+    """Called by the real entry points (run_gui.main, SATELLITE-WATCH, live_alerts), never by tests.
 
-    Writing still needs a linked workspace and the secret key (``linked``).
-    ``ARGUS_SUPABASE_READ=0`` turns keyless reading off.
+    An explicit ``ARGUS_SUPABASE_READ=0`` keeps keyless reading off.
+    """
+    os.environ.setdefault('ARGUS_SUPABASE_READ', '1')
+
+
+def readable(root):
+    """Team data can be read here: a linked workspace, or the app's own workspace with the publishable key.
+
+    Writing still needs a linked workspace and the secret key (``linked``). Keyless reading
+    is on only after ``enable_keyless_read()``, so tests and servers stay offline unless linked.
     """
     if linked(root):
         return True
-    return own_workspace(root) and os.environ.get('ARGUS_SUPABASE_READ', '1') != '0' and bool(read_key())
+    return os.environ.get('ARGUS_SUPABASE_READ') == '1' and own_workspace(root) and bool(read_key())
 
 
 def rpc(name, payload, *, transport=http_rpc):

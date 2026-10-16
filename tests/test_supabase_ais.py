@@ -212,10 +212,12 @@ class ReadKeyTests(unittest.TestCase):
         self.root = Path(self.folder.name)
         self.env = patch.dict(os.environ, {'ARGUS_SATELLITE_ROOT': str(self.root)})
         self.env.start()
-        for name in ('ARGUS_SUPABASE_URL', 'ARGUS_SUPABASE_READ', 'ARGUS_SUPABASE_LINK'):
+        for name in ('ARGUS_SUPABASE_URL', 'ARGUS_SUPABASE_LINK'):
             os.environ.pop(name, None)
         self.no_secret = patch.object(supabase_ais, 'get_key', return_value='')
         self.no_secret.start()
+        os.environ.pop('ARGUS_SUPABASE_READ', None)
+        supabase_ais.enable_keyless_read()  # as run_gui.main does
 
     def tearDown(self):
         self.no_secret.stop()
@@ -235,6 +237,13 @@ class ReadKeyTests(unittest.TestCase):
             self.assertFalse(supabase_ais.readable(other))  # test folders stay offline
         with patch.dict(os.environ, {'ARGUS_SUPABASE_READ': '0'}):
             self.assertFalse(supabase_ais.readable(self.root))
+
+    def test_keyless_reading_is_off_until_an_entry_point_turns_it_on(self):
+        os.environ.pop('ARGUS_SUPABASE_READ')
+        self.assertFalse(supabase_ais.readable(self.root))  # tests and servers that set ARGUS_SATELLITE_ROOT stay offline
+        os.environ['ARGUS_SUPABASE_READ'] = '0'
+        supabase_ais.enable_keyless_read()
+        self.assertFalse(supabase_ais.readable(self.root))  # an explicit 0 wins
 
     def test_read_functions_use_the_publishable_key_and_writes_need_the_secret(self):
         calls = []

@@ -86,8 +86,12 @@ class SetupScriptTests(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
         self.root = Path(self.folder.name)
+        # main() switches keyless reading on (D108); keep that from leaking into later tests.
+        self.environment = patch.dict(os.environ)
+        self.environment.start()
 
     def tearDown(self):
+        self.environment.stop()
         self.folder.cleanup()
 
     def test_tensorx_key_is_checked_for_free_before_it_is_saved(self):

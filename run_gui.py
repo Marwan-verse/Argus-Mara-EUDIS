@@ -3034,6 +3034,8 @@ def main() -> int:
     modes.add_argument('--offline', action='store_true', help='open one offline window without login or Docker')
     modes.add_argument('--soc-client', action='store_true', help='sign-in only; do not offer local server startup')
     args = parser.parse_args()
+    from argus import supabase_ais
+    supabase_ais.enable_keyless_read()  # D108: read the team database without a secret key
     if args.coast_watch:
         args.offline = True  # Coast Watch runs in this computer's private workspace.
         from argus.satellite_scan import FRESH_DEFAULT_H
