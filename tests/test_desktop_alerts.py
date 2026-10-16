@@ -115,7 +115,7 @@ class DesktopAlertBoardTests(unittest.TestCase):
             self.app.tools.settings_path = None
 
     def test_one_queue_by_importance_real_leads_first_low_folded_away(self):
-        """D89: real leads join the severity bands ahead of simulated contacts; Low folds away (remembered)."""
+        """D94: real leads join the severity bands ahead of simulated contacts; Low folds away (remembered)."""
         from desktop_alerts import CardRow, HeaderRow, LeadRow
         board = self.board
 

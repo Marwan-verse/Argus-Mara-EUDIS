@@ -148,7 +148,7 @@ The 50 m, 100 m and 1 km thresholds are assumptions. SCL excludes cloud, shadow,
 land and missing data, but does not certify freedom from glint, haze or rough sea.
 The wording is **not detected**, never absent or confirmed false AIS.
 
-**Lead priority (for D89).** `comparison_index()` gives every lead a `confidence`, a `priority` (`high`, `medium`, `low` or `null`) and a `priority_reason`, so alert lists can sort leads and collapse the minor ones:
+**Lead priority (for D94).** `comparison_index()` gives every lead a `confidence`, a `priority` (`high`, `medium`, `low` or `null`) and a `priority_reason`, so alert lists can sort leads and collapse the minor ones:
 
 | Lead | `confidence` | `priority` |
 |---|---|---|

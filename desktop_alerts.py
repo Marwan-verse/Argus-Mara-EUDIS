@@ -62,7 +62,7 @@ DETECTOR_REASONS = 4
 IN_TIME, LATE, UNAVAILABLE = "#47c7da", "#ec8a3c", "#7d8b97"
 RESPONSE_SHAPE = {"aircraft": "square", "helicopter": "square", "ship": "circle", "drone": "diamond",
                   "hail": "ring"}
-# D89: one queue by importance. Within a band, real data comes before simulated contacts; Low (quiet
+# D94: one queue by importance. Within a band, real data comes before simulated contacts; Low (quiet
 # incidents, watched contacts, low-priority satellite leads) and Closed fold away until asked for.
 GROUP_TITLES = {"critical": "CRITICAL", "high": "HIGH", "medium": "MEDIUM", "low": "LOW · QUIET AND WATCHED",
                 "closed": "CLOSED AND REVIEWED", "sources": "SOURCES · WHAT WAS CHECKED"}
@@ -426,7 +426,7 @@ class AlertBoard:
         self.hovered: str | None = None
         self.level_filter: str | None = None
         self.show_closed = False
-        self.show_low = app.tools.settings.get("show_low_alerts", False) is True  # D89, saved like the demo switch
+        self.show_low = app.tools.settings.get("show_low_alerts", False) is True  # D94, saved like the demo switch
         self.leads: dict[str, Lead] = {}
         self.evidence_leads = []
         self.show_reviewed_evidence = tk.BooleanVar(app.root, value=False)
@@ -631,7 +631,7 @@ class AlertBoard:
             self.relayout(top=True)
         section.add('toggle', 'Show reviewed outcomes', self.show_reviewed_evidence, refilter)
         visible = [r for r in self.evidence_leads if self.show_reviewed_evidence.get() or r.get('review_status') not in CLOSED_OUTCOMES]
-        # D89: evidence that changed first, then review priority, then the newest image.
+        # D94: evidence that changed first, then review priority, then the newest image.
         visible.sort(key=lambda r: str(r.get('acquired_utc') or ''), reverse=True)
         visible.sort(key=lambda r: (not r.get('evidence_changed'), PRIORITY_ORDER.get(r.get('priority'), 1)))
         self.evidence_page = min(self.evidence_page, max(0, (len(visible)-1)//50))
@@ -997,7 +997,7 @@ class AlertBoard:
         return (not (incident and incident.get("needs_review_again")), sort_key(self.by_id[identifier]))
 
     def current_leads(self) -> list[Lead]:
-        """Real entries of the shown sources, each with its band (D89)."""
+        """Real entries of the shown sources, each with its band (D94)."""
         found = []
         for section in (self.reports_frame, self.evidence_frame, self.history_frame):
             if section.shown:

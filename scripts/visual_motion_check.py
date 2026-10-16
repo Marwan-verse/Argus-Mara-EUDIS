@@ -118,7 +118,7 @@ def main() -> int:
     pump(1.5)
     shot("09-zoom-out-end")
 
-    # The incidents panel (D89) with leads shaped like a real run: 1 high, 1 medium and 24 low priority.
+    # The incidents panel (D94) with leads shaped like a real run: 1 high, 1 medium and 24 low priority.
     def panel_shot(name: str) -> None:
         root.update()
         panel = app.alerts_panel
