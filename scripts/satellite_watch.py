@@ -77,15 +77,27 @@ def connect_database(root, ask=getpass, rpc=supabase_ais.http_rpc, save=supabase
 
 
 def budget(root):
-    """The pilot ledger, and roughly how many more image checks fit under the ceiling."""
+    """The pilot ledger, and roughly how many more image checks fit under the ceiling.
+
+    Each call needs one full reservation of headroom when it starts and then
+    settles at its real cost, so after the first calls the estimate uses their
+    measured average cost; before that it assumes the worst-case reservation.
+    """
     root = Path(root)
     ledger = satellite_ai.read_ledger(root/'ai')
     left = max(0., satellite_ai.PILOT_USD-ledger['reserved_usd'])
     model_path = root/'ai/model.json'
     reserve = json.loads(model_path.read_text(encoding='utf-8')).get('reservation_usd') if model_path.exists() else None
-    calls = math.floor(left/reserve+1e-9) if isinstance(reserve, (int, float)) and reserve > 0 else None
-    return {'reserved_usd': ledger['reserved_usd'], 'left_usd': left, 'calls_left': calls,
-            'halted': bool(ledger.get('halted'))}
+    reserve = reserve if isinstance(reserve, (int, float)) and reserve > 0 else None
+    measured = ledger['reported_usd']/ledger['calls'] if ledger['calls'] and ledger['reported_usd'] > 0 else None
+    if reserve and measured:
+        calls, basis = math.floor(max(0., left-reserve)/measured+1e-9), 'measured'
+    elif reserve:
+        calls, basis = math.floor(left/reserve+1e-9), 'worst case'
+    else:
+        calls, basis = None, None
+    return {'reserved_usd': ledger['reserved_usd'], 'left_usd': left, 'calls_left': calls, 'basis': basis,
+            'per_check_usd': measured if basis == 'measured' else reserve, 'halted': bool(ledger.get('halted'))}
 
 
 def coastal_region():
@@ -232,7 +244,8 @@ def main(argv=None):
     print('  TensorX AI     ', 'connected' if ai else 'not connected · free "AIS at image time" still works')
 
     money = budget(root)
-    calls = f" · about {money['calls_left']} more image checks" if money['calls_left'] is not None else ''
+    calls = (f" · about {money['calls_left']:,} more image checks ({money['basis']}, ${money['per_check_usd']:.4f} each)"
+             if money['calls_left'] is not None else '')
     halted = ' · HALTED, check the ledger' if money['halted'] else ''
     print(f"  AI budget       ${money['reserved_usd']:.2f} of ${satellite_ai.PILOT_USD:.0f} reserved{calls}{halted}")
 

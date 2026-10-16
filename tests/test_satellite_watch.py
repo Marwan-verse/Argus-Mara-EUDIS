@@ -129,11 +129,15 @@ class SetupScriptTests(unittest.TestCase):
                                                      save=Mock(), link=Mock()))
         rpc.assert_not_called()
 
-    def test_budget_counts_image_checks_left(self):
-        atomic_json(self.root/'ai/budget.json', {'reserved_usd': 1.0, 'reported_usd': .1, 'calls': 5})
+    def test_budget_counts_image_checks_left_at_the_measured_real_cost(self):
         atomic_json(self.root/'ai/model.json', {'reservation_usd': .2})
+        atomic_json(self.root/'ai/budget.json', {'reserved_usd': 0, 'reported_usd': 0, 'calls': 0})
         money = watch.budget(self.root)
-        self.assertEqual((money['left_usd'], money['calls_left'], money['halted']), (19.0, 95, False))
+        self.assertEqual((money['calls_left'], money['basis'], money['per_check_usd']), (100, 'worst case', .2))
+        # After calls settle, one reservation of headroom stays free and the rest goes at $0.02 each.
+        atomic_json(self.root/'ai/budget.json', {'reserved_usd': 1.0, 'reported_usd': .1, 'calls': 5, 'settled_calls': 5})
+        money = watch.budget(self.root)
+        self.assertEqual((money['left_usd'], money['calls_left'], money['basis'], money['halted']), (19.0, 940, 'measured', False))
         self.assertIsNone(watch.budget(self.root/'empty')['calls_left'])
 
     def test_granules_group_into_passes_and_missing_passes_are_expected(self):
