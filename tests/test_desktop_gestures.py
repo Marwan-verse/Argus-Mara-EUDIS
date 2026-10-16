@@ -34,11 +34,10 @@ class GestureTests(unittest.TestCase):
     def test_two_finger_scroll_moves_the_alert_list(self):
         board = self.app.alert_board
         self.assertEqual(scroll_deltas(self.root, (3 << 16) | (-12 & 0xffff)), (3.0, -12.0))
-        row = board.cards['SIM-01']['name']
-        self.assertIs(scrollable_under(row), board.list)
-        self.assertIs(scrollable_under(board.list._parent_canvas), board.list)
+        self.assertIs(scrollable_under(board.list.canvas), board.list)
+        self.assertIs(scrollable_under(board.list), board.list)
         self.assertIsNone(scrollable_under(self.app.map))
-        canvas = board.list._parent_canvas
+        canvas = board.list.canvas
         self.assertEqual(canvas.canvasy(0), 0)
         self.assertTrue(scroll_frame(board.list, 120))
         self.assertAlmostEqual(canvas.canvasy(0), 120, delta=2)

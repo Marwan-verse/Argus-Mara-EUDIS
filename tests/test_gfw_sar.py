@@ -507,9 +507,9 @@ class RadarDesktopTests(unittest.TestCase):
                 self.assertFalse(app.map.find_withtag('radar-contact-'+lead['id']))
                 satellite.show_radar.set(True)
                 board.refresh_evidence(satellite.workspace.comparison_index())
-                buttons = [w for w in board.evidence_frame.winfo_children() if isinstance(w, tk.Button)]
-                card = next(w for w in buttons if 'Radar contact without AIS' in w.cget('text'))
-                self.assertIn('Show radar contact on map', card.cget('text'))
+                entries = [link for link in board.evidence_frame.links if link.kind == 'entry']
+                card = next(link for link in entries if 'Radar contact without AIS' in link.text)
+                self.assertEqual(card.action, 'Show radar contact on map')
                 self.assertIn('radar detections (Global Fishing Watch)', board.evidence_status)
                 satellite.selected_radar = None
                 card.invoke()
