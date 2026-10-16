@@ -138,6 +138,8 @@ def main() -> int:
              lead(1, "image_without_ais", "medium", "Image contact without AIS")]
     leads += [lead(2 + i, "image_without_ais", "low", "Image contact without AIS") for i in range(24)]
     app.alert_board.refresh_evidence({"leads": leads, "reviews_checked": 26, "reviews_pending": 0})
+    # Keep the synthetic leads: the satellite poll would replace them with this machine's (empty) results.
+    app.alert_board.refresh_evidence = lambda *args, **kwargs: None
     pump(1.0)
     panel_shot("10-incidents-panel")
     app.alert_board.list.see("header:high", margin=0)
