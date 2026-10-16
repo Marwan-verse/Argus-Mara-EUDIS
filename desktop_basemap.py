@@ -206,7 +206,10 @@ RULER_INK = "#9fb3bd"
 ACCENT = "#46d1c4"
 FONT = ("Menlo", 8)
 FONT_BOLD = ("Menlo", 9, "bold")
-MARGIN_TAGS = ("chart-furniture", "chart-margin")
+MARGIN_TAGS = ("chart-furniture", "chart-margin", "chart-fixed")  # Margin strips stay put while panning
+X_TICKS = ("chart-furniture", "chart-margin", "ruler-x")  # Longitude ticks slide sideways only
+Y_TICKS = ("chart-furniture", "chart-margin", "ruler-y")  # Latitude ticks slide up and down only
+FIXED_TAGS = ("chart-furniture", "chart-fixed")
 
 
 def _grid_step(span_degrees: float) -> float:
@@ -249,13 +252,13 @@ def draw_grid(app, width: int, height: int, geo_to_world, world_to_geo, tile_siz
         if x < MARGIN + 2:
             continue
         canvas.create_line(x, MARGIN, x, height, fill=GRID, dash=(2, 5), tags="chart-furniture")
-        canvas.create_line(x, MARGIN - 6, x, MARGIN, fill=RULER_INK, tags=MARGIN_TAGS)
+        canvas.create_line(x, MARGIN - 6, x, MARGIN, fill=RULER_INK, tags=X_TICKS)
         canvas.create_text(x + 3, MARGIN / 2, text=_label(((lon + 180) % 360) - 180, "E", "W", lon_step, 3),
-                           anchor="w", fill=RULER_INK, font=FONT, tags=MARGIN_TAGS)
+                           anchor="w", fill=RULER_INK, font=FONT, tags=X_TICKS)
         for minor in range(1, 5):
             minor_x = x + minor * lon_step / 5 / 360 * world
             if minor_x < width:
-                canvas.create_line(minor_x, MARGIN - 3, minor_x, MARGIN, fill=RULER_INK, tags=MARGIN_TAGS)
+                canvas.create_line(minor_x, MARGIN - 3, minor_x, MARGIN, fill=RULER_INK, tags=X_TICKS)
     first = math.ceil(lat_bottom / lat_step) * lat_step
     for index in range(80):
         lat = first + index * lat_step
@@ -267,13 +270,13 @@ def draw_grid(app, width: int, height: int, geo_to_world, world_to_geo, tile_siz
         if y < MARGIN + 2:
             continue
         canvas.create_line(MARGIN, y, width, y, fill=GRID, dash=(2, 5), tags="chart-furniture")
-        canvas.create_line(MARGIN - 6, y, MARGIN, y, fill=RULER_INK, tags=MARGIN_TAGS)
+        canvas.create_line(MARGIN - 6, y, MARGIN, y, fill=RULER_INK, tags=Y_TICKS)
         canvas.create_text(MARGIN / 2, y - 3, text=_label(lat, "N", "S", lat_step, 2), angle=90,
-                           anchor="w", fill=RULER_INK, font=FONT, tags=MARGIN_TAGS)
+                           anchor="w", fill=RULER_INK, font=FONT, tags=Y_TICKS)
         for minor in range(1, 5):
             minor_y = geo_to_world(lat + minor * lat_step / 5, 0, z)[1] - center_y + height / 2
             if minor_y > MARGIN:
-                canvas.create_line(MARGIN - 3, minor_y, MARGIN, minor_y, fill=RULER_INK, tags=MARGIN_TAGS)
+                canvas.create_line(MARGIN - 3, minor_y, MARGIN, minor_y, fill=RULER_INK, tags=Y_TICKS)
     canvas.create_rectangle(0, 0, MARGIN, MARGIN, fill=RULER_BG, outline="", tags=MARGIN_TAGS)
     canvas.create_line(MARGIN, MARGIN, width, MARGIN, fill="#33505e", tags=MARGIN_TAGS)
     canvas.create_line(MARGIN, MARGIN, MARGIN, height, fill="#33505e", tags=MARGIN_TAGS)
@@ -281,17 +284,17 @@ def draw_grid(app, width: int, height: int, geo_to_world, world_to_geo, tile_siz
 
 def draw_north_arrow(canvas, x: float, y: float) -> None:
     radius = 22
-    canvas.create_oval(x - radius, y - radius, x + radius, y + radius, outline="#3b5967", width=1, tags="chart-furniture")
+    canvas.create_oval(x - radius, y - radius, x + radius, y + radius, outline="#3b5967", width=1, tags=FIXED_TAGS)
     for angle in range(0, 360, 30):
         inner = radius - (5 if angle % 90 == 0 else 3)
         rad = math.radians(angle)
         canvas.create_line(x + inner * math.sin(rad), y - inner * math.cos(rad),
-                           x + radius * math.sin(rad), y - radius * math.cos(rad), fill="#5d7c89", tags="chart-furniture")
-    canvas.create_polygon(x, y - radius + 4, x + 6, y + 2, x, y - 2, fill=ACCENT, outline="", tags="chart-furniture")
-    canvas.create_polygon(x, y - radius + 4, x - 6, y + 2, x, y - 2, fill="#1f6f69", outline="", tags="chart-furniture")
-    canvas.create_polygon(x, y + radius - 4, x + 6, y - 2, x, y + 2, fill="#4b5a62", outline="", tags="chart-furniture")
-    canvas.create_polygon(x, y + radius - 4, x - 6, y - 2, x, y + 2, fill="#26323a", outline="", tags="chart-furniture")
-    canvas.create_text(x, y - radius - 8, text="N", fill=ACCENT, font=FONT_BOLD, tags="chart-furniture")
+                           x + radius * math.sin(rad), y - radius * math.cos(rad), fill="#5d7c89", tags=FIXED_TAGS)
+    canvas.create_polygon(x, y - radius + 4, x + 6, y + 2, x, y - 2, fill=ACCENT, outline="", tags=FIXED_TAGS)
+    canvas.create_polygon(x, y - radius + 4, x - 6, y + 2, x, y - 2, fill="#1f6f69", outline="", tags=FIXED_TAGS)
+    canvas.create_polygon(x, y + radius - 4, x + 6, y - 2, x, y + 2, fill="#4b5a62", outline="", tags=FIXED_TAGS)
+    canvas.create_polygon(x, y + radius - 4, x - 6, y - 2, x, y + 2, fill="#26323a", outline="", tags=FIXED_TAGS)
+    canvas.create_text(x, y - radius - 8, text="N", fill=ACCENT, font=FONT_BOLD, tags=FIXED_TAGS)
 
 
 def draw_scale_bar(canvas, width: int, height: int, lat: float, zoom: int, tile_size: int, card: str, line: str) -> None:
@@ -304,17 +307,17 @@ def draw_scale_bar(canvas, width: int, height: int, lat: float, zoom: int, tile_
     pixels = nm / nm_per_pixel
     right, bottom = width - 72, height - 124  # Above the layer bar and the zoom buttons
     left = right - pixels
-    canvas.create_rectangle(left - 10, bottom - 34, right + 12, bottom + 16, fill=card, outline=line, tags="chart-furniture")
+    canvas.create_rectangle(left - 10, bottom - 34, right + 12, bottom + 16, fill=card, outline=line, tags=FIXED_TAGS)
     for part in range(4):
         x1 = left + pixels * part / 4
         canvas.create_rectangle(x1, bottom - 4, x1 + pixels / 4, bottom, outline="#c9d6dc",
-                                fill="#c9d6dc" if part % 2 == 0 else card, tags="chart-furniture")
-    canvas.create_text(left, bottom - 10, text="0", anchor="sw", fill=RULER_INK, font=FONT, tags="chart-furniture")
-    canvas.create_text(right, bottom - 10, text=f"{nm:g} NM", anchor="se", fill="#dfe8ec", font=FONT_BOLD, tags="chart-furniture")
-    canvas.create_text(right, bottom + 3, text=f"{nm * 1.852:.3g} km", anchor="ne", fill=RULER_INK, font=FONT, tags="chart-furniture")
+                                fill="#c9d6dc" if part % 2 == 0 else card, tags=FIXED_TAGS)
+    canvas.create_text(left, bottom - 10, text="0", anchor="sw", fill=RULER_INK, font=FONT, tags=FIXED_TAGS)
+    canvas.create_text(right, bottom - 10, text=f"{nm:g} NM", anchor="se", fill="#dfe8ec", font=FONT_BOLD, tags=FIXED_TAGS)
+    canvas.create_text(right, bottom + 3, text=f"{nm * 1.852:.3g} km", anchor="ne", fill=RULER_INK, font=FONT, tags=FIXED_TAGS)
     denominator = km_per_pixel * 1000 / 0.000264583  # 96 dpi screen pixel = 0.2646 mm
     ratio = f"1:{denominator / 1e6:.2f}M" if denominator >= 1e6 else f"1:{denominator / 1e3:.0f}k"
-    canvas.create_text(left, bottom + 3, text=f"Z{zoom} · {ratio}", anchor="nw", fill=RULER_INK, font=FONT, tags="chart-furniture")
+    canvas.create_text(left, bottom + 3, text=f"Z{zoom} · {ratio}", anchor="nw", fill=RULER_INK, font=FONT, tags=FIXED_TAGS)
 
 
 def readout_text(lat: float | None, lon: float | None) -> str:
@@ -328,9 +331,9 @@ def draw_readout(app, width: int) -> None:
     text = readout_text(lat, lon)
     x = width - 12 - 215  # Top right, clear of the chart title and the tool rail below it
     app.map.create_rectangle(x - 215, MARGIN + 6, x + 215, MARGIN + 28, fill=RULER_BG, outline="#33505e",
-                             tags=("chart-furniture", "chart-readout-box"))
+                             tags=("chart-furniture", "chart-fixed", "chart-readout-box"))
     app.map.create_text(x, MARGIN + 17, text=text, fill="#dfe8ec", font=FONT_BOLD,
-                        tags=("chart-furniture", "chart-readout"))
+                        tags=("chart-furniture", "chart-fixed", "chart-readout"))
 
 
 def update_readout(app, lat: float, lon: float) -> None:
@@ -345,4 +348,4 @@ def draw_frame(canvas, width: int, height: int) -> None:
     length = 26
     for x, y, dx, dy in ((MARGIN + 4, MARGIN + 4, 1, 1), (width - 4, MARGIN + 4, -1, 1),
                          (MARGIN + 4, height - 4, 1, -1), (width - 4, height - 4, -1, -1)):
-        canvas.create_line(x, y + dy * length, x, y, x + dx * length, y, fill=ACCENT, width=2, tags="chart-furniture")
+        canvas.create_line(x, y + dy * length, x, y, x + dx * length, y, fill=ACCENT, width=2, tags=FIXED_TAGS)

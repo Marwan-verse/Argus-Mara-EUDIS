@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 from io import BytesIO
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -41,6 +42,7 @@ from argus.map_view import coordinates, find_ports, geographic_extent, route_nam
 from argus.prediction import dark_countdown, last_gap, position_at, reappearance_check, v_max_kn
 from desktop_ais import DesktopAIS
 import desktop_basemap
+from desktop_motion import FIXED, TILE, MapMotion
 import desktop_prediction
 
 
@@ -254,6 +256,8 @@ class ArgusApp:
         self.chart_margin = desktop_basemap.MARGIN if UI_EDITION == "pro" else 0
         self._cursor_geo = (None, None)
         self._tile_fallback: dict[tuple[int, int, int], tk.PhotoImage] = {}
+        self.motion = MapMotion(self)  # Smooth pan and animated zoom (desktop_motion.py)
+        self._tile_pixels: OrderedDict = OrderedDict()  # Decoded tiles, so a zoom animation starts at once
         self.map_layers = {name: tk.BooleanVar(value=True) for name in ("AIS track", "Dark prediction", "Radar contacts", "Cable", "Anchor reach", "Response assets", "World ports", "Historical cable routes", "Simulated alerts", "Rain and cloud", "Wind")}
         self.map_layers["World ports"].set(True)
         self.irish_ports_only = tk.BooleanVar(value=True)
@@ -1310,10 +1314,11 @@ class ArgusApp:
         title = self.map.bbox("map_title")
         top = (title[3] if title else 26) + 6
         left = getattr(self, "chart_margin", 0)
-        label = self.map.create_text(14 + left, top + 4, text=text, anchor="nw", fill=INK, font=("Segoe UI Semibold", 8))
+        label = self.map.create_text(14 + left, top + 4, text=text, anchor="nw", fill=INK, font=("Segoe UI Semibold", 8),
+                                     tags=(FIXED,))
         _x1, y1, x2, y2 = self.map.bbox(label)
         line = y2 - y1
-        background = self.map.create_rectangle(8 + left, top, x2 + 8, y2 + 8, fill=CARD, outline=LINE)
+        background = self.map.create_rectangle(8 + left, top, x2 + 8, y2 + 8, fill=CARD, outline=LINE, tags=(FIXED,))
         self.map.tag_raise(label)
         rows = []
         if rain_on:
@@ -1329,11 +1334,13 @@ class ArgusApp:
             x = 14 + left
             for index, (colour, caption) in enumerate(swatches):
                 if kind == "box":
-                    self.map.create_rectangle(x, row - line // 3, x + line, row + line // 3, fill=colour, outline="")
+                    self.map.create_rectangle(x, row - line // 3, x + line, row + line // 3, fill=colour, outline="",
+                                              tags=(FIXED,))
                 else:
-                    self.map.create_line(x, row, x + line, row, fill=colour, width=2.5, arrow="last", arrowshape=(7, 8, 3))
+                    self.map.create_line(x, row, x + line, row, fill=colour, width=2.5, arrow="last", arrowshape=(7, 8, 3),
+                                         tags=(FIXED,))
                 item = self.map.create_text(x + line + 4, row, text=caption + (unit if index == len(swatches) - 1 else ""),
-                                            anchor="w", fill=MUTED, font=("Segoe UI", 8))
+                                            anchor="w", fill=MUTED, font=("Segoe UI", 8), tags=(FIXED,))
                 x = self.map.bbox(item)[2] + (line if kind == "box" and index == 0 else line // 2)
             right, bottom = max(right, x), row + line // 2
         self.map.coords(background, 8 + left, top, right + 8, bottom + 6)
@@ -2078,7 +2085,7 @@ class ArgusApp:
             if path.exists() and key not in self._tile_images:
                 try:
                     with Image.open(path) as image:
-                        self._tile_images[key] = ImageTk.PhotoImage(image.copy(), master=self.map)
+                        self._tile_images[key] = ImageTk.PhotoImage(self._remember_tile(key, image), master=self.map)
                 except (OSError, ValueError, tk.TclError):
                     path.unlink(missing_ok=True)
             fresh = path.exists() and (chart or metadata.get("expires_at", 0) > time.time())
@@ -2119,10 +2126,10 @@ class ArgusApp:
                 try:
                     if image_data:
                         with Image.open(BytesIO(image_data)) as image:
-                            self._tile_images[key] = ImageTk.PhotoImage(image.copy(), master=self.map)
+                            self._tile_images[key] = ImageTk.PhotoImage(self._remember_tile(key, image), master=self.map)
                     else:
                         with Image.open(path) as image:
-                            self._tile_images[key] = ImageTk.PhotoImage(image.copy(), master=self.map)
+                            self._tile_images[key] = ImageTk.PhotoImage(self._remember_tile(key, image), master=self.map)
                     self._tile_status = result
                     changed = True
                 except (OSError, tk.TclError):
@@ -2153,6 +2160,7 @@ class ArgusApp:
         if is_raster(mode):
             # Every base map shares the z/x/y keys, so drop the images of the previous one.
             self._tile_images.clear()
+            self._tile_pixels.clear()
             self._tile_fallback.clear()
             self._tile_retry_after.clear()
             self.map_zoom = min(self.map_zoom, max_zoom_for(mode))
@@ -2171,6 +2179,8 @@ class ArgusApp:
             self.ais_tracker.follow.set(False)
         self._drag_state = {"x": event.x, "y": event.y, "last_x": event.x, "last_y": event.y, "moved": False}
         self.map.configure(cursor="tcross" if self.map_tool else "fleur")
+        if getattr(self, "motion", None) is not None:
+            self.motion.start_pan()
 
     def _pan_move(self, event) -> None:
         if not self._drag_state:
@@ -2180,17 +2190,21 @@ class ArgusApp:
             drag["moved"] = True
         if not drag["moved"]:
             return
+        dx, dy = event.x - drag["last_x"], event.y - drag["last_y"]
         center_x, center_y = geo_to_world(*self.map_center, self.map_zoom)
-        center_x -= event.x - drag["last_x"]
-        center_y -= event.y - drag["last_y"]
-        self.map_center = world_to_geo(center_x, center_y, self.map_zoom)
+        self.map_center = world_to_geo(center_x - dx, center_y - dy, self.map_zoom)
         drag["last_x"], drag["last_y"] = event.x, event.y
-        self._draw_map(force_static=True)
+        if getattr(self, "motion", None) is not None:
+            self.motion.pan(dx, dy)  # Slide what is drawn; the full redraw follows when the drag rests
+        else:
+            self._draw_map(force_static=True)
 
     def _pan_end(self, event) -> None:
         was_drag = bool(self._drag_state and self._drag_state["moved"])
         self._drag_state = None
         self.map.configure(cursor="hand2" if self.map_tool else "")
+        if getattr(self, "motion", None) is not None:
+            self.motion.end_pan()
         if was_drag:
             self._schedule_tile_refresh()
             if hasattr(self, "port_visible") and self.port_visible.get():
@@ -2328,18 +2342,27 @@ class ArgusApp:
         self._zoom_at(direction, x, y)
 
     def _zoom_at(self, amount: int, screen_x: float, screen_y: float) -> None:
+        motion = getattr(self, "motion", None)
+        if motion is not None:
+            motion.finish_zoom()  # A zoom still animating lands first, so steps never compound visually
         maximum = max_zoom_for(self.map_mode.get())
         new_zoom = max(MIN_MAP_ZOOM, min(maximum, self.map_zoom + amount))
         if new_zoom == self.map_zoom:
             return
+        reduced = hasattr(self, "tools") and self.tools.reduced_motion.get()
+        animate = motion is not None and hasattr(self, "map") and not reduced
+        raster = motion.snapshot() if animate else None  # The chart as drawn now, before the zoom changes
         under_cursor = world_to_geo(*self._world_at(screen_x, screen_y), self.map_zoom)
-        self.map_zoom = new_zoom
+        old_zoom, self.map_zoom = self.map_zoom, new_zoom
         point_x, point_y = geo_to_world(*under_cursor, new_zoom)
         center_x = point_x - (screen_x - self._map_size[0] / 2)
         center_y = point_y - (screen_y - self._map_size[1] / 2)
         self.map_center = world_to_geo(center_x, center_y, new_zoom)
-        self._draw_map(force_static=True)
-        self._schedule_tile_refresh()
+        if animate:
+            motion.zoom(2 ** (new_zoom - old_zoom), screen_x, screen_y, raster)  # Ends with the same full draw
+        else:
+            self._draw_map(force_static=True)
+            self._schedule_tile_refresh()
 
         if hasattr(self, "port_visible") and self.port_visible.get():
             self._schedule_port_directory()
@@ -2384,7 +2407,7 @@ class ArgusApp:
                 for lon, lat in ring:
                     x, y = geo_to_world(lat, lon, z)
                     coords.extend((x - center_x + width / 2 + shift, y - center_y + height / 2))
-                self.map.create_polygon(coords, fill="#090c0f", outline="#38424b", width=1)
+                self.map.create_polygon(coords, fill="#090c0f", outline="#38424b", width=1, tags=("map-land",))
         if z >= 8 and not is_raster(self.map_mode.get()):
             for ring, (lon_min, lat_min, lon_max, lat_max) in self.coastline_rings:
                 north_y = geo_to_world(lat_max, 0, z)[1] - center_y + height / 2
@@ -2397,7 +2420,7 @@ class ArgusApp:
                 for lon, lat in ring:
                     x, y = geo_to_world(lat, lon, z)
                     coords.extend((x - center_x + width / 2, y - center_y + height / 2))
-                self.map.create_polygon(coords, fill="#090c0f", outline="#38424b", width=1)
+                self.map.create_polygon(coords, fill="#090c0f", outline="#38424b", width=1, tags=("map-land",))
 
     def _draw_graticule(self, width: int, height: int) -> None:
         z = self.map_zoom
@@ -2507,8 +2530,11 @@ class ArgusApp:
         self._map_size = size
         width, height = size
         exercise = not hasattr(self, "exercise_visible") or self.exercise_visible.get()
+        motion = getattr(self, "motion", None)
+        if motion is not None and motion.defer():
+            return  # A drag or zoom animation is running; it redraws when it ends.
         self.map.delete("all")
-        self.map.create_rectangle(0, 0, width, height, fill=SEA, outline="")
+        self.map.create_rectangle(0, 0, width, height, fill=SEA, outline="", tags=("map-sea", FIXED))
         map_labels: list[tuple[int, str, str, float, float]] = []
         grid_label_boxes: list[tuple[int, int, int, int]] = []
         mode = self.map_mode.get()
@@ -2527,15 +2553,15 @@ class ArgusApp:
                 sx = x_absolute * TILE_SIZE - center_x + width / 2
                 sy = y_absolute * TILE_SIZE - center_y + height / 2
                 if image:
-                    self.map.create_image(sx, sy, image=image, anchor="nw")
+                    self.map.create_image(sx, sy, image=image, anchor="nw", tags=(TILE,))
             self.map.create_text(title_at, title_at, text=source.title if source else "NASA BLUE MARBLE · DISPLAY ONLY", anchor="nw",
                                  fill=desktop_basemap.RULER_INK if source else "#1e3550",
-                                 font=desktop_basemap.FONT_BOLD if pro else ("Segoe UI Semibold", 9), tags="map_title")
+                                 font=desktop_basemap.FONT_BOLD if pro else ("Segoe UI Semibold", 9), tags=("map_title", FIXED))
             self.map_status_label.configure(text=self._tile_status or (f"{mode} · cached on this device" if source else "NASA imagery · cached on this device"))
             self.map_attribution_label.configure(text=source.attribution if source else "NASA Earthdata · Natural Earth · NGA · TeleGeography")
         else:
             self.map.create_text(title_at, title_at, text="GLOBAL COASTLINE · DISPLAY ONLY", anchor="nw",
-                                 fill=MUTED, font=desktop_basemap.FONT_BOLD if pro else ("Segoe UI Semibold", 9), tags="map_title")
+                                 fill=MUTED, font=desktop_basemap.FONT_BOLD if pro else ("Segoe UI Semibold", 9), tags=("map_title", FIXED))
             self.map_status_label.configure(text="Drag to pan · wheel, two-finger scroll or +/- to zoom" if not self.map_tool else self.map_status_label.cget("text"))
             self.map_attribution_label.configure(text="Natural Earth · Marine Atlas CC BY 4.0 · NGA · TeleGeography")
 
@@ -2629,8 +2655,8 @@ class ArgusApp:
         for _priority, kind, label, x, y in sorted(map_labels, key=lambda item: item[0]):
             self._draw_map_callout(label, x, y, kind, reserved)
         self._draw_weather_legend()
-        self.map.create_rectangle(4, height - 24, width - 4, height - 3, fill=CARD, outline="")
-        self.map.create_text(10, height - 13,
+        self.map.create_rectangle(4, height - 24, width - 4, height - 3, fill=CARD, outline="", tags=(FIXED,))
+        self.map.create_text(10, height - 13, tags=(FIXED,),
                              text="Irish AIS observations · received positions only" if not exercise else "Reference ports and cables · exercise overlays fictional",
                              anchor="w", fill="#93a8b5", font=("Segoe UI", 8))
         if pro and width >= 350:
@@ -2643,16 +2669,29 @@ class ArgusApp:
             power = 10 ** math.floor(math.log10(max(target, .00001)))
             km = next(v * power for v in (1, 2, 5, 10) if v * power >= target)
             pixels = km / km_per_pixel
-            self.map.create_rectangle(width - pixels - 24, height - 56, width - 8, height - 27, fill=CARD, outline=LINE)
-            self.map.create_line(width - pixels - 16, height - 35, width - 16, height - 35, width=2, fill=INK)
-            self.map.create_text(width - 16, height - 48, text=f"{km:g} km · z{self.map_zoom}", anchor="e", fill=INK, font=("Segoe UI", 8))
+            self.map.create_rectangle(width - pixels - 24, height - 56, width - 8, height - 27, fill=CARD, outline=LINE,
+                                      tags=(FIXED,))
+            self.map.create_line(width - pixels - 16, height - 35, width - 16, height - 35, width=2, fill=INK, tags=(FIXED,))
+            self.map.create_text(width - 16, height - 48, text=f"{km:g} km · z{self.map_zoom}", anchor="e", fill=INK,
+                                 font=("Segoe UI", 8), tags=(FIXED,))
         if self._prediction_banner:
-            desktop_prediction.draw_banner(self, self._prediction_banner)
+            desktop_prediction.draw_banner(self, self._prediction_banner, tags=(FIXED,))
         self._draw_map_ping()
         if pro:
             self.map.tag_raise("chart-margin")
             desktop_basemap.draw_readout(self, width)
             desktop_basemap.draw_frame(self.map, width, height)
+
+    def _remember_tile(self, key: tuple[int, int, int], image: Image.Image) -> Image.Image:
+        """Keep the last 300 decoded tiles (about 60 MB) for zoom animations; returns an RGB copy."""
+        pixels = image.convert("RGB")
+        cache = getattr(self, "_tile_pixels", None)
+        if cache is not None:
+            cache[key] = pixels
+            cache.move_to_end(key)
+            while len(cache) > 300:
+                cache.popitem(last=False)
+        return pixels
 
     def _fallback_tile(self, key: tuple[int, int, int]) -> tk.PhotoImage | None:
         """While a detailed tile loads, show its cached parent tile enlarged instead of a hole."""

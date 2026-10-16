@@ -1321,10 +1321,10 @@ class AlertBoard:
         if items:
             text = f"SIMULATED · {len(items)} fictional contact{'s' if len(items) != 1 else ''}"
             label = app.map.create_text(20 + getattr(app, "chart_margin", 0), 40 + getattr(app, "chart_margin", 0), text=text, anchor="w", fill=ui.INK, font=(SANS, 9, "bold"),
-                                        tags=("sim-badge",))
+                                        tags=("sim-badge", "chart-fixed"))
             left, top, right, bottom = app.map.bbox(label)
             box = app.map.create_rectangle(left - 7, top - 3, right + 7, bottom + 3, fill=ui.BG, outline=ui.LINE,
-                                           tags=("sim-badge",))
+                                           tags=("sim-badge", "chart-fixed"))
             app.map.tag_lower(box, label)
 
     def draw_response(self, occupied) -> None:
@@ -1425,8 +1425,12 @@ class AlertBoard:
         if self.app.tools.reduced_motion.get():
             return
         radius = 17 if self.pulse else 13
-        for halo, x, y in self.halos:
-            self.app.map.coords(halo, x - radius, y - radius, x + radius, y + radius)
+        for halo, _x, _y in self.halos:
+            # Around the halo's current centre: a drag or zoom may have moved it since it was drawn.
+            box = self.app.map.coords(halo)
+            if len(box) == 4:
+                x, y = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+                self.app.map.coords(halo, x - radius, y - radius, x + radius, y + radius)
 
     def describe(self, identifier: str) -> str:
         item = self.by_id[identifier]
