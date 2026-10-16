@@ -10,6 +10,15 @@ finish() {
 }
 
 if command -v git >/dev/null 2>&1; then
+  branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+  if [ -n "$branch" ] && [ "$branch" != "main" ]; then
+    echo "You are on branch \"$branch\". The newest version of the app is on \"main\"."
+    read -r -p "Switch to main now? [Y/n] " answer
+    case "$answer" in
+      [nN]*) echo "Staying on $branch." ;;
+      *) git checkout main || echo "Could not switch to main (uncommitted changes?). Staying on $branch." ;;
+    esac
+  fi
   echo "Fetching the latest version of this branch..."
   if ! git pull --ff-only; then
     echo "Update failed, so the version already on this computer will start."
