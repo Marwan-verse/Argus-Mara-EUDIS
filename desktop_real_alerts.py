@@ -58,9 +58,17 @@ def parse_time(value) -> float | None:
         return None
 
 
+def can_read(workspace_root) -> bool:
+    """Whether this computer may read the team AIS database.
+
+    With D108 every teammate's app reads with the built-in publishable key (``supabase_ais.readable``);
+    before that, only a workspace linked with the secret key can."""
+    return getattr(supabase_ais, "readable", supabase_ais.linked)(workspace_root)
+
+
 def check(tracks, workspace_root, now: float | None = None) -> dict:
     """One check on the worker thread: the rules on real ships near the routes, or why they could not run."""
-    if not supabase_ais.linked(workspace_root):
+    if not can_read(workspace_root):
         return {"state": "unlinked"}
     now = time.time() if now is None else now
     started = time.perf_counter()
@@ -244,8 +252,8 @@ class RealAlerts:
         if self.feed == "disabled":
             text = "Off on this computer (ARGUS_REAL_ALERTS=0)."
         elif self.feed == "unlinked":
-            text = ("Not running: this computer is not linked to the team AIS database. The rules need the "
-                    "recorded tracks, not only the live map positions.")
+            text = ("Not running: this computer cannot read the team AIS database. The rules need its recorded "
+                    "tracks, not only the live map positions.")
         elif self.feed == "remote":
             text = "Not shown through the SOC connection yet: they run on a computer linked to the team database."
         elif self.checked_t is None:

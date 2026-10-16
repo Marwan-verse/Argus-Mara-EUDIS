@@ -171,7 +171,7 @@ def main() -> int:
               "250000006": {"name": "SYNTHETIC SURVEYOR", "ship_type": "33", "length_m": "60"},
               "250000007": {"name": "SYNTHETIC YACHT", "ship_type": "37", "length_m": "12"}}
     answer = {"positions": sorted(rows, key=lambda row: row[1]), "static": static, "truncated": False}
-    with patch("argus.supabase_ais.linked", return_value=True), patch("argus.watchlist_data.load", return_value=None):
+    with patch("desktop_real_alerts.can_read", return_value=True), patch("argus.watchlist_data.load", return_value=None):
         result = check(LiveTracks(rpc=lambda _payload: answer), ROOT)
     report["real_alerts"] = [[item["name"], item["assessment"]["level"]] for item in result.get("items", [])]
     board = app.alert_board

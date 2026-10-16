@@ -6,18 +6,19 @@ import time
 import unittest
 from unittest.mock import patch
 
+from argus import supabase_ais
 from argus.decision_log import DecisionLog
 from argus.explain import explain, source
 from argus.levels import LEVEL_NAMES
 from argus.live_alerts import LiveTracks
-from desktop_real_alerts import EPISODE_GAP_S, FORGET_S, RealAlerts, check
+from desktop_real_alerts import EPISODE_GAP_S, FORGET_S, RealAlerts, can_read, check
 
 from test_live_alerts import IN_PORT, LOITERER, NOW, STATIC, TRANSIT, FakeDatabase, packet
 
 
 def checked(*tracks, now=NOW, rpc=None):
     live = LiveTracks(rpc=rpc or FakeDatabase(packet(*tracks, static=STATIC)))
-    with patch('argus.supabase_ais.linked', return_value=True), patch('argus.watchlist_data.load', return_value=None):
+    with patch('desktop_real_alerts.can_read', return_value=True), patch('argus.watchlist_data.load', return_value=None):
         return check(live, 'workspace', now=now)
 
 
@@ -49,7 +50,7 @@ class CheckTests(unittest.TestCase):
         self.assertEqual(BASE['label'], 'real')
 
     def test_a_computer_not_linked_or_a_failing_database_is_reported_not_raised(self):
-        with patch('argus.supabase_ais.linked', return_value=False):
+        with patch('desktop_real_alerts.can_read', return_value=False):
             self.assertEqual(check(LiveTracks(rpc=FakeDatabase()), 'workspace'), {'state': 'unlinked'})
 
         def missing(_payload):
@@ -57,6 +58,14 @@ class CheckTests(unittest.TestCase):
         result = checked(rpc=missing)
         self.assertEqual(result['state'], 'error')
         self.assertIn('argus_recent_tracks may not be installed', result['error'])
+
+    def test_keyless_reading_is_used_when_the_database_client_offers_it(self):
+        with patch.object(supabase_ais, 'linked', return_value=False):
+            with patch.object(supabase_ais, 'readable', return_value=True, create=True):
+                self.assertTrue(can_read('workspace'))  # D108: every teammate's app reads without the secret key
+            with patch.dict(supabase_ais.__dict__):
+                supabase_ais.__dict__.pop('readable', None)
+                self.assertFalse(can_read('workspace'))  # before D108: only a linked workspace
 
     def test_real_alerts_are_labelled_real_live_ais_in_the_review_window(self):
         about = source(BASE)
@@ -140,7 +149,7 @@ class RealAlertTests(unittest.TestCase):
         self.assertIn('Last check failed: Cannot reach the Supabase database', text)
         self.assertIn('never evidence of intent', text)
         self.real.update({'state': 'unlinked'})
-        self.assertIn('not linked to the team AIS database', self.real.status_text())
+        self.assertIn('cannot read the team AIS database', self.real.status_text())
 
 
 class SignedLogTests(unittest.TestCase):

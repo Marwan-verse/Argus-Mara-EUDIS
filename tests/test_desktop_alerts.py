@@ -334,7 +334,7 @@ class DesktopAlertBoardTests(unittest.TestCase):
         from desktop_real_alerts import check
         from test_live_alerts import NOW, STATIC, FakeDatabase, packet
         live = LiveTracks(rpc=FakeDatabase(packet(*tracks, static=STATIC)))
-        with patch('argus.supabase_ais.linked', return_value=True), \
+        with patch('desktop_real_alerts.can_read', return_value=True), \
                 patch('argus.watchlist_data.load', return_value=None):
             return check(live, 'workspace', now=NOW)
 

@@ -28,7 +28,7 @@ Every result is labelled **real** and worded *for review*. A level is a rule out
 
 ## In the app (D107)
 
-The desktop app checks every 5 minutes on a background thread, on a computer linked to the team database (`desktop_real_alerts.py`). Set `ARGUS_REAL_ALERTS=0` to turn it off.
+The desktop app checks every 5 minutes on a background thread (`desktop_real_alerts.py`), on a computer that can read the team database: a linked workspace, or, with D108, every teammate's app through the built-in read-only key. Set `ARGUS_REAL_ALERTS=0` to turn it off.
 
 - **Incidents panel:** each ship is one alert, `REAL-<MMSI>`, tagged **AIS · REAL**, in the band of its level and ahead of the simulated contacts. Low alerts fold under LOW. The line under the name shows the status and level, for example `New · High 9 · In corridor`. SOURCES › LIVE AIS ALERTS says how many ships were checked and when.
 - **Review window:** a click opens the same explanation as for exercise contacts, tagged REAL · LIVE AIS, with the MMSI and a log in UTC. It shows no responders, because the response assets are the exercise's fictional fleet.
@@ -41,7 +41,7 @@ The desktop app checks every 5 minutes on a background thread, on a computer lin
   - When the rules stop raising an alert nobody opened, it stays as "cleared · not reviewed" until someone opens it. Once opened, it moves to Closed.
   - An alert raised again within 30 min continues its episode. A cleared alert is forgotten after 6 h.
 - **Map:** the *Real alerts* layer shows each ship's recent track, a `NAME · REAL` label and a badge `REAL · N live AIS alerts · checked HH:MMZ`. A click on the ship opens its review. Hiding the simulated alerts keeps the real ones.
-- **Failures:** a failed check keeps the last alerts and says so in SOURCES and on the badge. A computer that is not linked shows a *Connect team database* button. A 404 from the database means the `argus_recent_tracks` migration has not been applied yet.
+- **Failures:** a failed check keeps the last alerts and says so in SOURCES and on the badge. A computer that cannot read the database shows a *Connect team database* button. A 404 means the database lacks the `argus_recent_tracks` function (migration 20261016134500).
 
 ## First check on live data (16 Oct 2026, about 14:30 UTC)
 
