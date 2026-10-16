@@ -5,7 +5,8 @@ import customtkinter as ctk
 
 from argus import responders
 from argus.collab_crypto import validate_payload
-from argus.report_ai import build_pack, check_report, template_draft
+from argus import report_ai
+from argus.report_ai import build_pack, check_all, draft_report
 from argus.vessel_reports import CATEGORIES, make_report
 from desktop_soc_view import BG, CARD, MUTED, button, label
 
@@ -177,7 +178,8 @@ class ReportDialog:
         done(box["result"])
 
     def draft(self):
-        self.run("Drafting from the evidence…", lambda: template_draft(self.pack), self.drafted)
+        self.run("Drafting from the evidence… (AI when a key and budget allow)", lambda: draft_report(self.pack),
+                 self.drafted)
 
     def drafted(self, result):
         # One undo step: Ctrl+Z brings back exactly the text the draft replaced.
@@ -188,27 +190,63 @@ class ReportDialog:
         self.reason.edit_separator()
         self.reason.configure(autoseparators=True)
         self.category.set(result["category"])
-        self.generation = {key: result[key] for key in ("method", "model", "generated_utc", "evidence")}
-        self.show_notes("Template draft from system data: written by code from the evidence, no AI used.\n"
-                        f"Category set to the suggestion: {result['category']}. Change it if you disagree.\n"
-                        f"Evidence used: {', '.join(result['evidence'])}.\n"
-                        "Edit the text before you send it; Ctrl+Z restores your previous text.")
+        meta = result.get("ai") or {}
+        self.generation = {"method": result["method"], "model": result.get("model"),
+                           "generated_utc": result["generated_utc"], "evidence": result["evidence"],
+                           "cost_usd": meta.get("cost_usd"), "cached": meta.get("cached"),
+                           "fallback": result.get("fallback")}
+        if result["method"] == "ai":
+            head = (f"AI-assisted draft by {result['model']}. Code checked it against the evidence: times, "
+                    "positions, numbers, names, IDs, level, intent words and data label.")
+        else:
+            head = f"Template draft from system data, no AI used: {result['fallback']}."
+        lines = [head, *result.get("notes", ()),
+                 f"Category set to the suggestion: {result['category']}. Change it if you disagree.",
+                 f"Evidence used: {', '.join(result['evidence'])}."]
+        if meta:
+            lines.append(self.cost_line(meta))
+        lines.append("Edit the text before you send it; Ctrl+Z restores your previous text.")
+        self.show_notes("\n".join(lines))
+
+    def cost_line(self, meta):
+        spent = report_ai.budget()
+        total = "" if spent["reserved_usd"] is None else (
+            f" · report AI budget ${spent['reserved_usd']:.4f} of ${spent['limit_usd']:g} used")
+        cost = "from cache, no cost" if meta.get("cached") else f"cost ${meta['cost_usd']:.4f} (provider usage)"
+        return f"{meta['model']} · {cost}{total}"
 
     def check(self):
         text, category = self.reason.get("1.0", "end"), self.category.get()
-        self.run("Checking the report against the system data…", lambda: check_report(self.pack, text, category),
+        self.run("Checking the report against the system data…", lambda: check_all(self.pack, text, category),
                  self.checked)
 
-    def checked(self, result):
-        lines = ["CODE CHECK (exact, no AI)"]
-        if result["consistent"]:
-            lines.append("Report is consistent with system data.")
-        for number, finding in enumerate(result["findings"], 1):
+    @staticmethod
+    def finding_lines(findings):
+        lines = []
+        for number, finding in enumerate(findings, 1):
             quote = f" “{finding['quote']}”" if finding["quote"] else ""
             evidence = f"  Evidence: {', '.join(finding['evidence'])}" if finding["evidence"] else ""
             lines.append(f"{number}. {finding['kind'].capitalize()}{quote}: {finding['problem']}\n"
                          f"   Fix: {finding['fix']}{evidence}")
-        lines += result["notes"]
+        return lines
+
+    def checked(self, result):
+        code, ai = result["code"], result["ai"]
+        lines = ["CODE CHECK (exact, no AI)"]
+        if code["consistent"]:
+            lines.append("Report is consistent with system data.")
+        lines += self.finding_lines(code["findings"]) + code["notes"]
+        if "unavailable" in ai:
+            lines += ["", f"AI CHECK (meaning) not run: {ai['unavailable']}."]
+        else:
+            lines += ["", f"AI CHECK (meaning, {ai['meta']['model']}) · findings are suggestions for the analyst"]
+            if ai["consistent"]:
+                lines.append("No meaning problems found.")
+            lines += self.finding_lines(ai["findings"])
+            if ai["rejected"]:
+                lines.append(f"{len(ai['rejected'])} AI finding(s) dropped by validation: "
+                             f"{', '.join(sorted(set(ai['rejected'])))}.")
+            lines.append(self.cost_line(ai["meta"]))
         self.show_notes("\n".join(lines))
 
     def save_pdf(self):

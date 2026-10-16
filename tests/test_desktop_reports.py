@@ -1,4 +1,6 @@
 """Native report submission, incident display and SOC delivery failure behavior."""
+from pathlib import Path
+import tempfile
 import time
 import threading
 import tkinter as tk
@@ -8,10 +10,12 @@ import unittest
 import customtkinter as ctk
 
 from argus.collab_client import ClientError
+from argus.report_ai import AI_LABEL, check_all, draft_report, strip_label, template_draft
 from argus.vessel_reports import make_report
 from desktop_reports import open_report, board_snapshot
 from run_gui import ArgusApp, load_demo
 from tests.test_collab_desktop import FakeClient
+from tests.test_report_ai import KEY, FakeTensorX
 from tests.test_vessel_reports import VESSEL
 
 
@@ -27,6 +31,10 @@ class DesktopReportTests(unittest.TestCase):
         with patch.dict("os.environ", {"ARGUS_AIS_AUTOCONNECT": "0", "ARGUS_UI_PREFERENCES": ""}):
             self.app = ArgusApp(self.root, *load_demo())
         self.app.ais_tracker.cache_path = None
+        # Never a paid call from a test, even on a computer with a TensorX key in its keychain.
+        no_key = patch("argus.report_ai.get_key", return_value="")
+        no_key.start()
+        self.addCleanup(no_key.stop)
 
     def tearDown(self):
         self.app.close()
@@ -114,6 +122,36 @@ class DesktopReportTests(unittest.TestCase):
         self.assertEqual(self.app.vessel_reports.entries[0]["report"]["reason"], text.strip())
         self.assertEqual(set(self.app.vessel_reports.entries[0]["report"]), {"id", "vessel", "category", "reason",
                                                                              "created_utc"})
+
+    def test_with_a_key_the_window_shows_the_ai_draft_and_both_check_layers(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        board = self.app.alert_board
+        board.open("SIM-41", reveal=False)
+        board.dialog.report_button.invoke()
+        dialog = self.app.report_dialog
+        template = template_draft(dialog.pack)
+        draft = FakeTensorX({"draft": strip_label(template["text"]), "category": dialog.pack["category"],
+                             "evidence": template["evidence"]})
+        check = FakeTensorX({"findings": []})
+        root = Path(folder.name)
+        with patch("argus.report_ai.get_key", return_value=KEY), \
+                patch("desktop_reports.draft_report", lambda pack: draft_report(pack, root=root, transport=draft)), \
+                patch("desktop_reports.check_all",
+                      lambda pack, text, category: check_all(pack, text, category, root=root, transport=check)):
+            dialog.draft_button.invoke()
+            self.settle(dialog)
+            self.assertTrue(dialog.reason.get("1.0", "end").strip().endswith(AI_LABEL))
+            self.assertIn("AI-assisted draft by qwen/qwen3.8-flash-next", self.notes(dialog))
+            self.assertEqual(dialog.generation["method"], "ai")
+            dialog.check_button.invoke()
+            self.settle(dialog)
+        notes = self.notes(dialog)
+        self.assertIn("CODE CHECK (exact, no AI)\nReport is consistent with system data.", notes)
+        self.assertIn("AI CHECK (meaning, qwen/qwen3.8-flash-next)", notes)
+        self.assertIn("No meaning problems found.", notes)
+        self.assertEqual((len(draft.chats), len(check.chats)), (1, 1))
+        dialog.close()
 
     def test_report_without_brain_item_drafts_with_placeholders_offline(self):
         dialog = open_report(self.app, VESSEL)
