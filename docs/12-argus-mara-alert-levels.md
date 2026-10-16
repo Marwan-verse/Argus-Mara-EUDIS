@@ -225,9 +225,10 @@ From list cues alone each is Low or None.
 | Map | Markers are coloured by level; Critical ones pulse. High and Critical names carry a **SIM** label, the selected vessel shows its track and its line (marked "illustrative route"), and a **SIMULATED** badge sits in the corner. **Sim alerts** in the legend or Map layers hides them. |
 | Exercise | The fictional exercise alert is on the same list with the same rules. **Open replay** starts the existing countdown replay with its response options. |
 | Restart | The ↻ button restarts the simulation: countdowns and decisions reset. |
+| Decision log | The shield button opens the **signed decision log**: who decided what, on which alert and when, newest first. Every decision, responder sent or recalled and restart is a record signed with this computer's Ed25519 key that also holds the hash of the record before it. **Verify signatures** checks them all: a changed record turns red (CHANGED AFTER SIGNING), the next one amber (LINK BROKEN). The **seal** of the last record changes if records are removed from the end, so note it down. **Show the file** opens `data/desktop/decision-log.jsonl` for the tamper demo. `python -m argus.decision_log verify` checks the file from a terminal. |
 
-Decisions are recorded only for the current session on this computer. Nothing is sent
-to anyone, and a human decides every action.
+The review states belong to the current session. The signed decision log stays on this
+computer. Nothing is sent to anyone, and a human decides every action.
 
 ## The simulated board
 
@@ -267,6 +268,34 @@ Irish links (EWIC, Greenlink, the Celtic Interconnector, IC2, the Moyle intercon
 the Galway–Iceland link and others), not surveyed positions. Positions stay at the
 alert fix; only the two contacts with an ETA count down.
 
+## Brain detectors
+
+`argus.assemble.DETECTORS` runs every registered detector on a vessel's track and
+merges what they find into one set of observations for the rules above. Each finding
+says which detector found it, when, where, why and how strong the evidence is.
+
+| Detector | Looks for | Fills |
+|---|---|---|
+| `legacy_cable_v1` | The four-cue exercise rule from `argus/brain.py` | B1, I1, I3, I4, P, A |
+| `cable_risk` | Behaviour per line from the recent track: anchor drag, loitering, passes, slow in the corridor, anchoring, fishing, slowdown; ETA to the anchor-reachable section | B1–B7, B10, B11, P, A |
+| `ais_spoofing` | Impossible jumps, one identity in two places, speed that does not match the positions, fixes on land, an impossible return after a gap | I2 |
+| `stop_off_port` | Stopped at 0.5 kn or less for 30 min or more, over 3 nm from every port (`ui/assets/irish_ports.json`, `world_ports.json`) and rough anchorage; fishing vessels skipped | B12 |
+| `dark_vessel` | A satellite radar contact while the vessel's AIS was silent 10 min or more, inside its reachable circle (and within reach of the fix where AIS came back); also contacts no AIS vessel could have been | I1, I3, I4 |
+| `declared_vs_actual` | Reports "at anchor" or "moored" while moving 1 kn or more for 10 min; a declared destination (port name or UN/LOCODE) the course has led away from for an hour | B9, C3 |
+
+Only `cable_risk` and `legacy_cable_v1` name a line, so proximity and the line's
+class always come from them. `dark_vessel` is held from the fictional exercise
+(`HELD_FROM_SCENARIO`) until the team agrees to raise it earlier (D63).
+
+Three replay stories show the new detectors on the board's replay clock, scored from
+their tracks like SIM-50 to SIM-53:
+
+| ID | Vessel | Story | Level over time |
+|---|---|---|---|
+| SIM-57 | MOURNE SHADE | AIS silent from T+80 to T+125 on the approach to the Dublin–Holyhead cable; a simulated Sentinel-1 contact at T+110 fits its track | None → Medium at T+110 (I1, I3, worst-case ETA) → Critical at T+132 (AIS back, slow and yawing) |
+| SIM-58 | CALLOW BAY | Declares `IEDUB>GBLIV`, turns north-west, then reports "at anchor" while making 4 kn over the North Dublin cluster | C3 alone at T+145 (None) → Medium at T+164 → High at T+170 (B9) → Critical at T+173 |
+| SIM-59 | TUSKAR CALM | Stops for 2.5 h about 4 nm from both EWIC and the North Dublin cluster, away from any port or anchorage | Low at T+109 → Medium at T+135 (B12) |
+
 ## Limits
 
 - Thresholds and points are design choices for the demo. They need tuning with
@@ -298,6 +327,8 @@ alert fix; only the two contacts with an ETA count down.
 | `argus/alert_board.py` | The simulated board: scenarios, coastal-site contacts, minor alerts, tracks and the countdown update |
 | `desktop_alerts.py` | Docked panel, review window and map markers |
 | `desktop_gestures.py` | Two-finger scrolling on Tk 9 and pinch-to-zoom on macOS |
+| `argus/detectors/` | Brain detectors (`cable_risk`, `ais_spoofing`, `stop_off_port`, `dark_vessel`, `declared_vs_actual`) and the port, anchorage and destination lookup (`places.py`) |
+| `argus/brain_board.py` | The board scored through Brain, with the replay stories |
 | `tests/test_levels.py` | Rule cases, including every worked example above |
 | `tests/test_sites.py` | Stop and loiter detection, port and anchorage exclusions, and the new rule cues |
 | `tests/test_route_check.py` | Destination reading, heading-away cases, quiet cases and the SIM-55 story |
@@ -305,5 +336,7 @@ alert fix; only the two contacts with an ETA count down.
 | `tests/test_alert_board.py` | Labels, sorting, counts and the countdown raising a level |
 | `tests/test_desktop_alerts.py` | Panel, decisions, filters, map markers and hiding the panel |
 | `tests/test_desktop_gestures.py` | Trackpad scrolling of the queue and pinch zoom steps |
+| `tests/test_stop_off_port.py`, `tests/test_dark_vessel.py`, `tests/test_declared_vs_actual.py` | The three detectors, their thresholds and what they must not flag |
+| `tests/test_detector_stories.py` | SIM-57 to SIM-59 over time, and the innocent stories staying quiet |
 
 Run them with `python -m unittest discover -s tests`.

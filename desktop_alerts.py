@@ -18,24 +18,37 @@ where it meets the vessel. The storm switch grounds the drones; the wind is an e
 Send and Recall (permission ``response.review``) record a simulated human
 decision: a sent asset is busy for every other incident, so one that relied
 on it can rise, and the review window warns before that happens.
+
+Real alerts from live AIS (``desktop_real_alerts``, D107) join the same bands
+as leads tagged AIS · REAL, ahead of the simulated contacts. They keep real
+times, never pass through the replay, open the same review window (without
+the simulated responders) and are signed into the same decision log.
 """
 from __future__ import annotations
 
+import getpass
 import math
+import os
+import subprocess
 import sys
+import time
 import tkinter as tk
 import tkinter.font as tkfont
 
 import customtkinter as ctk
 
 from argus import responders
+from argus.decision_log import DecisionLog
 from argus.alert_board import inside, line_path, sort_key
-from argus.brain_board import build_board, update
-from argus.explain import explain, source
+from argus.brain_board import EXERCISE_NOTICES, build_board, update
+from argus.countdown import step
+from argus.detectors import marine_notice
+from argus.explain import data_issues, explain, source
 from argus.incident_board import OPEN_RANK, Replay
 from argus.incidents import QUIET_CLOSE_S, REASONS, STATUSES
 from argus.levels import LEVEL_NAMES, RANK
 from desktop_canvas_list import CanvasDocument, CanvasList, Field, Link
+from desktop_real_alerts import TAG as REAL_TAG, RealAlertFeed, RealAlerts, hhmm, iso
 
 LEVELS = ("critical", "high", "medium", "low")
 CODES = {"critical": "CRIT", "high": "HIGH", "medium": "MED", "low": "LOW", "none": "—"}
@@ -58,13 +71,20 @@ CHIP = {"SIMULATED": ("#c3ced6", "#2a3542"), "EXERCISE": ("#e1b164", "#34301f"),
         "ASSUMPTION": ("#d8b25c", "#34301f"), "ILLUSTRATIVE": ("#a8b6c2", "#1c2a36"),
         "RULE OUTCOME": ("#a8b6c2", "#1c2a36"), "SOURCE": ("#47c7da", "#173339")}
 DETECTOR_REASONS = 4
+NOTICE_COLOUR = "#b79cf2"  # Marine Notice work areas on the map and their chip
+CHIP["NOTICE"] = (NOTICE_COLOUR, "#2b2440")
 # Responder colours: arrives before the earliest line ETA, arrives after it, cannot go.
 IN_TIME, LATE, UNAVAILABLE = "#47c7da", "#ec8a3c", "#7d8b97"
 RESPONSE_SHAPE = {"aircraft": "square", "helicopter": "square", "ship": "circle", "drone": "diamond",
                   "hail": "ring"}
-# List groups after the open incidents by level: quiet incidents, watched contacts, closed incidents.
-GROUP_TITLES = {"critical": "CRITICAL", "high": "HIGH", "medium": "MEDIUM", "quiet": "QUIET · BELOW MEDIUM",
-                "watching": "WATCHING · LOW, NO INCIDENT", "closed": "CLOSED"}
+# D94: one queue by importance. Within a band, real data comes before simulated contacts; Low (quiet
+# incidents, watched contacts, low-priority satellite leads) and Closed fold away until asked for.
+GROUP_TITLES = {"critical": "CRITICAL", "high": "HIGH", "medium": "MEDIUM", "low": "LOW · QUIET AND WATCHED",
+                "closed": "CLOSED AND REVIEWED", "sources": "SOURCES · WHAT WAS CHECKED"}
+# A satellite or radar lead's review priority (argus.satellite_workspace.with_priority) decides its band;
+# an unknown priority is shown, not folded away.
+LEAD_BAND = {"high": "high", "medium": "medium", "low": "low", None: "medium"}
+PRIORITY_ORDER = {"high": 0, "medium": 1, None: 1, "low": 2}
 # How often the panel checks the exercise replay clock.
 FOLLOW_MS = 250
 
@@ -109,10 +129,25 @@ def badges(item: dict, incident: dict | None) -> list[tuple[str, str]]:
         found.append((f"Quiet {QUIET_CLOSE_S // 60} min · close?", "note"))
     if item["observations"].get("spoof_signs"):  # a lone GPS glitch is a finding but not a spoofing sign
         found.append(("AIS spoofing?", "warn"))
+    work = item.get("declared_work") or {}
+    if work.get("named"):
+        found.append((f"Notice {work['notice']} · capped Low" if work.get("applied")
+                      else f"Notice {work['notice']} · cap lifted", "note" if work.get("applied") else "warn"))
+    elif any((finding.get("notice") or {}).get("match") == "unnamed" for finding in item.get("findings", ())):
+        found.append(("In notice area · not named", "warn"))
     relevance = item.get("relevance") or {}
     if relevance.get("small"):
         found.append(("Small craft · cap lifted" if relevance.get("exception") else "Small craft · capped Low", "note"))
     return found
+
+
+def notice_areas(item: dict) -> list[tuple[dict, dict]]:
+    """(notice, area) for every Marine Notice the item's findings name, real or exercise."""
+    numbers = [(finding.get("notice") or {}).get("number") for finding in item.get("findings", ())
+               if finding.get("detector") == marine_notice.DETECTOR]
+    known = {notice["number"]: notice for notice in marine_notice.load_notices() + EXERCISE_NOTICES}
+    return [(known[number], area) for number in dict.fromkeys(numbers) if number in known
+            for area in known[number]["areas"]]
 
 
 def short_utc(value) -> str:
@@ -219,8 +254,65 @@ class CardRow:
         return height
 
 
+class Lead(Link):
+    """A real-data entry in the queue: a live AIS alert, a satellite or radar lead, a vessel history or a report."""
+
+    def __init__(self, text: str, command, *, band: str, tag: str, when, title: str, lines: str, action: str,
+                 subtitle: str, detail: str, attention: bool = False, secondary: Link | None = None,
+                 alert_id: str | None = None):
+        super().__init__(text, command, kind="entry", title=title, lines=lines, action=action)
+        self.band, self.tag, self.when = band, tag, str(when or "")
+        self.subtitle, self.detail, self.attention, self.secondary = subtitle, detail, attention, secondary
+        self.alert_id = alert_id  # A live AIS alert: selected like an incident card while its review is open
+        self.key = ""
+        self.hovered = False
+
+
+class LeadRow:
+    """A real lead drawn like an incident card: band stripe, name, time and source tag, what, status."""
+
+    def __init__(self, board, lead: Lead):
+        self.board, self.lead, self.key = board, lead, lead.key
+
+    def draw(self, view, y: float, width: float) -> float:
+        board, ui, lead = self.board, self.board.ui, self.lead
+        canvas = view.canvas
+        tags = (f"row:{self.key}", view.action(lead.command))
+        name_h = board.name_font.metrics("linespace")
+        line_h = board.meta_font.metrics("linespace")
+        reason_h = board.reason_font.metrics("linespace")
+        height = 10 + name_h + 2 + reason_h + 3 + line_h + (3 + line_h if lead.secondary else 0) + 10
+        selected = lead.alert_id is not None and lead.alert_id == board.selected
+        canvas.create_rectangle(0, y, width, y + height,
+                                fill=ROW_SELECTED if selected else ROW_HOVER if lead.hovered else ui.CARD,
+                                outline="", tags=tags)
+        canvas.create_line(12, y + height - 1, width - 4, y + height - 1, fill=ui.LINE, tags=tags)
+        stripe = ui.LINE if lead.band == "closed" else STYLE.get(lead.band, STYLE["none"])[0]
+        canvas.create_rectangle(6, y + 9, 9, y + height - 9, fill=stripe, outline="", tags=tags)
+        x, right, top = 20, width - 12, y + 10
+        canvas.create_text(right, top + 2, text=lead.tag, anchor="ne", fill=ui.TEAL, font=board.tag_font, tags=tags)
+        room = right - board.tag_font.measure(lead.tag) - 8
+        when = short_utc(lead.when) if lead.when else ""
+        if when:
+            canvas.create_text(room, top + 1, text=when, anchor="ne", fill=ui.MUTED, font=board.meta_font, tags=tags)
+            room -= board.meta_font.measure(when) + 8
+        canvas.create_text(x, top, text=clip(lead.title, board.name_font, max(60, room - x)), anchor="nw",
+                           fill=ui.INK, font=board.name_font, tags=tags)
+        top += name_h + 2
+        canvas.create_text(x, top, text=clip(lead.subtitle, board.reason_font, right - x), anchor="nw",
+                           fill=SECONDARY, font=board.reason_font, tags=tags)
+        top += reason_h + 3
+        canvas.create_text(x, top, text=clip(lead.detail, board.meta_font, right - x), anchor="nw",
+                           fill=STYLE["medium"][0] if lead.attention else ui.MUTED, font=board.meta_font, tags=tags)
+        top += line_h
+        if lead.secondary:
+            canvas.create_text(x, top + 3, text=lead.secondary.text.upper() + "  ›", anchor="nw", fill=ui.TEAL,
+                               font=(SANS, 8, "bold"), tags=(f"row:{self.key}", view.action(lead.secondary.command)))
+        return height
+
+
 class HeaderRow:
-    """A group title with its count; Watching and Closed fold open and shut when clicked."""
+    """A band title with its count; Low and Closed fold open and shut when clicked."""
 
     def __init__(self, board, key: str, text: str, count: str, gap: int, command=None):
         self.board, self.key, self.text, self.count, self.gap, self.command = board, key, text, count, gap, command
@@ -282,9 +374,11 @@ class SectionRow:
         top = y + 12
         background = canvas.create_rectangle(0, y, width, y + 1, fill=ui.CARD, outline="", tags=(row,))
         for kind, *values in self.section.blocks:
+            if kind == "entry" and isinstance(values[0], Lead):
+                continue  # Drawn in its band of the queue (LeadRow), not here
             if kind == "title":
-                canvas.create_text(x, top, text=values[0], anchor="nw", fill=ui.INK, font=(SANS, 10, "bold"), tags=(row,))
-                top += 22
+                canvas.create_text(x, top, text=values[0], anchor="nw", fill=ui.MUTED, font=(SANS, 8, "bold"), tags=(row,))
+                top += 18
             elif kind == "text":
                 item = canvas.create_text(x, top, text=values[0], anchor="nw", fill=ui.MUTED, font=(SANS, 9),
                                           width=right - x, tags=(row,))
@@ -366,7 +460,8 @@ class AlertBoard:
         self.hovered: str | None = None
         self.level_filter: str | None = None
         self.show_closed = False
-        self.show_watching = False
+        self.show_low = app.tools.settings.get("show_low_alerts", False) is True  # D94, saved like the demo switch
+        self.leads: dict[str, Lead] = {}
         self.evidence_leads = []
         self.show_reviewed_evidence = tk.BooleanVar(app.root, value=False)
         self.evidence_page = 0
@@ -389,10 +484,17 @@ class AlertBoard:
         self.halos: list[tuple[int, float, float]] = []
         self.pulse = False
         self.flashing: dict[str, str] = {}
+        self.decision_log = DecisionLog()
+        self.log_window: DecisionLogWindow | None = None
+        self.real = RealAlerts()  # D107: live AIS alerts, restored from the signed log
+        self.real.restore(self.decision_log)
         app.alert_board = self
         self.dialog = ReviewDialog(self)
         self._build()
         self.relayout()
+        satellite = getattr(app, "satellite", None)
+        self.real_feed = RealAlertFeed(self, satellite.workspace.root if satellite else ui.ROOT / "data/satellite")
+        self.real_feed.start()  # Only after run_gui.main allowed the network: tests stay offline
         self.timer = app.root.after(1000, self.tick)
         self.follower = app.root.after(FOLLOW_MS, self.follow)
         app.root.bind("<Escape>", self.dialog.escape, add="+")
@@ -411,6 +513,10 @@ class AlertBoard:
                                 width=30, height=30, fg_color="transparent", hover_color=ui.HOVER)
         restart.pack(side="right", padx=2)
         app.tools.style_button(restart, "Reset incidents and decisions at this replay time")
+        seal = ctk.CTkButton(head, text="", image=app.tools.icons.get("seal"), command=self.open_log,
+                             width=30, height=30, fg_color="transparent", hover_color=ui.HOVER)
+        seal.pack(side="right", padx=2)
+        app.tools.style_button(seal, "Signed decision log: who decided what and when, and a check that nothing was changed")
         tk.Label(head, text="INCIDENTS", bg=ui.CARD, fg=ui.INK, font=(SANS, 13, "bold"), anchor="w").pack(
             side="left", fill="x", expand=True)
         # The replay clock gets a row of its own, so a narrow panel can never clip the time.
@@ -432,7 +538,7 @@ class AlertBoard:
             command=self.toggle_demo_alerts, font=ctk.CTkFont(SANS, 12),
             checkbox_width=16, checkbox_height=16, height=26)
         self.demo_switch.pack(fill="x", padx=16, pady=(8, 0))
-        tk.Label(panel, text="Satellite / AIS review leads appear below.\n"
+        tk.Label(panel, text="Real leads rank first in their band; Low is folded.\n"
                  "Live AIS alone does not establish a threat.",
                  bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9), justify="left", anchor="w",
                  wraplength=250).pack(fill="x", padx=(20, 16), pady=(4, 6))
@@ -462,7 +568,7 @@ class AlertBoard:
             cell.grid(row=0, column=index * 2, sticky="nsew")
             line = tk.Frame(cell, bg=ui.CARD)
             line.pack(pady=(4, 0))
-            code = tk.Label(line, text="WATCH" if level == "low" else CODES[level], bg=ui.CARD, fg=ui.MUTED,
+            code = tk.Label(line, text=CODES[level], bg=ui.CARD, fg=ui.MUTED,
                             font=(MONO, 9), cursor="hand2")
             code.pack(side="left")
             count = tk.Label(line, text="0", bg=ui.CARD, fg=STYLE[level][0], font=(MONO, 12, "bold"), cursor="hand2")
@@ -471,7 +577,8 @@ class AlertBoard:
             underline.pack(fill="x", padx=12, pady=(5, 0))
             for widget in (cell, line, code, count, underline):
                 widget.bind("<Button-1>", lambda _event, value=level: self.set_filter(value))
-            app.tools.attach_tooltip(cell, "Show watched contacts: Low, not incidents" if level == "low"
+            app.tools.attach_tooltip(cell, "Show the Low band: quiet incidents, watched contacts, low-priority leads"
+                                     if level == "low"
                                      else f"Show {LEVEL_NAMES[level].lower()} incidents only")
             self.tiles[level] = (code, underline)
             self.tiles[level + "-count"] = count
@@ -494,6 +601,8 @@ class AlertBoard:
         self.refresh_evidence({'leads': [], 'reviews_checked': 0, 'reviews_pending': 0}, relayout=False)
         self.reports_frame = Section("reports")
         self.refresh_reports(relayout=False)
+        self.real_frame = Section("real")
+        self.paint_real(relayout=False)
         self.empty = Field(text="")
         for item in self.items:
             self._card(item)
@@ -510,23 +619,38 @@ class AlertBoard:
         section = self.history_frame
         section.clear()
         summary = packet.get('summary', {})
+        worker = packet.get('worker', {})
+        unlinked = worker.get('state') == 'unlinked'
         section.add('title', f"FLEET HISTORY REVIEW · {self.history_lead_count}")
         text = (f"{summary.get('checked_vessels', 0)} / {summary.get('total_vessels', 0)} recorded vessels checked\n"
                 f"{summary.get('never_checked', 0)} never checked · {summary.get('new_evidence_pending', 0)} awaiting new evidence checks\n"
                 + source_health(summary)+'\n'
                 + packet.get('worker', {}).get('message', 'History inventory is loading.'))
-        if not packet.get('inventory_complete'):
+        if unlinked:
+            text = ('History checks are blocked: team database is not connected.\n'
+                    'Live map positions do not supply the recorded history needed for these checks.')
+        elif not packet.get('inventory_complete'):
             text += '\nInventory is still loading; missing entries are not clean results.'
         section.add('text', text)
+        if unlinked:
+            satellite = self.app.satellite
+            if satellite.remote:
+                section.add('text', 'The SOC host administrator must connect the team database on the host.')
+            else:
+                section.add('button', Link('Connect team database', satellite.connect_database, kind='button'))
         for row in packet.get('vessels', []):
             result = row.get('result') or {}
             findings = [f for f in result.get('findings', []) if f.get('review_required')]
             title = f"{result.get('name') or row['mmsi']} · {row['mmsi']}"
             lines = (f"Motion history requires review\nChecked {short_utc(row.get('checked_utc'))} · derived assumption\n"
                      + '\n'.join(f['reason'] for f in findings[-2:]))
-            section.add('entry', Link(f"{title}\n{lines}\nOpen history evidence",
+            section.add('entry', Lead(f"{title}\n{lines}\nOpen history evidence",
                                       lambda mmsi=row['mmsi']: self.app.satellite.open_fleet(mmsi),
-                                      title=title, lines=lines, action="Open history evidence"), STYLE["medium"][0])
+                                      band="medium", tag="HISTORY · REAL", when=row.get('checked_utc'), title=title,
+                                      lines=lines, action="Open history evidence",
+                                      subtitle="Motion history requires review",
+                                      detail=findings[-1]['reason'] if findings else "Derived assumption"),
+                        STYLE["medium"][0])
         section.add('button', Link('Open all vessel histories', lambda: self.app.satellite.open_fleet(), kind='button'))
         if relayout:
             self.relayout()
@@ -544,6 +668,12 @@ class AlertBoard:
                                 f"{result.get('image_contacts', 0)} image contacts · "
                                 f"{result.get('images_without_ais', 0)} images without contemporaneous AIS\n"
                                 f"{result.get('partial_analysis_images', 0)} images with incomplete detail review")
+        if result.get('reviews_checked') and result.get('images_without_ais') == result.get('reviews_checked'):
+            self.evidence_status += ('\nComparison blocked: none of the checked images has AIS at acquisition time. '
+                                     'Image contacts alone cannot establish an AIS mismatch.')
+        if result.get('images_with_ais_conflicts'):
+            self.evidence_status += (f"\n{result['images_with_ais_conflicts']} images with conflicting AIS history; "
+                                     'unmatched-contact leads withheld pending source review.')
         if result.get('radar_detections'):
             self.evidence_status += (f"\n{result['radar_detections']} radar detections (Global Fishing Watch) · "
                                      f"{result.get('radar_leads', 0)} without AIS")
@@ -558,6 +688,8 @@ class AlertBoard:
         section.clear()
         section.add('title', f"SATELLITE / AIS REVIEW · {len(self.evidence_leads)} leads")
         section.add('text', self.evidence_status)
+        section.add('button', Link('Open satellite images and AIS coverage',
+                                  lambda: self.app.open_window('satellite'), kind='button'))
 
         def refilter():
             self.evidence_page = 0
@@ -565,8 +697,13 @@ class AlertBoard:
             self.relayout(top=True)
         section.add('toggle', 'Show reviewed outcomes', self.show_reviewed_evidence, refilter)
         visible = [r for r in self.evidence_leads if self.show_reviewed_evidence.get() or r.get('review_status') not in CLOSED_OUTCOMES]
+        # D94: evidence that changed first, then review priority, then the newest image.
+        visible.sort(key=lambda r: str(r.get('acquired_utc') or ''), reverse=True)
+        visible.sort(key=lambda r: (not r.get('evidence_changed'), PRIORITY_ORDER.get(r.get('priority'), 1)))
         self.evidence_page = min(self.evidence_page, max(0, (len(visible)-1)//50))
-        section.add('text', f'{len(visible)} shown · analyst outcomes retain the original evidence')
+        low = sum(1 for r in visible if r.get('priority') == 'low' and r.get('review_status') not in CLOSED_OUTCOMES)
+        section.add('text', f'{len(visible)} shown · {low} low-priority folded under LOW · '
+                            'analyst outcomes retain the original evidence')
         start = self.evidence_page*50
         for lead in visible[start:start+50]:
             state = OUTCOMES.get(lead.get('review_status'), 'Unreviewed')
@@ -579,14 +716,20 @@ class AlertBoard:
             lines = f"{lead['title']}\n{source} · {state}\n{lead['reason']}"
             action = lead.get('action_text') or 'Open image evidence'
             closed = lead.get('review_status') in CLOSED_OUTCOMES
-            section.add('entry', Link(f"{title}\n{lines}\n{action}", lambda row=lead: self.open_evidence(row),
-                                      title=title, lines=lines, action=action),
-                        self.ui.MUTED if closed else STYLE["high"][0])
+            secondary = None
             if lead.get('evidence_key'):
                 def review(row=lead):
                     from desktop_evidence_review import EvidenceReview
                     EvidenceReview(self, row)
-                section.add('button', Link('Record analyst outcome', review, kind='button'))
+                secondary = Link('Record analyst outcome', review, kind='button')
+            band = "closed" if closed else LEAD_BAND.get(lead.get('priority'), "medium")
+            why = lead.get('priority_reason') or lead['reason']
+            section.add('entry', Lead(f"{title}\n{lines}\n{action}", lambda row=lead: self.open_evidence(row),
+                                      band=band, tag="RADAR · REAL" if lead.get('radar') else "SAT · REAL",
+                                      when=lead.get('acquired_utc'), title=title, lines=lines, action=action,
+                                      subtitle=lead['title'], detail=f"{state} · {why}",
+                                      attention=bool(lead.get('evidence_changed')), secondary=secondary),
+                        self.ui.MUTED if closed else STYLE["high"][0])
         if len(visible) > 50:
             def turn(delta):
                 self.evidence_page += delta
@@ -595,6 +738,73 @@ class AlertBoard:
             section.add('pager', [Link(text, (lambda d=delta: turn(d)) if enabled else None, kind='pager')
                                   for text, delta, enabled in [('Previous', -1, start > 0),
                                                                ('Next', 1, start+50 < len(visible))]])
+
+    def paint_real(self, relayout: bool = True) -> None:
+        """Live AIS alerts (D107): one lead per ship in its level's band; what was checked goes to SOURCES."""
+        real, section = self.real, self.real_frame
+        section.clear()
+        section.add('title', f"LIVE AIS ALERTS · {real.open_count()}")
+        section.add('text', real.status_text())
+        satellite = getattr(self.app, "satellite", None)
+        if real.feed == "unlinked" and satellite is not None and not satellite.remote:
+            section.add('button', Link('Connect team database', satellite.connect_database, kind='button'))
+        for identifier in real.ordered():
+            item = real.items[identifier]
+            title = item["name"] if item["name"] == item["mmsi"] else f"{item['name']} · {item['mmsi']}"
+            where = proximity_text(item)
+            detail = real.detail(identifier) + (f" · {where}" if where else "")
+            lines = f"{item['title']}\n{detail}"
+            band = real.band(identifier)
+            section.add('entry', Lead(f"{title}\n{lines}\nOpen review", lambda key=identifier: self.open(key, centre=True),
+                                      band=band, tag=REAL_TAG, when=iso(item["raised_t"]), title=title, lines=lines,
+                                      action="Open review", subtitle=item["title"], detail=detail,
+                                      attention=real.attention(identifier), alert_id=identifier),
+                        self.ui.MUTED if band == "closed" else STYLE[item["assessment"]["level"]][0])
+        if relayout:
+            self.relayout()
+
+    def refresh_real(self, result: dict) -> None:
+        """A live AIS check came back (``desktop_real_alerts.RealAlertFeed``): fold it in, repaint, announce."""
+        events = self.real.update(result)
+        if self.dialog.item and self.dialog.item.get("label") == "real" and not self.is_real(self.dialog.item["id"]):
+            self.dialog.close()  # Cleared long ago and forgotten
+        self.paint_real()
+        if self.dialog.item and self.is_real(self.dialog.item["id"]):
+            self.dialog.refresh()
+        self.app._draw_map()
+        if events:
+            news = [f"{self.real.items[i]['name']} {self.real.items[i]['assessment']['level_name']}"
+                    + {"new": "", "rose": " (rose)", "reopened": " (reopened)"}[event] for i, event in events.items()]
+            self.app.map_status_label.configure(text="Real alert from live AIS · " + " · ".join(news[:3])
+                                                + " · for review")
+
+    def item(self, identifier: str | None) -> dict | None:
+        """A board contact or a live AIS alert."""
+        return self.by_id.get(identifier) or self.real.items.get(identifier)
+
+    def is_real(self, identifier: str | None) -> bool:
+        return identifier in self.real.items
+
+    def log_lines(self, identifier: str) -> list[tuple[str, str]]:
+        """(time, text) for the review window: real alerts in UTC, board contacts on the replay clock."""
+        if self.is_real(identifier):
+            return self.real.log_lines(identifier)
+        return [(self.stamp(stamp), text) for stamp, text in self.history.get(identifier, [])]
+
+    def recipient(self, identifier: str) -> str:
+        if self.is_real(identifier):
+            return self.real.state[identifier]["to"] or ""
+        return self.recipients.get(identifier, "")
+
+    def status_reason(self, identifier: str) -> str:
+        if self.is_real(identifier):
+            return self.real.state[identifier]["reason"] or ""
+        return (self.incident(identifier) or {}).get("status_reason") or ""
+
+    def _redraw_leads(self, *identifiers) -> None:
+        for key, lead in self.leads.items():
+            if lead.alert_id is not None and lead.alert_id in identifiers:
+                self.list.redraw(key)
 
     def open_evidence(self, lead):
         satellite = self.app.satellite
@@ -618,8 +828,10 @@ class AlertBoard:
                 vessel = report["vessel"]
                 title = f"{vessel['name']} · {vessel['id']}"
                 lines = f"{report['category']}\n{entries[-1]['sender']} · {vessel['label']} · {len(entries)} report(s)"
-                link = Link(f"{title}\n{lines}\nReview concern", lambda found=entries: review_reports(self.app, found),
-                            title=title, lines=lines, action="Review concern")
+                link = Lead(f"{title}\n{lines}\nReview concern", lambda found=entries: review_reports(self.app, found),
+                            band="high", tag="REPORT · ANALYST", when=report.get('created_utc'), title=title,
+                            lines=lines, action="Review concern", subtitle=report['category'],
+                            detail=f"{entries[-1]['sender']} · {vessel['label']} · {len(entries)} report(s)")
                 section.add('entry', link, self.ui.TEAL)
                 self.report_cards.append(link)
         if relayout:
@@ -658,14 +870,22 @@ class AlertBoard:
         return self.replay.log
 
     def incident(self, identifier: str) -> dict | None:
+        if self.is_real(identifier):
+            return None
         return self.tracker.incident(self.by_id[identifier])
 
     def status(self, identifier: str) -> str:
         """Incident status, "Rejected" once closed, or "Watching" for a Low contact without an incident."""
+        if self.is_real(identifier):
+            return self.real.state[identifier]["status"]
         return self.tracker.status(self.by_id[identifier]) or "Watching"
 
     def response(self, identifier: str) -> dict | None:
-        """Who can reach an open incident at this replay time (``argus.responders``), else None."""
+        """Who can reach an open incident at this replay time (``argus.responders``), else None.
+
+        Never for a real alert: the responders are the exercise's fictional fleet."""
+        if self.is_real(identifier):
+            return None
         if self.status(identifier) in ("Rejected", "Watching") or self.group(identifier) == "hidden":
             return None
         return self.replay.responses.get(identifier)
@@ -688,13 +908,21 @@ class AlertBoard:
         if hasattr(self.app, 'require_tool') and not self.app.require_tool('response.review'):
             return
         item = self.by_id[identifier]
-        self.rescore(lambda: self.replay.send(item, asset_id), f"Sent {asset_id} to {item['name']} (simulated)")
+        def action():
+            events = self.replay.send(item, asset_id)
+            self.signed(item, "Sent responder", f"Sent {asset_id} (simulated)", asset=asset_id)
+            return events
+        self.rescore(action, f"Sent {asset_id} to {item['name']} (simulated)")
 
     def recall(self, identifier: str, asset_id: str) -> None:
         if hasattr(self.app, 'require_tool') and not self.app.require_tool('response.review'):
             return
         item = self.by_id[identifier]
-        self.rescore(lambda: self.replay.recall(item, asset_id), f"Recalled {asset_id} from {item['name']}")
+        def action():
+            events = self.replay.recall(item, asset_id)
+            self.signed(item, "Recalled responder", f"Recalled {asset_id}", asset=asset_id)
+            return events
+        self.rescore(action, f"Recalled {asset_id} from {item['name']}")
 
     def rescore(self, action, text: str) -> None:
         """Run a change that scores the board again at this replay time; repaint and announce what rose."""
@@ -733,7 +961,9 @@ class AlertBoard:
         return "closed" if self.tracker.incident(item) is not None else "watching"
 
     def age_min(self, item: dict) -> float:
-        """Minutes since the contact was raised, on the replay clock."""
+        """Minutes since the contact was raised, on the replay clock; a real alert's on the real clock."""
+        if item.get("label") == "real":
+            return (time.time() - item["raised_t"]) / 60
         return (self.replay.now - self.replay.appear_s(item)) / 60
 
     def stamp(self, t: int) -> str:
@@ -748,19 +978,69 @@ class AlertBoard:
         """Record an analyst decision on the vessel's open incident through ``argus.incidents``."""
         if hasattr(self.app, 'require_tool') and not self.app.require_tool('alert.review'):
             return
+        if self.is_real(identifier):
+            self.real.decide(identifier, status, text, reason, to)
+            self.signed(self.real.items[identifier], status, text, reason=reason, to=to)
+            self.changed(identifier)
+            return
         item = self.by_id[identifier]
         if self.tracker.open_incident(item) is None:
             return
         before = self.snapshot()
         self.replay.decide(item, status, text, reason, to)
+        self.signed(item, status, text, reason=reason, to=to)
         self.sync_exercise(item, status)
         after = self.snapshot()
         for other in {key for key in after if after[key] != before[key]} - {identifier}:
             self.paint(other)  # a closed incident frees its assets for the others
         self.changed(identifier)
 
+    def operator(self) -> str:
+        """The SOC account that is signed in, otherwise this computer's user."""
+        client = getattr(self.app, "soc_client", None)
+        user = getattr(client, "user", None) if client else None
+        if user and user.get("username"):
+            return user["username"]
+        return f"{getpass.getuser()} (this computer)"
+
+    def signed(self, item: dict | None, action: str, text: str, **details) -> None:
+        """Add a decision to the signed log; if the file cannot be written, the decision still stands."""
+        record = {"operator": self.operator(), "action": action, "detail": text,
+                  **{key: value for key, value in details.items() if value}}
+        if item is not None and item.get("label") == "real":
+            # A real alert: real times only, no replay clock (D107).
+            assessment = item["assessment"]
+            record.update(real=True, simulated=False, alert=item["id"], vessel=item["name"], mmsi=item["mmsi"],
+                          level=assessment["level"], score=assessment["score"], raised=iso(item["raised_t"]))
+            item = None
+        else:
+            record.update(replay=self.stamp(self.replay.now), simulated=True)
+        if item is not None:
+            incident = self.tracker.incident(item) or {}
+            record.update(alert=item["id"], vessel=item["name"], level=incident.get("level") or item["assessment"]["level"])
+        try:
+            self.decision_log.append(**record)
+        except OSError as error:
+            self.app.map_status_label.configure(text=f"Decision kept, but the signed log could not be written: {error}")
+            return
+        if self.log_window is not None:
+            self.log_window.refresh()
+
+    def open_log(self) -> None:
+        if self.log_window is None or not self.log_window.window.winfo_exists():
+            self.log_window = DecisionLogWindow(self)
+        self.log_window.window.deiconify()
+        self.log_window.window.lift()
+        self.log_window.refresh()
+
     def mark_reviewed(self, identifier: str) -> None:
         if self.status(identifier) != "New":
+            return
+        if self.is_real(identifier):
+            # Who opened a real alert, and when, is worth keeping: it is signed like a decision.
+            self.real.decide(identifier, "Reviewed", "Opened for review")
+            self.signed(self.real.items[identifier], "Reviewed", "Opened for review")
+            self.changed(identifier, redraw=False)
             return
         item = self.by_id[identifier]
         self.replay.decide(item, "Reviewed", "Opened for review")
@@ -783,7 +1063,10 @@ class AlertBoard:
         tools.set_alert_status(alert_id, status)
 
     def changed(self, identifier: str, redraw: bool = True) -> None:
-        self.paint(identifier)
+        if identifier in self.cards:
+            self.paint(identifier)
+        else:
+            self.paint_real(relayout=False)
         self.relayout()
         if redraw:
             self.app._draw_map()
@@ -892,17 +1175,20 @@ class AlertBoard:
 
     def hover_row(self, key: str | None) -> None:
         """The pointer moved onto another row of the list (None: off the list)."""
-        previous, self.hovered = self.hovered, key if key in self.cards else None
+        previous, self.hovered = self.hovered, key if key in self.cards or key in self.leads else None
         for identifier in {previous, self.hovered} - {None}:
             if identifier in self.cards:
                 self.paint(identifier)
+            elif identifier in self.leads:
+                self.leads[identifier].hovered = identifier == self.hovered
+                self.list.redraw(identifier)
 
     def matches_filter(self, identifier: str) -> bool:
         group = self.group(identifier)
         if self.level_filter is None:
             return True
         if self.level_filter == "low":
-            return group == "watching"
+            return group in ("watching", "quiet")  # The Low band: watched contacts and quiet incidents
         return group == self.level_filter
 
     def visible_items(self) -> list[dict]:
@@ -914,17 +1200,32 @@ class AlertBoard:
         incident = self.incident(identifier)
         return (not (incident and incident.get("needs_review_again")), sort_key(self.by_id[identifier]))
 
+    def current_leads(self) -> list[Lead]:
+        """Real entries of the shown sources, each with its band (D94)."""
+        found = []
+        for section in (self.real_frame, self.reports_frame, self.evidence_frame, self.history_frame):
+            if section.shown:
+                found.extend(block[1] for block in section.blocks if block[0] == "entry" and isinstance(block[1], Lead))
+        return found
+
     def relayout(self, top: bool = False) -> None:
         ui = self.ui
         rows = []
         for section in (self.history_frame, self.evidence_frame, self.reports_frame):
             section.shown = section is not self.reports_frame or bool(self.app.vessel_reports.entries)
-            if section.shown and section.blocks:
-                rows.append(SectionRow(self, section))
+        self.real_frame.shown = self.real.feed != "idle" or bool(self.real.items)
         groups = {item["id"]: self.group(item["id"]) for item in self.items}
         first = True
         self.order = []
-        toggles = {"closed": self.toggle_closed, "watching": self.toggle_watching}
+        self.leads = {}
+        bands: dict[str, list[Lead]] = {band: [] for band in GROUP_TITLES}
+        for lead in self.current_leads():
+            bands.setdefault(lead.band, []).append(lead)
+        for band in bands.values():
+            # Newest first, then anything whose evidence changed (stable sort keeps the rest in order).
+            band.sort(key=lambda lead: lead.when, reverse=True)
+            band.sort(key=lambda lead: not lead.attention)
+        toggles = {"closed": self.toggle_closed, "low": self.toggle_low}
 
         def header(key, count):
             nonlocal first
@@ -938,55 +1239,90 @@ class AlertBoard:
             self.order.append(item["id"])
             first = False
 
+        def lead_row(lead):
+            nonlocal first
+            lead.key = f"lead:{len(self.leads)}"
+            lead.hovered = lead.key == self.hovered
+            self.leads[lead.key] = lead
+            rows.append(LeadRow(self, lead))
+            first = False
+
         def members(group):
             return sorted((item for item in self.items if groups[item["id"]] == group
                            and self.matches_filter(item["id"])), key=lambda item: self._order(item["id"]))
 
+        def band_leads(band):
+            return bands.get(band, []) if self.level_filter in (None, band) else []
+
         mode = self.sort_mode.get()
         shown = 0
         if mode == "Severity":
-            for group in ("critical", "high", "medium", "quiet"):
-                found = members(group)
-                if found:
-                    header(group, len(found))
+            for band in ("critical", "high", "medium"):
+                leads, found = band_leads(band), members(band)
+                if leads or found:
+                    header(band, len(leads) + len(found))
+                    for lead in leads:  # Real data first
+                        lead_row(lead)
                     for item in found:
                         card(item)
-                    shown += len(found)
+                    shown += len(leads) + len(found)
         else:
             def time_key(item):
                 observations = item["observations"]
                 eta = 0.0 if observations.get("in_corridor") else observations.get("eta_min")
                 return (eta if eta is not None else 1e9, sort_key(item))
             key = time_key if mode == "Time to asset" else (lambda item: (item.get("raised_min_ago", 0), sort_key(item)))
-            found = sorted((item for group in ("critical", "high", "medium", "quiet") for item in members(group)), key=key)
+            for band in ("critical", "high", "medium"):
+                for lead in band_leads(band):
+                    lead_row(lead)
+                    shown += 1
+            found = sorted((item for group in ("critical", "high", "medium") for item in members(group)), key=key)
             for item in found:
                 card(item)
-            shown = len(found)
-        if not shown and self.level_filter != "low" and not self.app.vessel_reports.entries and not self.evidence_leads and not self.history_lead_count:
+            shown += len(found)
+        if not shown and self.level_filter != "low":
             self.empty.configure(text=("Fictional / simulated alerts hidden.\n"
-                                      "No satellite / AIS review leads loaded yet.")
+                                      "No real review leads available. See the history and image coverage status above.")
                                  if not self.show_demo_alerts.get() else
-                                 ("No open incidents at this level." if self.level_filter else "No open incidents."))
+                                 ("Nothing at this level." if self.level_filter else
+                                  "Nothing above Low. Low items are folded below."))
             rows.append(EmptyRow(self, self.empty.cget("text")))
-        watching = members("watching")
-        if watching:
-            expanded = self.show_watching or self.level_filter == "low"
-            header("watching", f"{len(watching)} · {'hide' if expanded else 'show'}")
+        low_leads = bands.get("low", []) if self.level_filter in (None, "low") else []
+        quiet, watching = members("quiet"), members("watching")
+        low_count = len(low_leads) + len(quiet) + len(watching)
+        if low_count:
+            expanded = self.show_low or self.level_filter == "low"
+            header("low", f"{low_count} · {'hide' if expanded else 'show'}")
             if expanded:
-                for item in watching:
+                for lead in low_leads:
+                    lead_row(lead)
+                for item in quiet + watching:
                     card(item)
+        closed_leads = bands.get("closed", []) if self.level_filter is None else []
         closed = members("closed")
-        if closed:
-            header("closed", f"{len(closed)} · {'hide' if self.show_closed else 'show'}")
-            if self.show_closed:
+        if closed or closed_leads:
+            expanded = self.show_closed or bool(closed_leads and self.show_reviewed_evidence.get())
+            header("closed", f"{len(closed) + len(closed_leads)} · {'hide' if expanded else 'show'}")
+            if expanded:
+                for lead in closed_leads:
+                    lead_row(lead)
                 for item in closed:
                     card(item)
+        # The sources' own summaries (how much was checked, how fresh) close the list.
+        sources = [section for section in (self.real_frame, self.history_frame, self.evidence_frame)
+                   if section.shown and any(block[0] != "entry" for block in section.blocks)]
+        if sources:
+            header("sources", "")
+            rows.extend(SectionRow(self, section) for section in sources)
         counts = {level: 0 for level in LEVELS}
         for group in groups.values():
             if group in counts:
                 counts[group] += 1
-            elif group == "watching":
+            elif group in ("watching", "quiet"):
                 counts["low"] += 1
+        for lead in self.current_leads():
+            if lead.band in counts:
+                counts[lead.band] += 1
         for level in LEVELS:
             code, underline = self.tiles[level]
             active = self.level_filter == level
@@ -1012,10 +1348,12 @@ class AlertBoard:
             self.summary.configure(text=f"{shown} {LEVEL_NAMES[self.level_filter].lower()} ·")
         else:
             self.summary.configure(text=f"{open_count} open · {counts['Escalated']} escalated")
+        issues = sum(1 for item in self.items if self.replay.present(item) and data_issues(item))
         self.app.alert_counts_label.configure(
             text=f"{counts['New']} new · {counts['Reviewed']} reviewed · {counts['Acknowledged']} acknowledged · "
                  f"{counts['Escalated']} escalated · {counts['Rejected']} rejected\n"
-                 "Brain: {} contacts scored in {:.0f} ms at this replay step".format(*self.replay.scored))
+                 "Brain: {} contacts scored in {:.0f} ms at this replay step".format(*self.replay.scored)
+                 + (f" · {issues} vessel{'s' if issues != 1 else ''} with data issues" if issues else ""))
         if not self.show_demo_alerts.get():
             self.app.alert_counts_label.configure(text="Fictional / simulated alerts hidden")
         from argus.satellite_disposition import CLOSED_OUTCOMES
@@ -1034,8 +1372,10 @@ class AlertBoard:
         self.app.tools.settings["show_demo_alerts"] = self.show_demo_alerts.get()
         self.app.tools.schedule_save()
         if not self.show_demo_alerts.get():
-            self.dialog.close()
-            self.selected = self.hovered = None
+            if not self.is_real(self.selected):  # Real alerts stay, and so does one open for review
+                self.dialog.close()
+                self.selected = None
+            self.hovered = None
             self.level_filter = None
         self.relayout(top=True)
         self.app._draw_map()
@@ -1049,12 +1389,17 @@ class AlertBoard:
         self.show_closed = not self.show_closed
         self.relayout()
 
-    def toggle_watching(self) -> None:
+    def toggle_low(self) -> None:
+        """Open or fold the Low band (quiet incidents, watched contacts, low-priority leads); remembered."""
         if self.level_filter == "low":
             self.set_filter(None)
             return
-        self.show_watching = not self.show_watching
+        self.show_low = not self.show_low
+        self.app.tools.settings["show_low_alerts"] = self.show_low
+        self.app.tools.schedule_save()
         self.relayout()
+
+    toggle_watching = toggle_low  # The older name, kept for callers and tests
 
     def set_width(self, pixels: int) -> None:
         wrap = max(150, pixels - 92)
@@ -1072,7 +1417,7 @@ class AlertBoard:
         self.relayout()
 
     def scroll_to(self, identifier: str) -> None:
-        self.list.see(identifier)
+        self.list.see(next((key for key, lead in self.leads.items() if lead.alert_id == identifier), identifier))
 
     def flash(self, identifier: str, count: int = 6) -> None:
         """Briefly tint a card whose incident has just opened or risen."""
@@ -1094,13 +1439,15 @@ class AlertBoard:
         """Select a contact and show its review window; ``centre`` (a card click) centres the map on it."""
         if hasattr(self.app, 'require_tool') and not self.app.require_tool('alert.review'):
             return
-        item = self.by_id.get(identifier)
+        item = self.item(identifier)
         if not item:
             return
         previous, self.selected = self.selected, identifier
         if previous in self.cards and previous != identifier:
             self.paint(previous)
-        self.paint(identifier)
+        if identifier in self.cards:
+            self.paint(identifier)
+        self._redraw_leads(previous, identifier)
         self.mark_reviewed(identifier)
         self.dialog.show(item)
         self.scroll_to(identifier)
@@ -1114,6 +1461,7 @@ class AlertBoard:
         previous, self.selected = self.selected, None
         if previous in self.cards:
             self.paint(previous)
+        self._redraw_leads(previous)
         self.app._draw_map()
 
     def reveal(self, item: dict, fit: bool = False, centre: bool = False) -> None:
@@ -1179,6 +1527,7 @@ class AlertBoard:
             self.paint(identifier)
         self.relayout(top=True)
         self.app._draw_map()
+        self.signed(None, "Simulation restarted", "Incidents and decisions reset at this replay time")
         self.app.map_status_label.configure(text="Incidents restarted at this replay time · decisions reset")
 
     def snapshot(self) -> dict[str, tuple]:
@@ -1208,7 +1557,7 @@ class AlertBoard:
             self.paint(identifier)
         if rewound or touched:
             self.relayout()
-        if self.selected and self.group(self.selected) == "hidden":
+        if self.selected in self.by_id and self.group(self.selected) == "hidden":
             self.dialog.close()
         for identifier, found in events.items():
             if {"opened", "raised", "review_again"} & set(found):
@@ -1252,16 +1601,104 @@ class AlertBoard:
                     pass
         self.timer = self.follower = None
         self.flashing.clear()
+        self.real_feed.close()
 
     # ----- map ------------------------------------------------------------------------
     def draw(self) -> None:
-        app, ui = self.app, self.ui
         self.halos = []
+        occupied: list[tuple[float, float, float, float]] = []
+        self.draw_simulated(occupied)
+        self.draw_real(occupied)  # On top: real ships are what an operator acts on
+
+    def draw_real(self, occupied) -> None:
+        """Live AIS alerts (D107): recent track, ship and a NAME · REAL label; the selected one with its route."""
+        app, ui = self.app, self.ui
+        layer = app.map_layers.get("Real alerts")
+        if layer is not None and not layer.get():
+            return
+        width, height = app._map_size
+        real = self.real
+        shown = [identifier for identifier in real.ordered() if real.band(identifier) != "closed"
+                 and self.level_filter in (None, real.band(identifier))]
+        selected = real.items.get(self.selected) if self.selected in shown else None
+        if selected:
+            colour = STYLE[selected["assessment"]["level"]][0]
+            path = line_path(selected["line_id"], app.scenario)
+            if len(path) > 1:
+                app.map.create_line(*app._points(path), fill=ui.BG, width=7, tags=("real-selected",))
+                app.map.create_line(*app._points(path), fill=colour, width=3, dash=(9, 5), tags=("real-selected",))
+            self.draw_notice_areas(selected, occupied)
+        for identifier in shown:  # Tracks first, under every marker
+            item = real.items[identifier]
+            if len(item["track"]) > 1:
+                points = app._points(item["track"])
+                tags = ("real-alert", f"real-alert:{identifier}")
+                if identifier == self.selected:
+                    app.map.create_line(*points, fill=ui.BG, width=5, tags=tags)
+                app.map.create_line(*points, fill=STYLE[item["assessment"]["level"]][0],
+                                    width=2 if identifier == self.selected else 1, tags=tags)
+        labels = []
+        for identifier in sorted(shown, key=lambda key: (key == self.selected, RANK[real.items[key]["assessment"]["level"]])):
+            item = real.items[identifier]
+            x, y = app._project(item["lat"], item["lon"])
+            if not (-20 <= x <= width + 20 and -20 <= y <= height + 20):
+                continue
+            level = item["assessment"]["level"]
+            colour = STYLE[level][0]
+            size = MARKER_SIZE.get(level, 1.0)
+            cleared = real.state[identifier]["cleared_t"] is not None
+            tags = ("real-alert", f"real-alert:{identifier}")
+            fill = "" if cleared else colour  # A cleared alert is drawn hollow at its last fix
+            if level == "critical" and not cleared:
+                radius = 17 if self.pulse else 13
+                halo = app.map.create_oval(x - radius, y - radius, x + radius, y + radius, outline=colour,
+                                           width=2, tags=tags)
+                self.halos.append((halo, x, y))
+            if (item["sog_kn"] or 0) >= 0.5:
+                angle = math.radians(item["cog_deg"] or 0)
+                shape = []
+                for across, along in ((0, -7), (5, 5), (0, 2.5), (-5, 5)):
+                    across, along = across * size, along * size
+                    shape.extend((x + across * math.cos(angle) - along * math.sin(angle),
+                                  y + across * math.sin(angle) + along * math.cos(angle)))
+                app.map.create_polygon(shape, fill=fill, outline=colour if cleared else ui.BG, width=2 if cleared else 1,
+                                       tags=tags)
+            else:
+                radius = 4.5 * size
+                app.map.create_oval(x - radius, y - radius, x + radius, y + radius, fill=fill,
+                                    outline=colour if cleared else ui.BG, width=2 if cleared else 1, tags=tags)
+            if identifier == self.selected:
+                app.map.create_oval(x - 18, y - 18, x + 18, y + 18, outline=ui.INK, width=2, tags=tags)
+            text = f"{item['name']} · REAL" + (" · cleared" if cleared else "")
+            labels.append((identifier != self.selected, -RANK[level], level == "low" and identifier != self.selected,
+                           text, x, y, colour, tags))
+        # Every real alert above Low keeps its label; a Low one gives way when crowded.
+        for _optional, _rank, droppable, text, x, y, colour, tags in sorted(labels, key=lambda row: row[:2]):
+            for dx, dy, anchor in ((14, -12, "w"), (14, 12, "w"), (-14, -12, "e"), (-14, 12, "e")):
+                if self._label(x + dx, y + dy, text, colour, tags, anchor, occupied, force=False):
+                    break
+            else:
+                if not droppable:
+                    self._label(x + 14, y - 12, text, colour, tags, "w", occupied, force=True)
+        if real.checked_t is not None:
+            count = len(shown)
+            text = (f"REAL · {count} live AIS alert{'s' if count != 1 else ''} · checked {hhmm(real.checked_t)}"
+                    + (" · last check failed" if real.feed == "error" else ""))
+            margin = getattr(app, "chart_margin", 0)
+            below = bool(app.map.find_withtag("sim-badge"))
+            label = app.map.create_text(20 + margin, (64 if below else 40) + margin, text=text, anchor="w",
+                                        fill=ui.TEAL, font=(SANS, 9, "bold"), tags=("real-badge", "chart-fixed"))
+            left, top, right, bottom = app.map.bbox(label)
+            box = app.map.create_rectangle(left - 7, top - 3, right + 7, bottom + 3, fill=ui.BG, outline=ui.LINE,
+                                           tags=("real-badge", "chart-fixed"))
+            app.map.tag_lower(box, label)
+
+    def draw_simulated(self, occupied) -> None:
+        app, ui = self.app, self.ui
         layer = app.map_layers.get("Simulated alerts")
         if layer is None or not layer.get() or not self.show_demo_alerts.get():
             return
         width, height = app._map_size
-        occupied: list[tuple[float, float, float, float]] = []
         exercise_shown = app.exercise_visible.get()
         items = [item for item in self.visible_items() if not (item.get("exercise") and exercise_shown)]
         selected = self.by_id.get(self.selected)
@@ -1273,6 +1710,7 @@ class AlertBoard:
             if len(path) > 1:
                 app.map.create_line(*app._points(path), fill=ui.BG, width=7, tags=("sim-selected",))
                 app.map.create_line(*app._points(path), fill=colour, width=3, dash=(9, 5), tags=("sim-selected",))
+            self.draw_notice_areas(selected, occupied)
             if len(selected["track"]) > 1:
                 app.map.create_line(*app._points(selected["track"]), fill=colour, width=2, tags=("sim-selected",))
         labels = []
@@ -1289,7 +1727,7 @@ class AlertBoard:
                 halo = app.map.create_oval(x - radius, y - radius, x + radius, y + radius, outline=colour,
                                            width=2, tags=tags)
                 self.halos.append((halo, x, y))
-            if item["sog_kn"] >= 0.5:
+            if (item["sog_kn"] or 0) >= 0.5:
                 angle = math.radians(item["cog_deg"] or 0)
                 shape = []
                 for across, along in ((0, -7), (5, 5), (0, 2.5), (-5, 5)):
@@ -1323,6 +1761,7 @@ class AlertBoard:
                 if self._label(x, y + 12, f"{selected['line_name']} · illustrative route",
                                STYLE[selected["assessment"]["level"]][0], ("sim-selected",), "n", occupied, force=False):
                     break
+        self.draw_radar(items, occupied)
         self.draw_response(occupied)
         self.draw_assigned(occupied)
         if items:
@@ -1333,6 +1772,58 @@ class AlertBoard:
             box = app.map.create_rectangle(left - 7, top - 3, right + 7, bottom + 3, fill=ui.BG, outline=ui.LINE,
                                            tags=("sim-badge", "chart-fixed"))
             app.map.tag_lower(box, label)
+
+    def draw_radar(self, items, occupied) -> None:
+        """Satellite radar contacts of the shown stories once the replay reaches them, drawn like the exercise's."""
+        app = self.app
+        layer = app.map_layers.get("Radar contacts")
+        if self.replay.now is None or (layer is not None and not layer.get()):
+            return
+        for item in items:
+            for detection in (item.get("story") or {}).get("detections", []):
+                if detection["t"] > self.replay.now:
+                    continue
+                x, y = app._project(detection["lat"], detection["lon"])
+                tags = ("sim-radar", f"sim-alert:{item['id']}")
+                app.map.create_polygon(x, y - 8, x + 8, y, x, y + 8, x - 8, y, fill="#f6d293", outline="#8f4d00",
+                                       width=2, tags=tags)
+                text = f"SAR {self.stamp(detection['t'])} · {detection.get('length_m', '?')} m · {detection['label']}"
+                self._label(x + 12, y + 12, text, self.ui.INK, tags, "w", occupied, force=item["id"] == self.selected)
+
+    def draw_notice_areas(self, item: dict, occupied) -> None:
+        """The work areas of the Marine Notices the selected contact touches, dashed in the notice colour."""
+        app, ui = self.app, self.ui
+        tags = ("sim-selected", "sim-notice")
+        vessel = app._project(item["lat"], item["lon"])
+        labelled = set()
+        for notice, area in notice_areas(item):
+            points = [tuple(point) for point in area["points"]]
+            if area["kind"] == "point" or len(points) == 1:
+                x, y = app._project(*points[0])
+                edge = app._project(*step(*points[0], 0, area["buffer_nm"]))
+                radius = max(6.0, abs(y - edge[1]))
+                app.map.create_oval(x - radius, y - radius, x + radius, y + radius, outline=NOTICE_COLOUR, width=2,
+                                    dash=(6, 4), tags=tags)
+                anchor = (x, y - radius)
+            elif area["kind"] == "polygon":
+                app.map.create_polygon(*app._points(points + points[:1]), fill="", outline=NOTICE_COLOUR, width=2,
+                                       dash=(6, 4), tags=tags)
+                anchor = app._project(*points[0])
+            else:
+                centre = app._project(*points[len(points) // 2])
+                edge = app._project(*step(*points[len(points) // 2], 0, area["buffer_nm"]))
+                band = max(4, min(60, int(2 * abs(centre[1] - edge[1]))))
+                app.map.create_line(*app._points(points), fill="#3a3152", width=band, capstyle="round",
+                                    joinstyle="round", tags=tags)
+                app.map.create_line(*app._points(points), fill=NOTICE_COLOUR, width=2, dash=(6, 4), tags=tags)
+                # Label the route where it is farthest from the vessel, clear of the vessel's own label.
+                anchor = max((app._project(*point) for point in points), key=lambda xy: math.dist(xy, vessel))
+            if notice["number"] in labelled:
+                continue
+            labelled.add(notice["number"])
+            kind = "exercise notice" if notice.get("label") == "fictional" else "Marine Notice · real"
+            self._label(anchor[0] + 6, anchor[1] - 10, f"{notice['number']} work area · {kind}", NOTICE_COLOUR, tags,
+                        "w", occupied, force=False)
 
     def draw_response(self, occupied) -> None:
         """For the selected incident: asset bases, the vessel's expected path and the best asset's dashed route."""
@@ -1440,12 +1931,114 @@ class AlertBoard:
                 self.app.map.coords(halo, x - radius, y - radius, x + radius, y + radius)
 
     def describe(self, identifier: str) -> str:
+        if self.is_real(identifier):
+            item = self.real.items[identifier]
+            return (f"Real · live AIS · {item['name']} · MMSI {item['mmsi']} · {self.real.detail(identifier)} · "
+                    f"{item['title']}")
         item = self.by_id[identifier]
         kind = "Fictional exercise" if item.get("exercise") else "Simulated contact"
         incident = self.tracker.open_incident(item)
         where = f"{incident['id']} {self.status(identifier)}" if incident else self.status(identifier)
         return (f"{kind} · {item['name']} · {item['assessment']['level_name']} {item['assessment']['score']} · "
                 f"{where} · {item['title']}")
+
+
+VERIFIED = "#7ee0a1"  # Result colour when every signature and link checks out.
+
+
+class DecisionLogWindow:
+    """The signed decision log: newest decisions first, a verify button and the file for a tamper test."""
+
+    def __init__(self, board: AlertBoard):
+        import run_gui as ui
+        self.board, self.ui = board, ui
+        self.window = ctk.CTkToplevel(board.app.root)
+        self.window.title("Signed decision log")
+        self.window.geometry("760x520")
+        self.window.configure(fg_color=ui.CARD)
+        self.window.transient(board.app.root)
+        top = tk.Frame(self.window, bg=ui.CARD)
+        top.pack(fill="x", padx=18, pady=(16, 4))
+        tk.Label(top, text="Signed decision log", bg=ui.CARD, fg=ui.INK, font=(SANS, 15, "bold")).pack(side="left")
+        self.chip = tk.Label(top, text="SIM", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 7, "bold"), padx=5,
+                             highlightthickness=1, highlightbackground=ui.LINE)
+        self.chip.pack(side="left", padx=(8, 0), pady=(3, 0))
+        self.key_label = tk.Label(self.window, text="", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 10), anchor="w",
+                                  justify="left", wraplength=720)
+        self.key_label.pack(fill="x", padx=18)
+        self.text = ctk.CTkTextbox(self.window, wrap="word", fg_color=ui.BG, text_color=ui.INK,
+                                   font=ctk.CTkFont(SANS, 12), corner_radius=6)
+        self.text.pack(fill="both", expand=True, padx=18, pady=10)
+        self.text.tag_config("changed", foreground=STYLE["critical"][0])
+        self.text.tag_config("link", foreground=STYLE["medium"][0])
+        self.bad: dict = {}  # From the last check: record number -> "changed" or "link".
+        self.result = tk.Label(self.window, text="", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 11), anchor="w",
+                               justify="left", wraplength=700)
+        self.result.pack(fill="x", padx=18)
+        buttons = tk.Frame(self.window, bg=ui.CARD)
+        buttons.pack(fill="x", padx=18, pady=(8, 16))
+        self.verify_button = ctk.CTkButton(buttons, text="Verify signatures", command=self.verify, width=150, height=30,
+                                           fg_color=ui.TEAL, hover_color="#6ed5e3", text_color=ui.BG)
+        self.verify_button.pack(side="left")
+        ctk.CTkButton(buttons, text="Show the file", command=self.show_file, width=120, height=30,
+                      fg_color="transparent", border_width=1).pack(side="left", padx=8)
+        ctk.CTkButton(buttons, text="Close", command=self.window.withdraw, width=84, height=30,
+                      fg_color="transparent", border_width=1).pack(side="right")
+
+    def refresh(self) -> None:
+        log = self.board.decision_log
+        try:
+            records = log.records()
+        except ValueError:
+            records = None
+        key = log.public_key() if log.key_path.exists() else None
+        from argus.decision_log import fingerprint
+        seal = log.seal()
+        self.key_label.configure(text=(f"Signed on this computer with key {fingerprint(key)}. "
+                                       if key else "No decisions yet; this computer gets its key with the first one. ")
+                                 + (f"Seal of the last record: {seal}. Note it down: removing records from the "
+                                    "end changes it. " if seal else "") + f"File: {log.path}")
+        self.text.configure(state="normal")
+        self.text.delete("1.0", "end")
+        if records is None:
+            self.text.insert("end", "The log file is not readable. Press Verify signatures to see where.")
+        rows = [r for r in records or [] if r.get("kind") == "decision"]
+        kinds = {"REAL" if r.get("real") else "SIM" for r in rows}
+        self.chip.configure(text=" + ".join(sorted(kinds, reverse=True)) if kinds else "SIM")
+        for record in reversed(rows):
+            when = record.get("time", "")[11:19] + " UTC" if len(record.get("time", "")) >= 19 else record.get("time", "")
+            vessel = f"{record['vessel']} ({record['alert']}) · " if record.get("vessel") else ""
+            problem = self.bad.get(record.get("seq"))
+            tags = (problem,) if problem else ()
+            changed = {"changed": "  · CHANGED AFTER SIGNING", "link": "  · LINK BROKEN"}.get(problem, "")
+            real = "REAL · " if record.get("real") else ""
+            self.text.insert("end", f"{when} · {record.get('operator', '?')} · {real}{record.get('action', '?')}{changed}\n",
+                             tags)
+            self.text.insert("end", f"    {vessel}{record.get('detail', '')}\n", tags)
+        if records is not None and not rows:
+            self.text.insert("end", "No decisions yet. Acknowledge, escalate, reject or send a responder, "
+                                    "and each decision appears here, signed.")
+        self.text.configure(state="disabled")
+
+    def verify(self) -> None:
+        result = self.board.decision_log.verify()
+        self.bad = result.bad
+        colour = VERIFIED if result.ok else STYLE["critical"][0]
+        details = "" if result.ok or len(result.problems) == 1 else f"  (+{len(result.problems) - 1} more)"
+        self.result.configure(text=result.summary() + details, fg=colour)
+        self.refresh()
+
+    def show_file(self) -> None:
+        path = self.board.decision_log.path
+        if not path.exists():
+            self.result.configure(text="There is no log file yet.", fg=self.ui.MUTED)
+            return
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", str(path)])
+        elif os.name == "nt":
+            subprocess.Popen(["explorer", "/select,", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path.parent)])
 
 
 class ReviewDialog:
@@ -1548,7 +2141,7 @@ class ReviewDialog:
     def report_vessel(self):
         from desktop_reports import board_snapshot, open_report
         if self.item:
-            open_report(self.board.app, board_snapshot(self.item))
+            open_report(self.board.app, board_snapshot(self.item), self.item)
 
     # ----- layout ---------------------------------------------------------------------
     def place(self) -> None:
@@ -1640,7 +2233,7 @@ class ReviewDialog:
         item, board, ui = self.item, self.board, self.ui
         if item is None:
             return
-        item = board.by_id.get(item["id"], item)
+        item = board.item(item["id"]) or item
         self.item = item
         assessment = item["assessment"]
         incident = board.incident(item["id"])
@@ -1649,13 +2242,16 @@ class ReviewDialog:
         if incident and RANK[incident["peak_level"]] > RANK[assessment["level"]]:
             level += f"  ·  PEAK {LEVEL_NAMES[incident['peak_level']].upper()}"
         self.level.configure(text=level, fg=STYLE[assessment["level"]][0])
-        self.score.configure(text=f"Score {assessment['score']}" + (f"  ·  {incident['id']}" if incident else ""))
+        suffix = (f"  ·  {incident['id']}" if incident else
+                  f"  ·  MMSI {item['mmsi']}" if item.get("label") == "real" else "")
+        self.score.configure(text=f"Score {assessment['score']}{suffix}")
         self.tag.configure(text=source(item)["long_tag"])
         self.name.configure(text=item["name"])
         meta = [item["vessel_type"]]
         if item.get("length_m"):
             meta.append(f"{item['length_m']:.0f} m")
-        meta += [f"SOG {item['sog_kn']:.1f} kn", f"COG {item['cog_deg']:03.0f}°"]
+        meta += ["SOG n/a" if item["sog_kn"] is None else f"SOG {item['sog_kn']:.1f} kn",
+                 "COG n/a" if item["cog_deg"] is None else f"COG {item['cog_deg']:03.0f}°"]
         if not item.get("exercise"):
             minutes = int(board.age_min(item))
             meta.append("raised now" if minutes < 1 else f"raised {minutes} min ago" if minutes < 60
@@ -1663,6 +2259,8 @@ class ReviewDialog:
         self.meta.configure(text="  ·  ".join(meta))
         self.title.configure(text=item["title"])
         flags = badges(item, incident if status != "Rejected" else None)
+        if board.is_real(item["id"]) and board.real.state[item["id"]]["review_again"]:
+            flags.insert(0, ("⚠ Review again", "warn"))
         self.flags.configure(text="   ".join(text for text, _kind in flags))
         if flags:
             self.flags.pack(fill="x", padx=20, pady=(4, 0), after=self.title)
@@ -1672,8 +2270,8 @@ class ReviewDialog:
         self.facts["asset"][0].configure(text=item["line_name"])
         self.facts["asset"][1].configure(text="Fictional cable" if item.get("exercise") else "Illustrative route")
         self.update_live(force=True)
-        detail = {"Escalated": f"To {board.recipients.get(item['id'], '')}",
-                  "Rejected": (incident or {}).get("status_reason") or "",
+        detail = {"Escalated": f"To {board.recipient(item['id'])}",
+                  "Rejected": board.status_reason(item["id"]),
                   "Watching": "Low: an observation, not an incident"}.get(status, STATUS_DETAIL.get(status, ""))
         self.facts["status"][0].configure(text="Closed · rejected" if status == "Rejected" else status, fg=ui.INK)
         self.facts["status"][1].configure(text=detail)
@@ -1749,6 +2347,13 @@ class ReviewDialog:
         ui, item, board, body = self.ui, self.item, self.board, self.body
         body.clear()
         self.compact(self.mode == "escalate")
+        if self.mode == "escalate" and item.get("label") == "real":
+            self.heading("WHO CAN REACH IT", top=4)
+            self.paragraph("Not worked out for real alerts: the response assets are the exercise's fictional fleet. "
+                           "Choose who to tell below; the decision is signed into this computer's log and not "
+                           "transmitted.", ui.MUTED)
+            body.finish()
+            return
         if self.mode == "escalate":
             # Escalating is when an asset is chosen: the window shows who can reach the vessel instead.
             self.fill_responders()
@@ -1758,12 +2363,12 @@ class ReviewDialog:
         self.heading("RECOMMENDED ACTION")
         self.paragraph(item["recommendation"], ui.INK)
         self.heading("LOG")
-        entries = board.history.get(item["id"], [])
+        entries = board.log_lines(item["id"])
         if not entries:
             self.paragraph("No entries.", ui.MUTED)
         for stamp, text in entries[-8:]:
             body.y += 1
-            time = body.text(6, board.stamp(stamp), ui.MUTED, (MONO, 9))
+            time = body.text(6, stamp, ui.MUTED, (MONO, 9))
             left = body.canvas.bbox(time)[2] + 10
             entry = body.text(left, text, SECONDARY, (SANS, 10), width=body.page_width - left - 10)
             body.y = body.bottom(time, entry) + 1
@@ -1775,9 +2380,14 @@ class ReviewDialog:
             right = body.chip(6, body.y, tag, fill, background, (SANS, 7, "bold"), chip_width)
             label = body.text(right + 8, text, SECONDARY, (SANS, 9), width=body.page_width - right - 18)
             body.y = body.bottom(label) + 2
-        source = ("Brain opens and updates the incident; only a human sets its status." if board.incident(item["id"])
-                  else "Low: watched, not an incident; it opens one if it reaches Medium.")
-        self.paragraph(source + " Decisions are logged locally and not transmitted.", ui.MUTED, (SANS, 9), top=12)
+        if item.get("label") == "real":
+            source = ("Real rule outcome on live AIS, checked every 5 min; only a human sets its status. Decisions are "
+                      "signed into this computer's log and not transmitted.")
+        else:
+            source = ("Brain opens and updates the incident; only a human sets its status." if board.incident(item["id"])
+                      else "Low: watched, not an incident; it opens one if it reaches Medium.")
+            source += " Decisions are logged locally and not transmitted."
+        self.paragraph(source, ui.MUTED, (SANS, 9), top=12)
         body.finish()
 
     def chip_width(self) -> float:
@@ -1891,6 +2501,8 @@ class ReviewDialog:
         """Why this level: the five groups with points and factors, rules applied, the line, detectors."""
         ui, body = self.ui, self.body
         self.heading("WHY THIS LEVEL", top=4, right=why["basis"])
+        for issue in why["data_issues"]:  # first, so the reviewer reads the level knowing the data was faulty
+            self.line("!", issue, STYLE["medium"][0])
         for group in why["groups"]:
             body.y += 6
             active = group["points"] > 0
@@ -1918,6 +2530,7 @@ class ReviewDialog:
             self.heading("SMALL VESSEL")
             self.line("›", f"Small: {small['reason']}.", ui.INK, ui.MUTED)
             self.line("", small["outcome"], STYLE["low"][0] if small["capped"] else STYLE["medium"][0])
+        self.fill_declared_work(why["declared_work"])
         self.heading("FINDINGS BY DETECTOR")
         for finding in why["findings"]:
             body.y += 4
@@ -1930,6 +2543,23 @@ class ReviewDialog:
             hidden = len(finding["reasons"]) - DETECTOR_REASONS
             if hidden > 0:
                 self.line("", f"+{hidden} more", ui.MUTED)
+
+    def fill_declared_work(self, work: dict) -> None:
+        """Marine Notices: whether a notice explains the vessel, and what each notice it touches says."""
+        ui, body = self.ui, self.body
+        self.heading("DECLARED WORK · MARINE NOTICES", right=f"{work['checked']} real notices")
+        colour = {"explained": STYLE["low"][0], "not_applied": STYLE["medium"][0],
+                  "unnamed": STYLE["medium"][0]}.get(work["status"], ui.MUTED)
+        self.line("›", work["outcome"], colour, ui.MUTED)
+        for notice in work["notices"]:
+            body.y += 4
+            title = body.text(6, f"{notice['name']}: {notice['title']}", ui.INK, (SANS, 10, "bold"),
+                              width=body.page_width - 96)
+            fill, background = CHIP.get(notice["label"], (ui.MUTED, ui.CONTROL))
+            body.chip(body.page_width - 80, body.y + 2, notice["label"], fill, background, (SANS, 7, "bold"))
+            body.y = body.bottom(title) + 1
+            for reason in notice["reasons"]:
+                self.line("•", reason, SECONDARY, ui.MUTED)
 
     def fill_actions(self) -> None:
         ui, item, board = self.ui, self.item, self.board
@@ -2008,8 +2638,9 @@ class ReviewDialog:
         ctk.CTkButton(buttons, text="Confirm escalation" if escalate else "Confirm rejection", command=self.confirm,
                       width=150, height=30, corner_radius=6, fg_color=ui.PURPLE, hover_color="#af9450",
                       text_color=ui.BG, font=ctk.CTkFont(SANS, 12, "bold")).pack(side="right")
-        tk.Label(buttons, text="Simulation: not transmitted", bg=ui.CARD, fg=ui.MUTED,
-                 font=(SANS, 9)).pack(side="right", padx=10)
+        real = self.item is not None and self.item.get("label") == "real"
+        tk.Label(buttons, text="Real alert: signed, not transmitted" if real else "Simulation: not transmitted",
+                 bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9)).pack(side="right", padx=10)
         self.form.pack(side="bottom", fill="x", padx=20, pady=(4, 4), before=self.middle)
 
     def cancel_form(self) -> None:

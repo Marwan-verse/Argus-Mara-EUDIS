@@ -23,7 +23,13 @@ from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+# D106: the one team database is argus-mara in the Argus Mara organisation.
 DEFAULT_URL = 'https://lcpgnzvkntqdhejrsgpa.supabase.co'
+ROOT = Path(__file__).resolve().parents[1]
+# D108: the team project's publishable key may ship in this private repository. The database
+# lets it run only these read-only functions; every write still needs the secret key.
+PUBLISHABLE_KEY = 'sb_publishable_kpSx9M-p6dLzdJVy7KADXA_IDrgi8Sl'
+READ_FUNCTIONS = frozenset({'argus_ais_status', 'argus_ais_rows', 'argus_recent_tracks', 'argus_history_index'})
 SERVICE, ACCOUNT = 'ArgusMara.Supabase', 'secret-key'
 LIMIT = 16 * 1024 * 1024
 KEY_FORMAT = re.compile(r'sb_secret_[A-Za-z0-9_-]{16,200}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+')
@@ -40,8 +46,34 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def base_url():
-    url = os.environ.get('ARGUS_SUPABASE_URL', DEFAULT_URL).strip().rstrip('/')
+def linked_url(root=None):
+    """The project this workspace's key was checked against when it was linked, if recorded.
+
+    A secret key belongs to one project, so the client follows the link instead of a
+    default that may have changed since. Only https://<project>.supabase.co is accepted,
+    so an edited link file cannot send the key anywhere else.
+    """
+    path = Path(root or os.environ.get('ARGUS_SATELLITE_ROOT') or ROOT/'data/satellite')/LINK_FILE
+    try:
+        url = json.loads(path.read_text(encoding='utf-8')).get('url')
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not isinstance(url, str):
+        return None
+    url = url.strip().rstrip('/')
+    parts = urlsplit(url)
+    if parts.scheme != 'https' or parts.path or not (parts.hostname or '').endswith('.supabase.co'):
+        return None
+    return url
+
+
+def base_url(*, follow_link=True, root=None):
+    """ARGUS_SUPABASE_URL, else the project this workspace was linked to, else the team project.
+
+    New keys are checked against the explicit or team project (``follow_link=False``).
+    """
+    url = (os.environ.get('ARGUS_SUPABASE_URL', '').strip() or (linked_url(root) if follow_link else None)
+           or DEFAULT_URL).rstrip('/')
     parts = urlsplit(url)
     if parts.scheme != 'https' or not parts.hostname or parts.path:
         raise ValueError('ARGUS_SUPABASE_URL must be an https://<project>.supabase.co address')
@@ -114,7 +146,7 @@ def linked(root):
 def link(root):
     path = Path(root)/LINK_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({'url': base_url(), 'note': 'Coast Watch uses the team Supabase database. '
+    path.write_text(json.dumps({'url': base_url(follow_link=False), 'note': 'Coast Watch uses the team Supabase database. '
                                 'Delete this file to stop.'}, indent=2) + '\n', encoding='utf-8')
     return path
 
@@ -150,10 +182,48 @@ def http_rpc(url, payload, key, timeout=30):
         raise ValueError('Cannot read the Supabase response') from None
 
 
+def read_key():
+    """This computer's secret key, else the team project's publishable read key (D108)."""
+    try:
+        key = get_key()
+    except ValueError:
+        key = ''
+    return key or (PUBLISHABLE_KEY if base_url() == DEFAULT_URL else '')
+
+
+def own_workspace(root):
+    """The app's own workspace (or a host's ARGUS_SATELLITE_ROOT), never a test's temporary folder."""
+    try:
+        return Path(root).resolve() == Path(os.environ.get('ARGUS_SATELLITE_ROOT') or ROOT/'data/satellite').resolve()
+    except OSError:
+        return False
+
+
+def enable_keyless_read():
+    """Called by the real entry points (run_gui.main, SATELLITE-WATCH, live_alerts), never by tests.
+
+    An explicit ``ARGUS_SUPABASE_READ=0`` keeps keyless reading off.
+    """
+    os.environ.setdefault('ARGUS_SUPABASE_READ', '1')
+
+
+def readable(root):
+    """Team data can be read here: a linked workspace, or the app's own workspace with the publishable key.
+
+    Writing still needs a linked workspace and the secret key (``linked``). Keyless reading
+    is on only after ``enable_keyless_read()``, so tests and servers stay offline unless linked.
+    """
+    if linked(root):
+        return True
+    return os.environ.get('ARGUS_SUPABASE_READ') == '1' and own_workspace(root) and bool(read_key())
+
+
 def rpc(name, payload, *, transport=http_rpc):
     if not re.fullmatch(r'argus_[a-z_]{3,40}', name):
         raise ValueError('Unknown database function')
     key = get_key()
+    if not key and name in READ_FUNCTIONS:
+        key = read_key()
     if not key:
         raise ValueError('Supabase is not configured; run python scripts/configure_supabase.py')
     return transport(base_url() + '/rest/v1/rpc/' + name, payload, key)
@@ -184,10 +254,24 @@ def historical_ais_from_database(acquired_utc, area, *, transport=http_rpc):
     rows = packet.get('rows') if isinstance(packet, dict) else None
     if not isinstance(rows, list):
         raise ValueError('Unexpected Supabase AIS response')
+    excluded = packet.get('excluded_vessels', [])
+    reasons = {'conflicting_positions_at_same_time', 'mixed_provenance', 'ambiguous_stream_epochs'}
+    if not isinstance(excluded, list) or any(
+            not isinstance(item, dict) or not isinstance(item.get('mmsi'), str) or
+            not re.fullmatch(r'[0-9]{9}', item['mmsi']) or
+            item.get('reason') not in reasons for item in excluded):
+        raise ValueError('Invalid Supabase AIS source-quality evidence')
     positions = sum(1 for row in rows if isinstance(row, dict) and row.get('msg_type') == 'PositionReport')
     with tempfile.TemporaryDirectory(prefix='argus-supabase-ais-') as folder:
         write_rows_csv(rows, Path(folder)/'supabase_ais.csv')
         result = historical_ais(folder, acquired_utc, area)
+    blocked = {item['mmsi'] for item in excluded}
+    result['vessels'] = [v for v in result['vessels'] if v['mmsi'] not in blocked]
+    combined = result['coverage'].get('excluded_vessels', []) + excluded
+    result['coverage'].update(excluded_vessels=[dict(mmsi=m, reason=r) for m, r in
+                              sorted({(item['mmsi'], item['reason']) for item in combined})],
+                              eligible_vessels=len(result['vessels']),
+                              status='partial' if result['vessels'] else 'unavailable')
     result['source'] = 'supabase'
     result['coverage'].update(source='Team Supabase database (Railway AIS feed copied every 30 s)',
                               database_position_rows=positions)
@@ -211,13 +295,16 @@ def scene_payload(scene, contacts, observed_areas=(), source='argus-coast-watch'
             continue
         items.append({'external_id': str(point.get('id') or index)[:120], 'lat': lat, 'lon': lon,
                       'overlap_ambiguous': point.get('overlap_ambiguous') is True,
-                      'source': 'tensorx_ai', 'label': 'assumption', 'confidence': confidence(point.get('confidence')),
+                      'source': point.get('source') if point.get('source') in {'compact_optical_feature', 'tensorx_ai_pixel_supported'} else 'tensorx_ai',
+                      'localization': point.get('localization') or {},
+                      'label': 'assumption', 'confidence': confidence(point.get('confidence')),
                       'note': str(point.get('description') or '')[:300] or None})
     return {'id': scene['id'], 'sensor': sensor, 'acquired_utc': scene['acquired_utc'],
             'bbox': [float(v) for v in scene['bbox']], 'source': source,
             'label': 'real' if real else 'simulated', 'contacts': items,
             'review_evidence': {'version': 'image-ais-review-v2',
                                 'image_input_verified': bool(analysis and analysis.get('image_input_verified') is True),
+                                'image_status': (analysis or {}).get('image_status', 'limited'),
                                 'clear_footprint_radius_m': 100},
             'observed_areas': [[float(v) for v in area] for area in observed_areas]}
 

@@ -1,6 +1,6 @@
 # 7. Codebase architecture and team contracts
 
-## Investigation lab (D94, 16 October)
+## Investigation lab (D110, 16 October)
 
 `desktop_investigation.py` adds four local tabs: source timeline, pairwise
 encounter review, an editable fictional branch, and evaluation against a
@@ -117,6 +117,15 @@ and shades model-forecast cloud and rain (not radar) for now or up to 12 hours a
 layer draws downwind arrows coloured by speed. Map-bar "Rain" and "Wind" switches toggle each layer.
 It shows current real weather, not the replay's, and is display-only: alerts,
 countdowns, ETAs and both JSON files are unchanged.
+
+*Magnetics (D91, 16 October):* `desktop_magnetics.py` is a rail panel with two parts.
+Its opt-in storm feed (`argus/geomag.py`: NOAA SWPC 1-minute Kp with a rolling maximum
+over the current and previous 3-hour interval, and Valentia 1-minute H from INTERMAGNET via
+BGS GIN as |dH/dt|) shows tiers 0–3 in a header chip and caches the last status in
+`data/magnetics/`. Its seabed search planner (`argus/survey_plan.py`) builds a corridor
+from a track and a cable path and estimates magnetometer survey effort. Both are
+display-only: no detector reads them, and alerts, countdowns, ETAs and both JSON files are
+unchanged.
 
 *Dark-vessel prediction (D51, 13 October):* the "Dark prediction" map layer, on by
 default, replaces the withdrawn exercise marker during its AIS gap with a labelled
@@ -235,6 +244,16 @@ requires administrator status. A local scan runs with the desktop, a shared scan
 with the existing private SOC host. Neither installs an OS scheduled task.
 
 ## Optional team database — 15 October 2026 (D74)
+
+D95 (16 October) deploys the complete schema to the user-selected new project
+`zibmytppznydhlggzlaq` in marwan-verse's projects, Ireland. The original project
+is unchanged. `ais_observations` additionally preserves complete received ship
+objects, and a forward migration disables automatic AIS history deletion.
+`scripts/export_ship_history_sql.py` prepares private idempotent import batches
+for the existing local capture archive; original CSV fields and source hashes
+remain stored alongside normalized query fields. The history worker's 14-day
+analysis window is separate from archive retention. See the current deployment
+in `supabase/README.md`; desktop/host secrets remain required for their access.
 
 `supabase/migrations/` holds the schema of the Supabase project `argus-mara`.
 Inside the database, `pg_cron` and `pg_net` copy the Railway AIS feed every 30

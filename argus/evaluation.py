@@ -20,6 +20,10 @@ def exercise_cases():
                     "SIM-55": (True, "Fictional route deviation and slowdown near a line")}
     cases = []
     for row, ais_class, make_track in STORY_ITEMS:
+        # The comparison is an explicitly labelled five-story cohort. Newly
+        # added team stories stay outside it until review labels are supplied.
+        if row[0] not in expectations:
+            continue
         expected, reason = expectations[row[0]]
         vessel = {"mmsi": row[0], "name": row[1], "type": row[2], "ship_type": SHIP_TYPES.get(row[2]),
                   "ais_class": ais_class, "ais_length_m": row[3], "label": "fictional", "track": make_track()}
@@ -28,6 +32,8 @@ def exercise_cases():
         scenario = {"vessels": [vessel], "cables": deepcopy(STORY_LINES), "detections": [], "assets": []}
         cases.append({"id": row[0], "scenario": scenario, "vessel": vessel,
                       "expected_review": expected, "label_basis": reason})
+    if {case["id"] for case in cases} != set(expectations):
+        raise ValueError("An evaluation story is missing; update the labelled cohort explicitly")
     return cases
 
 
@@ -67,7 +73,10 @@ def evaluate_cases(cases):
         for fix in track:
             now = fix["t"]
             context = context_from_scenario(scenario, now)
-            if assess_vessel(vessel, context)["assessment"]["rank"] >= 2:
+            assessed = assess_vessel(vessel, context)
+            if assessed.get("detector_errors"):
+                raise ValueError(f"Detector failure in {case['id']}; comparison withheld")
+            if assessed["assessment"]["rank"] >= 2:
                 brain.append(now)
             proximity = any(distance_to_path_nm(fix["lat"], fix["lon"], c["path"])[0] <= 1
                             for c in scenario["cables"] if len(c.get("path", [])) >= 2)

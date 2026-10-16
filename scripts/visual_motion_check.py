@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +23,8 @@ sys.path.insert(0, str(ROOT))
 os.environ.setdefault("ARGUS_AIS_AUTOCONNECT", "0")
 os.environ.setdefault("ARGUS_UI_PREFERENCES", "")
 os.environ["ARGUS_REDUCED_MOTION"] = "0"
+# Synthetic decisions below must never reach this computer's signed decision log.
+os.environ["ARGUS_DECISION_LOG"] = str(Path(tempfile.mkdtemp(prefix="argus-visual-")) / "decision-log.jsonl")
 
 
 def main() -> int:
@@ -117,6 +120,70 @@ def main() -> int:
     shot("08-zoom-out-mid")
     pump(1.5)
     shot("09-zoom-out-end")
+
+    # The incidents panel (D94) with leads shaped like a real run: 1 high, 1 medium and 24 low priority.
+    def panel_shot(name: str) -> None:
+        root.update()
+        panel = app.alerts_panel
+        x, y = panel.winfo_rootx(), panel.winfo_rooty()
+        try:
+            ImageGrab.grab(bbox=(x, y, x + panel.winfo_width(), y + panel.winfo_height())).save(output / f"{name}.png")
+        except Exception as error:
+            report["events"].append(f"{name}: screen grab failed: {error}")
+
+    def lead(index: int, kind: str, priority, title: str) -> dict:
+        return {"id": f"synthetic-{index}", "kind": kind, "name": "Unidentified contact" if kind != "ais_not_detected"
+                else "SYNTHETIC SHIP", "mmsi": "123456789" if kind == "ais_not_detected" else None,
+                "title": title, "acquired_utc": f"2026-10-13T12:{index:02d}:00Z", "source_label": "synthetic",
+                "reason": "Synthetic lead for the screenshot only.", "scene_id": "a" * 24, "priority": priority,
+                "priority_reason": f"Synthetic {priority} priority"}
+    leads = [lead(0, "ais_not_detected", "high", "AIS vessel not detected in clear-water image"),
+             lead(1, "image_without_ais", "medium", "Image contact without AIS")]
+    leads += [lead(2 + i, "image_without_ais", "low", "Image contact without AIS") for i in range(24)]
+    app.alert_board.refresh_evidence({"leads": leads, "reviews_checked": 26, "reviews_pending": 0})
+    # Keep the synthetic leads: the satellite poll would replace them with this machine's (empty) results.
+    app.alert_board.refresh_evidence = lambda *args, **kwargs: None
+    pump(1.0)
+    panel_shot("10-incidents-panel")
+    app.alert_board.list.see("header:high", margin=0)
+    pump(0.4)
+    panel_shot("11-incidents-high-band")
+    app.alert_board.toggle_low()
+    pump(0.6)
+    app.alert_board.list.see("header:low", margin=0)
+    pump(0.4)
+    panel_shot("12-incidents-low-open")
+    app.alert_board.toggle_low()
+
+    # D107: real alerts from live AIS, here from synthetic tracks (no network): their band, the map and the review.
+    from unittest.mock import patch
+    from argus.live_alerts import LiveTracks
+    from desktop_real_alerts import check
+    now = time.time()
+
+    def track(mmsi, lat, lon, minutes, sog, lat_step=0.0, lon_step=0.0, cog=90.0):
+        return [[mmsi, now - (minutes - 1 - i) * 60, lat + i * lat_step, lon + i * lon_step, sog, cog, None, 0]
+                for i in range(minutes)]
+    rows = (track("250000001", 53.358, -5.705, 120, 1.5, lon_step=.0002)
+            + track("250000006", 51.42, -7.62, 100, 2.5, lat_step=-.0002, cog=170)
+            + track("250000007", 53.47, -5.32, 25, 3.0, lon_step=.0004))
+    static = {"250000001": {"name": "SYNTHETIC LOITERER", "ship_type": "70", "length_m": "150"},
+              "250000006": {"name": "SYNTHETIC SURVEYOR", "ship_type": "33", "length_m": "60"},
+              "250000007": {"name": "SYNTHETIC YACHT", "ship_type": "37", "length_m": "12"}}
+    answer = {"positions": sorted(rows, key=lambda row: row[1]), "static": static, "truncated": False}
+    with patch("desktop_real_alerts.can_read", return_value=True), patch("argus.watchlist_data.load", return_value=None):
+        result = check(LiveTracks(rpc=lambda _payload: answer), ROOT)
+    report["real_alerts"] = [[item["name"], item["assessment"]["level"]] for item in result.get("items", [])]
+    board = app.alert_board
+    board.refresh_real(result)
+    pump(0.6)
+    board.list.see("header:high", margin=0)
+    pump(0.4)
+    panel_shot("13-real-alerts-panel")
+    board.open("REAL-250000001", centre=True)
+    pump(1.5)
+    shot("14-real-alert-map-and-review")
+    panel_shot("15-real-alert-selected")
 
     report["flatten_ms"] = [round(value * 1000, 1) for value in app.motion.timings]
     report["prepare_ms"] = round(app.motion.prepare_seconds * 1000, 1)

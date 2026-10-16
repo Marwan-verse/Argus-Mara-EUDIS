@@ -79,22 +79,49 @@ def type_top_kn(ship_type) -> float:
     return next((top for codes, top in TYPE_TOP_KN if code in codes), OTHER_TOP_KN)
 
 
-def clean_track(track: list[dict], now: float | None = None) -> list[dict]:
+def clean_track(track: list[dict], now: float | None = None, *, diagnostics=None) -> list[dict]:
     """Fixes up to ``now`` with a usable position; SOG 102.3 or more ("not available") becomes None.
 
     AIS "position not available" (lat 91, lon 181) and the 0, 0 default are dropped.
     """
-    fixes = []
+    groups = {}
+    rejected, duplicates, conflicts = 0, 0, []
+
+    def usable(value):
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+    if now is not None and not usable(now):
+        raise ValueError('Track cutoff must be a finite number')
     for fix in track:
+        if not isinstance(fix, dict) or not usable(fix.get('t')):
+            rejected += 1
+            continue
         if now is not None and fix["t"] > now:
-            break
+            continue
         lat, lon = fix.get("lat"), fix.get("lon")
-        if lat is None or lon is None or not (-90 <= lat <= 90 and -180 <= lon <= 180) or (lat == 0 and lon == 0):
+        if not usable(lat) or not usable(lon) or not (-90 <= lat <= 90 and -180 <= lon <= 180) or (lat == 0 and lon == 0):
+            rejected += 1
             continue
         sog = fix.get("sog_kn")
-        if sog is not None and not 0 <= sog < SOG_NOT_AVAILABLE:
+        if not usable(sog) or not 0 <= sog < SOG_NOT_AVAILABLE:
             sog = None
-        fixes.append({**fix, "sog_kn": sog})
+        groups.setdefault(fix['t'], []).append({**fix, 'sog_kn': sog})
+    fixes = []
+    for t, group in sorted(groups.items()):
+        if len({(f['lat'], f['lon']) for f in group}) > 1:
+            # A receipt timestamp cannot establish a traversal order. Retain a
+            # separate quality cue rather than inventing an infinite-speed leg.
+            conflicts.append(t)
+            continue
+        merged = dict(group[0])
+        for key in ('sog_kn', 'cog_deg'):
+            if any(f.get(key) != merged.get(key) for f in group):
+                merged[key] = None
+        duplicates += len(group)-1
+        fixes.append(merged)
+    if diagnostics is not None:
+        diagnostics.update(rejected_fixes=rejected, duplicate_fixes=duplicates,
+                           conflicting_times=conflicts)
     return fixes
 
 
@@ -401,11 +428,20 @@ def persistence(events: list[dict]) -> str | None:
 
 def ais_spoofing(vessel: dict, context: dict) -> list[dict]:
     """One ``ais_spoofing`` finding per vessel with physically impossible positions; none for a clean track."""
-    fixes = clean_track(vessel.get("track") or [], context.get("now"))
+    quality = {}
+    fixes = clean_track(vessel.get("track") or [], context.get("now"), diagnostics=quality)
     steps, ship_type = steps_between(fixes), vessel.get("ship_type")
     events = (jump_events(fixes, steps, ship_type) + two_places_events(fixes, steps, ship_type)
               + speed_mismatch_events(fixes, steps) + land_events(fixes)
               + reappearance_events(fixes, steps, ship_type))
+    if not events and quality['conflicting_times']:
+        t = quality['conflicting_times'][-1]
+        return [{'detector': DETECTOR, 'mmsi': vessel['mmsi'], 't': t, 'position': None,
+                 'strength': WEAK_STRENGTH,
+                 'reasons': ['Conflicting positions share an AIS receipt time; motion cannot be ordered. '
+                             'Review the source data; this alone is not a spoofing sign.'],
+                 'related': {'events': [], 'track_quality': quality},
+                 'label': vessel.get('label', 'simulated'), 'obs': {}}]
     if not events:
         return []
     events.sort(key=lambda event: event["t"])
@@ -425,7 +461,7 @@ def ais_spoofing(vessel: dict, context: dict) -> list[dict]:
     return [{
         "detector": DETECTOR, "mmsi": vessel["mmsi"], "t": lead["t"], "position": lead["position"],
         "strength": strength, "reasons": reasons,
-        "related": {"events": [{key: event[key] for key in ("kind", "t", "position", "distance_nm")}
+        "related": {"track_quality": quality, "events": [{key: event[key] for key in ("kind", "t", "position", "distance_nm")}
                                for event in events]},
         "label": vessel.get("label", "simulated"), "obs": {"spoof_signs": True} if why else {},
     }]

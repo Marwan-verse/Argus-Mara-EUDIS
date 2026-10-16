@@ -9,10 +9,12 @@ import math
 from argus.satellite import mercator
 from argus.space import distance_km, timestamp
 
-VERSION = 'image-ais-review-v2'
+VERSION = 'image-ais-review-v6'
 MIN_LENGTH_M = 50
 VISIBILITY_RADIUS_M = 100
 ALTERNATIVE_KM = 1
+BUSY_WATER_NOTE = (' Pixel check unavailable: over 100 bright spots in this image (waves, glint or boats),'
+                   ' so the AI position is not pixel-confirmed.')
 
 
 def visibility(scene, position, mask, radius_m=VISIBILITY_RADIUS_M):
@@ -77,9 +79,11 @@ def region_coverage(scene, visual, extent):
 def compare_review(scene, contacts, ais, visual, folder):
     """List all image-time vessels, with an explicit result for each unchecked case."""
     from argus.satellite_screen import water_mask
-    checks, leads = [], []
+    from argus.tracking import within_temporal_support
+    from argus.optical_localization import position_eligible
+    checks, leads, contact_checks = [], [], []
     result = {'version': VERSION, 'acquired_utc': scene['acquired_utc'],
-              'scene_id': scene['id'], 'vessel_checks': checks, 'leads': leads,
+              'scene_id': scene['id'], 'vessel_checks': checks, 'contact_checks': contact_checks, 'leads': leads,
               'parameters': {'minimum_length_m': MIN_LENGTH_M, 'visibility_radius_m': VISIBILITY_RADIUS_M,
                              'alternative_radius_m': ALTERNATIVE_KM*1000},
               'caveat': 'Partial AIS reception and unvalidated optical detection. Not detected does not mean absent; clear SCL does not rule out glint, haze or rough sea. Human review required.'}
@@ -103,10 +107,11 @@ def compare_review(scene, contacts, ais, visual, folder):
         length = vessel.get('broadcast_fields', {}).get('length_m', {}).get('value')
         nav = vessel.get('broadcast_fields', {}).get('nav_status', {}).get('value')
         state = 'not_checked'
-        matches = [c for c in contacts if c.get('matched_mmsi') == vessel['mmsi']]
+        matches = [c for c in contacts if c.get('matched_mmsi') == vessel['mmsi'] and position_eligible(c)]
         nearby = [c for c in contacts if distance_km(position, c) <= ALTERNATIVE_KM]
         visible = visibility(scene, position, mask)
         coverage = analysis_coverage(scene, position, visual) if verified else 'image_not_analysed'
+        support = vessel.get('position_evidence', {}).get('temporal_support')
         if not verified:
             state = 'image_not_analysed'
         elif vessel.get('position_evidence', {}).get('kinematic_consistency') == 'exceeds_assumed_limit':
@@ -115,6 +120,8 @@ def compare_review(scene, contacts, ais, visual, folder):
             state = 'ambiguous_match' if any(c.get('ambiguous') for c in matches) else 'provisional_match'
         elif nearby:
             state = 'nearby_image_contact_review'
+        elif support and support['center_radius_m'] > ALTERNATIVE_KM*1000:
+            state = 'ais_position_uncertain'
         elif coverage != 'complete':
             state = coverage
         elif visible != 'clear_water':
@@ -136,21 +143,45 @@ def compare_review(scene, contacts, ais, visual, folder):
                           'title': 'AIS vessel not detected in clear-water image',
                           'reason': 'At image acquisition UTC, AIS places this vessel inside a clear-water footprint; no image contact within 1 km. Detection misses remain possible.',
                           'label': 'assumption', 'review_status': 'unreviewed'})
-    if verified:
-        for contact in contacts:
-            if contact.get('matched_mmsi') or contact.get('overlap_ambiguous'):
-                continue
+    for contact in contacts:
+        # D109: over 100 bright spots ("clutter") means the D100 pixel check could not run,
+        # which is no evidence against the AI position. Such an observation may still be a
+        # review lead, marked as not pixel-confirmed, but it never claims an AIS identity.
+        busy = (contact.get('localization') or {}).get('status') == 'clutter'
+        if not verified:
+            state = 'image_not_analysed'
+        elif visual.get('image_status') == 'unusable':
+            state = 'image_unusable'
+        elif not position_eligible(contact) and not busy:
+            state = 'optical_feature_unclassified' if contact['localization'].get('status') == 'feature_only' else 'image_location_unverified'
+        elif contact.get('matched_mmsi') and not busy:
+            state = 'provisional_match'
+        elif contact.get('overlap_ambiguous'):
+            state = 'duplicate_or_overlapping_observation'
+        elif any(distance_km(contact, v['position']) <= .3 for v in vessels):
             # A failed one-to-one assignment is ambiguity, not a dark-vessel lead.
-            if any(distance_km(contact, v['position']) <= .3 for v in vessels):
-                continue
-            if not vessels:
-                continue  # No regional AIS at acquisition: cannot judge silence.
+            state = 'nearby_ais_review'
+        elif ais.get('coverage', {}).get('excluded_vessels'):
+            # Removing ambiguous AIS must never manufacture a dark-ship claim.
+            state = 'ais_history_conflict'
+        elif any(v.get('position_evidence', {}).get('kinematic_consistency') != 'exceeds_assumed_limit'
+                 and within_temporal_support(contact, v.get('position_evidence', {})) is True for v in vessels):
+            state = 'ais_position_uncertain'
+        elif not vessels:
+            state = 'no_contemporaneous_ais'
+        else:
+            state = 'image_without_ais'
+        contact_checks.append({'contact_id': contact['id'], 'status': state,
+                               'identity_confirmed': False})
+        if state == 'image_without_ais':
             leads.append({'id': scene['id']+':image:'+contact['id'], 'kind': 'image_without_ais',
                           'title': 'Image contact without a nearby AIS association',
-                          'reason': 'No eligible AIS position within 300 m at acquisition UTC. Reception and image interpretation are incomplete.',
+                          'reason': 'No eligible AIS position within 300 m at acquisition UTC. Reception and image interpretation are incomplete.'
+                                    + (BUSY_WATER_NOTE if busy else ''),
                           'lat': contact['lat'], 'lon': contact['lon'], 'mmsi': None,
                           'name': contact['id'], 'contact_id': contact['id'],
-                          'label': 'assumption', 'review_status': 'unreviewed'})
+                          'label': 'assumption', 'review_status': 'unreviewed',
+                          **({'pixel_support': 'unavailable_busy_water'} if busy else {})})
     for lead in leads:
         lead.update(scene_id=scene['id'], acquired_utc=scene['acquired_utc'], sensor=scene['sensor'],
                     source_label=scene['label'], identity_confirmed=False)

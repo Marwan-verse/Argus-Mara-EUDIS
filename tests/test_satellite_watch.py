@@ -86,8 +86,12 @@ class SetupScriptTests(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
         self.root = Path(self.folder.name)
+        # main() switches keyless reading on (D108); keep that from leaking into later tests.
+        self.environment = patch.dict(os.environ)
+        self.environment.start()
 
     def tearDown(self):
+        self.environment.stop()
         self.folder.cleanup()
 
     def test_tensorx_key_is_checked_for_free_before_it_is_saved(self):
@@ -129,11 +133,15 @@ class SetupScriptTests(unittest.TestCase):
                                                      save=Mock(), link=Mock()))
         rpc.assert_not_called()
 
-    def test_budget_counts_image_checks_left(self):
-        atomic_json(self.root/'ai/budget.json', {'reserved_usd': 1.0, 'reported_usd': .1, 'calls': 5})
+    def test_budget_counts_image_checks_left_at_the_measured_real_cost(self):
         atomic_json(self.root/'ai/model.json', {'reservation_usd': .2})
+        atomic_json(self.root/'ai/budget.json', {'reserved_usd': 0, 'reported_usd': 0, 'calls': 0})
         money = watch.budget(self.root)
-        self.assertEqual((money['left_usd'], money['calls_left'], money['halted']), (19.0, 95, False))
+        self.assertEqual((money['calls_left'], money['basis'], money['per_check_usd']), (100, 'worst case', .2))
+        # After calls settle, one reservation of headroom stays free and the rest goes at $0.02 each.
+        atomic_json(self.root/'ai/budget.json', {'reserved_usd': 1.0, 'reported_usd': .1, 'calls': 5, 'settled_calls': 5})
+        money = watch.budget(self.root)
+        self.assertEqual((money['left_usd'], money['calls_left'], money['basis'], money['halted']), (19.0, 940, 'measured', False))
         self.assertIsNone(watch.budget(self.root/'empty')['calls_left'])
 
     def test_granules_group_into_passes_and_missing_passes_are_expected(self):
@@ -170,9 +178,26 @@ class SetupScriptTests(unittest.TestCase):
         self.assertEqual(code, watch.NOT_READY)
         tensorx.assert_not_called()
         database.assert_not_called()
-        self.assertIn('Team database   not linked', output.getvalue())
+        self.assertIn('Team database   not reachable', output.getvalue())
         self.assertIn('TensorX AI      not connected', output.getvalue())
 
+
+    def test_without_a_key_the_team_database_is_read_only_and_nothing_is_asked(self):
+        output = io.StringIO()
+        with patch.object(watch, 'readers_installed', return_value=True), \
+                patch.object(watch, 'tensorx_connected', return_value=True), \
+                patch.object(watch.supabase_ais, 'configured', return_value=False), \
+                patch.object(watch.supabase_ais, 'linked', return_value=False), \
+                patch.object(watch.supabase_ais, 'readable', return_value=True), \
+                patch.object(watch, 'show_database', return_value={'vessels_last_hour': 290}), \
+                patch.object(watch, 'show_images'), \
+                patch.object(watch, 'connect_database') as database, \
+                redirect_stdout(output):
+            code = watch.main(['--root', str(self.root)])
+        self.assertEqual(code, 0)
+        database.assert_not_called()
+        self.assertIn('read only with the built-in key', output.getvalue())
+        self.assertIn('Ready.', output.getvalue())
 
     def test_a_stored_database_key_links_a_new_workspace_without_asking(self):
         output = io.StringIO()

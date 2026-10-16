@@ -62,30 +62,26 @@ def water_mask(scene, folder):
     return eligible & ~excluded, scl
 
 
-def screen(scene, image, folder):
+def compact_features(image, allowed):
+    """Locate the existing bright compact features; never classify them as ships."""
     from PIL import Image, ImageFilter
     import numpy as np
-    allowed, scl = water_mask(scene, folder)
     pixels = np.array(Image.open(BytesIO(image)).convert('L'))
-    stats = {'revision': REVISION, 'label': 'assumption', 'eligible_water_fraction': round(float(allowed.mean()), 4),
-             'cloud_fraction': round(float(np.isin(scl, [8, 9, 10]).mean()), 4),
-             'candidate_count': 0, 'exhaustive': False,
-             'caveat': 'Experimental optical triage can miss dark, small, coastal or obscured vessels. No candidate is not evidence of no ships.'}
-    if allowed.sum() < 1000:
-        return {**stats, 'status': 'unobservable_water', 'send_to_ai': False}
+    allowed = np.asarray(allowed, dtype=bool)
+    if allowed.shape != pixels.shape:
+        raise ValueError('Feature mask must match the source image')
+    if not allowed.any():
+        return {'candidates': [], 'candidate_count': 0, 'clutter': False}
     level = pixels[allowed].astype('float32')
     median = float(np.median(level))
     mad = float(np.median(abs(level-median)))
     background = np.array(Image.fromarray(pixels).filter(ImageFilter.BoxBlur(5))).astype('float32')
     possible = allowed & (pixels > max(65, median+max(25, 6*mad))) & (pixels.astype('float32')-background > 22)
-    # Eight-connected components, bounded by the image size. Large patches are
-    # clutter, not dozens of invented ship points.
     remaining = {int(y)*pixels.shape[1]+int(x) for y, x in zip(*np.nonzero(possible))}
     width, height = pixels.shape[1], pixels.shape[0]
-    count = 0
+    candidates = []
     while remaining:
-        seed = remaining.pop()
-        stack, group = [seed], []
+        stack, group = [remaining.pop()], []
         while stack:
             value = stack.pop()
             group.append(value)
@@ -99,13 +95,31 @@ def screen(scene, image, folder):
         if 2 <= len(group) <= 200:
             ys, xs = zip(*(divmod(p, width) for p in group))
             if max(max(xs)-min(xs)+1, max(ys)-min(ys)+1) <= 70:
-                count += 1
-        if count > 100:
-            return {**stats, 'candidate_count': count, 'status': 'clutter_review_required', 'send_to_ai': False}
-    return {**stats, 'candidate_count': count, 'status': 'possible_contacts' if count else 'no_local_candidates',
-            'send_to_ai': count > 0}
+                candidates.append({'x': (sum(xs)/len(xs)+.5)/width,
+                                   'y': (sum(ys)/len(ys)+.5)/height,
+                                   'bounds_px': [min(xs), min(ys), max(xs)+1, max(ys)+1],
+                                   'pixel_count': len(group), 'label': 'assumption',
+                                   'source': 'compact_optical_feature'})
+        if len(candidates) > 100:
+            return {'candidate_count': len(candidates), 'candidates': candidates, 'clutter': True}
+    candidates.sort(key=lambda c: (c['y'], c['x']))
+    return {'candidate_count': len(candidates), 'candidates': candidates, 'clutter': False}
 
 
+def screen(scene, image, folder):
+    import numpy as np
+    allowed, scl = water_mask(scene, folder)
+    stats = {'revision': REVISION, 'label': 'assumption', 'eligible_water_fraction': round(float(allowed.mean()), 4),
+             'cloud_fraction': round(float(np.isin(scl, [8, 9, 10]).mean()), 4),
+             'candidate_count': 0, 'exhaustive': False,
+             'caveat': 'Experimental optical triage can miss dark, small, coastal or obscured vessels. No candidate is not evidence of no ships.'}
+    if allowed.sum() < 1000:
+        return {**stats, 'status': 'unobservable_water', 'send_to_ai': False, 'candidates': []}
+    features = compact_features(image, allowed)
+    if features['clutter']:
+        return {**stats, **features, 'status': 'clutter_review_required', 'send_to_ai': False}
+    return {**stats, **features, 'status': 'possible_contacts' if features['candidate_count'] else 'no_local_candidates',
+            'send_to_ai': features['candidate_count'] > 0}
 def retain_water_contacts(scene, contacts, folder):
     allowed, _ = water_mask(scene, folder)
     retained, excluded = [], []

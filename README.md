@@ -25,7 +25,9 @@ once for optional image readers. **One click:** `SATELLITE-WATCH-MAC.command` or
 database keys and opens the app with Coast Watch running on images from the last 36 h
 (D83). See [setup and open-source accuracy plan](docs/16-satellite-ai.md).
 
-**Team database (optional):** the Supabase project `argus-mara` copies the shared
+**Real alerts (D104, D107):** with the team database linked, the alert rules run on real ships near the cable routes (last 3 h of AIS, harbour craft left out). The desktop app shows the results every 5 min in Incidents and on the map, tagged AIS · REAL, and `python -m argus.live_alerts` prints them. They are rule outcomes for review, labelled real. The read-only database function comes from migration `20261016134500_argus_recent_tracks.sql`. See [real alerts](docs/21-real-alerts.md).
+
+**Team database (no key needed to read, D108):** the Supabase project `argus-mara` copies the shared
 Railway AIS feed every 30 seconds by itself, so Coast Watch can compare any image
 with AIS at its acquisition time even when no laptop was recording, both ways:
 image contacts without AIS, and large ships whose AIS position shows nothing on the
@@ -39,6 +41,16 @@ once with `python scripts/configure_gfw.py`, then press **Coast Watch → Fetch 
 at the radar time. *Radar contact without AIS* leads are violet on the map and listed in
 Incidents. Detections arrive 4–5 days late. Powered by Global Fishing Watch. See
 [how it works and what was checked](docs/19-gfw-radar.md).
+
+**Magnetics (optional, D91):** the magnet button on the left rail opens two real uses of
+magnetics; neither watches the sea, because a ship's field fades as 1/r³ (a seabed sensor
+sees a 200 m ship only within about 0.5–1 km). *Live magnetic data*, off by default, polls
+NOAA SWPC Kp and the Valentia observatory and shows a storm tier in the header: context
+for electrical cable alarms that never changes an alert. *Plan search* turns the exercise
+vessel's or the selected alert's track (slowdown → cable crossing → speed recovery) into a
+magnetometer search corridor with lines, line-km and hours per platform, ranked search
+points and a GeoJSON export to `data/magnetics/`; every number is a labelled assumption.
+`python -m argus.geomag` prints the live status; `python -m argus.survey_plan` the worked example.
 
 > *"Ireland can crew two ships. Argus Mara gives them a hundred eyes."*
 
@@ -219,6 +231,13 @@ Details and links: [plan §4.5](docs/04-work-plan.md).
 - [x] `argus/brain.py`: read `scenario.json` → write `alerts.json` from four review cues;
       countdown v1 and response options are in `argus/countdown.py`.
       *Owners:* **Nazar K., Myroslav**
+- [x] Brain detectors for a vessel stopped away from ports, a dark vessel seen by satellite radar
+      while its AIS is silent, and a declared status or destination that contradicts the track, with
+      replay stories SIM-54 to SIM-56. [What they find](docs/12-argus-mara-alert-levels.md#brain-detectors).
+      *Owner:* **Myroslav**
+- [ ] Agree whether `dark_vessel` may also score the fictional exercise: it would open the exercise
+      incident at Medium at T+40, when the radar sees the tanker in its AIS gap (D63).
+      *Owners:* **Nazar K., Myroslav, Mykhailo**
 - [x] `ui/index.html`: offline map, cable line, vessel replay, approval and evidence export.
       *Owners:* **Adam, Marwan**
 - [x] Four-minute [demo runbook](docs/demo-runbook.md) and [one-pager](docs/one-pager.md) drafted; live rehearsal and recording still required. *Owner:* **Mykhailo**
@@ -281,6 +300,7 @@ the answer is "after the hackathon". ([plan §4.6](docs/04-work-plan.md))
 | [docs/09-team-skills.md](docs/09-team-skills.md) | How teammates download the repository skills |
 | [docs/10-space-dataset-plan.md](docs/10-space-dataset-plan.md) | Space dataset comparison, implementation sequence and handoffs to Data, Brain and Interface |
 | [docs/12-argus-mara-alert-levels.md](docs/12-argus-mara-alert-levels.md) | How alert levels are scored and how the docked alert panel works |
+| [docs/14-aircraft-and-magnetic-sensing.md](docs/14-aircraft-and-magnetic-sensing.md) | Research (15 Oct): public aircraft (ADS-B) data, tasked aircraft and magnetic sensing between satellite looks, with fleet corrections and a build plan |
 | [docs/demo-runbook.md](docs/demo-runbook.md) | Four-minute click and talk script, offline acceptance and fallback steps |
 | [docs/one-pager.md](docs/one-pager.md) | Current demonstrated capability and explicit validation limits |
 | [docs/ui-skills-survey.md](docs/ui-skills-survey.md) | UI skills and tools ranked for this static offline console |
@@ -469,7 +489,8 @@ sort to time to the asset or newest. Click a row or a map marker to open its rev
 window: the score scale, the indicators behind the level, the time to the asset, the
 recommended action and the log. **Acknowledge**, **Escalate** (duty officer, line
 operator, Irish Coast Guard (MRCC) or Naval Service operations) and **Reject** (with a
-reason) are recorded for the session only; nothing is sent. Countdowns run live, so
+reason) are recorded in a signed decision log on this computer (the shield button: change
+one letter in the file and Verify signatures names the record); nothing is sent. Countdowns run live, so
 GREY HERON rises from High to Critical after about 3.5 minutes; ↻ restarts the
 simulation. Map markers use the level colours, carry **SIM** labels and sit under a
 **SIMULATED** corner badge; **Sim alerts** in the legend hides them. On a trackpad,

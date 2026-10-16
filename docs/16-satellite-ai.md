@@ -148,7 +148,7 @@ The 50 m, 100 m and 1 km thresholds are assumptions. SCL excludes cloud, shadow,
 land and missing data, but does not certify freedom from glint, haze or rough sea.
 The wording is **not detected**, never absent or confirmed false AIS.
 
-**Lead priority (for D87).** `comparison_index()` gives every lead a `confidence`, a `priority` (`high`, `medium`, `low` or `null`) and a `priority_reason`, so alert lists can sort leads and collapse the minor ones:
+**Lead priority (for D94).** `comparison_index()` gives every lead a `confidence`, a `priority` (`high`, `medium`, `low` or `null`) and a `priority_reason`, so alert lists can sort leads and collapse the minor ones:
 
 | Lead | `confidence` | `priority` |
 |---|---|---|
@@ -158,6 +158,8 @@ The wording is **not detected**, never absent or confirmed false AIS.
 | anything else, or a contact without confidence | `null` | `null`, shown and never collapsed |
 
 The fields are added after the analyst evidence key is computed, so recorded outcomes are not reopened. On the 13 Oct Dublin Bay run, 24 of the 26 leads are `low`, mostly glint or waves. Priority is a sorting aid for the analyst, not a threat level.
+
+Since D109, a lead from a busy image, one with over 100 bright spots, adds "busy water, position not pixel-confirmed" to its `priority_reason`. Its `pixel_support` is `unavailable_busy_water`. On the 16 Oct re-check of the same 13 Oct images, all 22 leads are of this kind: 21 `low` and 1 `medium`. See docs/20 "Busy water and the coastal map".
 
 A free background pass checks one saved image per status cycle, prioritising
 unchecked images. Checks are saved and become eligible for refresh after five
@@ -258,9 +260,15 @@ The live-verified Qwen route reports image tokens. A response without positive
 image-token accounting is rejected instead of becoming a false zero-contact
 result. This connection check does not establish vessel-detection accuracy.
 
-Reported token cost is shown separately from this deliberately conservative
-reservation. Failed, malformed or uncertain calls keep their reservation; they
-are never retried automatically. A per-workspace exclusive file prevents racing
+**Settling at the real cost (D86).** When the provider answers with valid token usage, within the model's limits and not above the reservation, the call is settled at that reported cost and the rest of its reservation returns to the budget. `reserved_usd` therefore holds settled real costs plus the full reservation of any call that failed or is still open; `settled_calls` counts the settled ones.
+
+- Usage above the reservation still halts all spending.
+- Failed, malformed or uncertain calls, such as a timeout or a response without usage, keep the full reservation, because they may have been charged.
+- Every call still needs one full reservation of headroom when it starts.
+
+Measured on the 13 Oct Dublin Bay run: 34 calls reserved $1.81 but were reported at $0.0134, about $0.0004 per check. Settled this way, the $20 ceiling covers roughly 50,000 checks instead of about 375, which is enough for the whole coastal belt every day. Ledgers written before D86 keep their old reservations; only new calls settle.
+
+Failed, malformed or uncertain calls are never retried automatically. A per-workspace exclusive file prevents racing
 calls; after a crash, an operator must verify the old process has stopped before
 removing `data/satellite/ai/analysis.lock`. Do not delete `budget.json` to resume.
 

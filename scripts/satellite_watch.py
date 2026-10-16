@@ -66,7 +66,7 @@ def connect_database(root, ask=getpass, rpc=supabase_ais.http_rpc, save=supabase
             print('  Not saved: that is not a Supabase secret key (sb_secret_...)')
             continue
         try:
-            state = rpc(supabase_ais.base_url()+'/rest/v1/rpc/argus_ais_status', {}, key)
+            state = rpc(supabase_ais.base_url(follow_link=False)+'/rest/v1/rpc/argus_ais_status', {}, key)
             save(key)
             link(root)
         except (ValueError, OSError) as error:
@@ -77,15 +77,27 @@ def connect_database(root, ask=getpass, rpc=supabase_ais.http_rpc, save=supabase
 
 
 def budget(root):
-    """The pilot ledger, and roughly how many more image checks fit under the ceiling."""
+    """The pilot ledger, and roughly how many more image checks fit under the ceiling.
+
+    Each call needs one full reservation of headroom when it starts and then
+    settles at its real cost, so after the first calls the estimate uses their
+    measured average cost; before that it assumes the worst-case reservation.
+    """
     root = Path(root)
     ledger = satellite_ai.read_ledger(root/'ai')
     left = max(0., satellite_ai.PILOT_USD-ledger['reserved_usd'])
     model_path = root/'ai/model.json'
     reserve = json.loads(model_path.read_text(encoding='utf-8')).get('reservation_usd') if model_path.exists() else None
-    calls = math.floor(left/reserve+1e-9) if isinstance(reserve, (int, float)) and reserve > 0 else None
-    return {'reserved_usd': ledger['reserved_usd'], 'left_usd': left, 'calls_left': calls,
-            'halted': bool(ledger.get('halted'))}
+    reserve = reserve if isinstance(reserve, (int, float)) and reserve > 0 else None
+    measured = ledger['reported_usd']/ledger['calls'] if ledger['calls'] and ledger['reported_usd'] > 0 else None
+    if reserve and measured:
+        calls, basis = math.floor(max(0., left-reserve)/measured+1e-9), 'measured'
+    elif reserve:
+        calls, basis = math.floor(left/reserve+1e-9), 'worst case'
+    else:
+        calls, basis = None, None
+    return {'reserved_usd': ledger['reserved_usd'], 'left_usd': left, 'calls_left': calls, 'basis': basis,
+            'per_check_usd': measured if basis == 'measured' else reserve, 'halted': bool(ledger.get('halted'))}
 
 
 def coastal_region():
@@ -202,6 +214,7 @@ def main(argv=None):
     parser.add_argument('--root', default=str(ROOT/'data/satellite'), help='satellite workspace')
     parser.add_argument('--check', action='store_true', help='print readiness without asking for keys')
     args = parser.parse_args(argv)
+    supabase_ais.enable_keyless_read()  # D108
     try:
         fresh = max_image_age()
     except ValueError as error:
@@ -214,16 +227,15 @@ def main(argv=None):
     readers = readers_installed()
     print('  Image readers  ', 'installed' if readers else 'missing: pip install -r requirements-satellite.txt')
 
-    if not supabase_ais.linked(root) and not args.check:
-        if supabase_ais.configured():
-            supabase_ais.link(root)  # The key is already stored; only this workspace was unlinked.
-            print('  Team database key found in this computer’s credential store; workspace linked.')
-        else:
-            print('The team database is not linked on this computer. Paste its secret key once.')
-            connect_database(root)
-    database = show_database(now) if supabase_ais.linked(root) else None
+    if not supabase_ais.linked(root) and not args.check and supabase_ais.configured():
+        supabase_ais.link(root)  # The key is already stored; only this workspace was unlinked.
+        print('  Team database key found in this computer’s credential store; workspace linked.')
+    # D108: reading the team database needs no key; only the computer that publishes holds one.
+    database = show_database(now) if supabase_ais.readable(root) else None
     if not supabase_ais.linked(root):
-        print('  Team database   not linked · only AIS this computer records from now on can be compared')
+        print('  Team database   read only with the built-in key; results are published by the computer that '
+              'holds the team key' if database is not None else
+              '  Team database   not reachable · only AIS this computer records from now on can be compared')
 
     if not tensorx_connected() and not args.check:
         print('TensorX is not connected. Paste its API key once; it is checked for free before saving.')
@@ -232,7 +244,8 @@ def main(argv=None):
     print('  TensorX AI     ', 'connected' if ai else 'not connected · free "AIS at image time" still works')
 
     money = budget(root)
-    calls = f" · about {money['calls_left']} more image checks" if money['calls_left'] is not None else ''
+    calls = (f" · about {money['calls_left']:,} more image checks ({money['basis']}, ${money['per_check_usd']:.4f} each)"
+             if money['calls_left'] is not None else '')
     halted = ' · HALTED, check the ledger' if money['halted'] else ''
     print(f"  AI budget       ${money['reserved_usd']:.2f} of ${satellite_ai.PILOT_USD:.0f} reserved{calls}{halted}")
 

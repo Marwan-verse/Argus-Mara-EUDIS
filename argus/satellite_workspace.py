@@ -15,8 +15,9 @@ import time
 
 from argus import satellite, supabase_ais
 from argus.satellite_ais import ArchiveChanged, associate, attach_latest, historical_ais
-from argus.satellite_ai import PILOT_USD, get_key, read_ledger, visual_analysis
+from argus.satellite_ai import PILOT_USD, get_key, read_ledger, visual_analysis, mark_duplicate_contacts
 from argus.fleet_history import FleetHistoryWorker
+from argus.optical_localization import pixel_feature
 from argus.satellite_disposition import Dispositions, evidence_key
 
 DEFAULT_QUESTION = 'Find possible vessels in this image and describe the visible evidence and uncertainty.'
@@ -39,6 +40,8 @@ def with_priority(lead, confidences):
     elif confidence in CONFIDENCE_PRIORITY:
         priority = CONFIDENCE_PRIORITY[confidence]
         reason = f'AI rated this image contact {confidence} confidence; no AIS within 300 m'
+        if lead.get('pixel_support') == 'unavailable_busy_water':
+            reason += '; busy water, position not pixel-confirmed'
     else:
         priority, reason = None, 'Priority unknown'
     return {**lead, 'confidence': confidence, 'priority': priority, 'priority_reason': reason}
@@ -153,7 +156,9 @@ class SatelliteWorkspace:
             dense = screen(scene, self.image(identifier), self.scenes).get('candidate_count', 0) > 16
         visual = review_image(self.root/'ai', scene, self.image(identifier), question,
                               analyse=visual_analysis, dense=dense)
-        points = visual['contacts']
+        from argus.optical_localization import localize_optical
+        localization = localize_optical(scene, self.image(identifier), self.scenes, visual['contacts'])
+        points = localization.pop('contacts')
         excluded = 0
         if scene.get('quality_sha256'):
             from argus.satellite_screen import retain_water_contacts
@@ -161,7 +166,7 @@ class SatelliteWorkspace:
         elif automatic:
             raise ValueError('Automatic optical reviews require a verified quality mask')
         contacts = self.associate_current(points, ais, scene)
-        result = {'scene': scene, 'visual': visual, 'contacts': contacts, 'ais': ais,
+        result = {'scene': scene, 'visual': visual, 'contacts': contacts, 'ais': ais, 'localization': localization,
                   'budget': read_ledger(self.root/'ai'),
                   'assumptions': {'association_radius_km': .3, 'max_interpolation_gap_s': 600,
                                   'max_past_projection_age_s': 300},
@@ -214,6 +219,7 @@ class SatelliteWorkspace:
     def comparison_index(self):
         """All saved review leads and per-vessel results, independent of demo alerts."""
         rows, vessels, pending, reviewed, image_contacts, no_ais, partial = [], [], 0, 0, 0, 0, 0
+        ais_conflicts = 0
         for path in (self.root/'reviews').glob('*.json'):
             if not re.fullmatch(r'[0-9a-f]{24}\.json', path.name):
                 continue
@@ -227,8 +233,9 @@ class SatelliteWorkspace:
                     continue
                 reviewed += 1
                 partial += bool(review.get('visual', {}).get('analysis_incomplete'))
-                image_contacts += len(review.get('contacts', []))
+                image_contacts += sum(not pixel_feature(c) for c in review.get('contacts', []))
                 no_ais += not bool(review.get('ais', {}).get('vessels'))
+                ais_conflicts += bool(review.get('ais', {}).get('coverage', {}).get('excluded_vessels'))
                 confidences = {c.get('id'): c.get('confidence') for c in review.get('contacts', [])}
                 rows.extend(with_priority(self.dispositions.decorate(lead, evidence_key(review, lead)), confidences)
                             for lead in comparison.get('leads', []))
@@ -247,6 +254,7 @@ class SatelliteWorkspace:
                 'vessel_checks': vessels, 'reviews_checked': reviewed, 'reviews_pending': pending,
                 'image_contacts': image_contacts, 'images_without_ais': no_ais,
                 'partial_analysis_images': partial,
+                'images_with_ais_conflicts': ais_conflicts,
                 'radar_detections': radar_summary.get('detections', 0), 'radar_leads': len(radar),
                 'radar_newest_utc': radar_summary.get('newest_detection_utc'),
                 'complete_vessel_census': False}
@@ -273,13 +281,18 @@ class SatelliteWorkspace:
 
     def associate_current(self, points, ais, scene):
         from argus.satellite_capture import load_latest
-        contacts = attach_latest(associate(points, ais), load_latest(self.root/'scan/latest_ais.json'), scene['acquired_utc'])
+        contacts = attach_latest(associate(mark_duplicate_contacts(points), ais),
+                                 load_latest(self.root/'scan/latest_ais.json'), scene['acquired_utc'])
         for point in contacts:
             point['ambiguous'] = point.get('ambiguous', False) or point.get('overlap_ambiguous', False)
         return contacts
 
     def contacts(self):
-        """Small map index; detailed AIS, image and latest positions load on click."""
+        """Small map index of AI observations; detailed AIS, image and latest positions load on click.
+
+        Unclassified bright spots (OPT-n, D100) stay in each image's own review: one busy
+        image holds up to 101 of them, which buried the coastal map (D109).
+        """
         rows = []
         folder = self.root/'reviews'
         for path in sorted(folder.glob('*.json')) if folder.exists() else []:
@@ -290,6 +303,8 @@ class SatelliteWorkspace:
                 continue
             scene = review['scene']
             for point in review['contacts']:
+                if pixel_feature(point):
+                    continue
                 # Compact map/list index; full descriptions are loaded on click.
                 rows.append({key: point[key] for key in ('id', 'lat', 'lon', 'confidence', 'label', 'ts', 'matched_mmsi')})
                 rows[-1].update(scene_id=scene['id'], sensor=scene['sensor'], scene_label=scene['label'])
@@ -314,9 +329,10 @@ class SatelliteWorkspace:
                                  'complete_regional_census': False,
                                  'caveat': 'Synthetic or unverified imagery cannot be associated with real archived AIS.'}}
         note = None
-        if supabase_ais.linked(self.root):
+        if supabase_ais.readable(self.root):
             # The team database records the Railway feed every 30 s even when no
             # app is open, so it is preferred over this computer's own capture.
+            # Reading needs no secret key (D108); publishing results still does.
             try:
                 ais = supabase_ais.historical_ais_from_database(scene['acquired_utc'], scene['bbox'])
                 if ais['coverage'].get('database_position_rows'):
@@ -343,7 +359,18 @@ class SatelliteWorkspace:
                 # previous match, and latest fixes change independently of images.
                 ais = self.ais_for_scene(review['scene'])
                 review['ais'] = ais
-                review['contacts'] = self.associate_current(review['contacts'], ais, review['scene'])
+                from argus.optical_localization import localize_optical
+                raw = review['visual'].get('contacts')
+                if not isinstance(raw, list):
+                    raw = [p for p in review['contacts'] if not p.get('id', '').startswith('OPT-')]
+                localization = localize_optical(review['scene'], self.image(identifier), self.scenes, raw)
+                points = localization.pop('contacts')
+                if review['scene'].get('quality_sha256'):
+                    from argus.satellite_screen import retain_water_contacts
+                    points, excluded = retain_water_contacts(review['scene'], points, self.scenes)
+                    review['quality_excluded_contacts'] = excluded
+                review['localization'] = localization
+                review['contacts'] = self.associate_current(points, ais, review['scene'])
                 self.compare(review)
                 satellite.atomic_json(path, review)
                 return review

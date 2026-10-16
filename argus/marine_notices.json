@@ -1,0 +1,948 @@
+{
+ "source": "Irish Marine Notices 2026, Department of Transport (Irish Maritime Administration)",
+ "collection_url": "https://www.gov.ie/en/department-of-transport/collections/marine-notices-2026/",
+ "retrieved": "2026-10-16",
+ "label": "real",
+ "assumptions": [
+  "Work areas: the stated corridor width plus 0.25 nm for AIS position error; 1 nm either side of the route where no width is stated; areas marked approximate where the notice gives only a map or end points",
+  "Dates: notices say 'subject to weather', so a notice counts from 1 day before its start to 7 days after its estimated end"
+ ],
+ "notices": [
+  {
+   "number": "49/2026",
+   "title": "EWIC 2026 Geophysical Cable Condition Survey",
+   "url": "https://assets.gov.ie/static/documents/23e898a1/MN_49_of_2026_EWIC_2026_Geophysical_Cable_Condition_Survey.pdf",
+   "issued": "2026-10-13",
+   "amended": null,
+   "asset": "EWIC",
+   "asset_kind": "power",
+   "work": "Hydrographic and geophysical cable condition survey with towed side-scan sonar; restricted in ability to manoeuvre while towing",
+   "valid_from": "2026-10-12",
+   "valid_to": "2026-11-15",
+   "end_note": "Estimated completion 15 November, subject to weather",
+   "vessels": [
+    {
+     "name": "LADY KATHLEEN",
+     "call_sign": "EIXT2",
+     "role": "nearshore, from 12 October",
+     "valid_from": null
+    },
+    {
+     "name": "ROMAN REBEL",
+     "call_sign": "2ICA5",
+     "role": "offshore, from 1 November",
+     "valid_from": "2026-11-01"
+    }
+   ],
+   "areas": [
+    {
+     "kind": "route",
+     "points": [
+      [
+       53.526389,
+       -6.082778
+      ],
+      [
+       53.551722,
+       -5.958222
+      ],
+      [
+       53.603033,
+       -5.285464
+      ],
+      [
+       53.601917,
+       -4.756831
+      ],
+      [
+       53.389278,
+       -3.613194
+      ],
+      [
+       53.351989,
+       -3.440317
+      ]
+     ],
+     "buffer_nm": 1.0
+    }
+   ],
+   "area_note": "Notice route KP 0.3 (Rush) to KP 187 (Prestatyn); width not stated, 1 nm either side assumed",
+   "label": "real"
+  },
+  {
+   "number": "46/2026",
+   "title": "Irish Sea Gas Networks Ireland Inspection Surveys",
+   "url": "https://assets.gov.ie/static/documents/8cf89010/Irish_Sea_Gas_Networks_Ireland_Inspection_Surveys.pdf",
+   "issued": "2026-09-29",
+   "amended": "2026-10-08",
+   "asset": "Gas interconnectors IC1 and IC2",
+   "asset_kind": "gas",
+   "work": "Pipeline inspection survey for Gas Networks Ireland",
+   "valid_from": "2026-09-30",
+   "valid_to": "2026-10-06",
+   "end_note": "Works between 30 September and 6 October",
+   "vessels": [
+    {
+     "name": "N-SEA PATHFINDER",
+     "call_sign": "PBYN",
+     "role": null,
+     "valid_from": null
+    }
+   ],
+   "areas": [
+    {
+     "kind": "route",
+     "points": [
+      [
+       53.53725,
+       -6.084083
+      ],
+      [
+       53.55155,
+       -5.966033
+      ],
+      [
+       53.562067,
+       -5.849217
+      ],
+      [
+       53.5727,
+       -5.7298
+      ],
+      [
+       53.5832,
+       -5.61035
+      ],
+      [
+       53.5936,
+       -5.490817
+      ],
+      [
+       53.631417,
+       -5.4033
+      ],
+      [
+       53.697867,
+       -5.3572
+      ],
+      [
+       53.7643,
+       -5.31095
+      ],
+      [
+       53.830717,
+       -5.26455
+      ],
+      [
+       53.897133,
+       -5.218017
+      ],
+      [
+       53.963517,
+       -5.171333
+      ],
+      [
+       54.029883,
+       -5.1245
+      ],
+      [
+       54.096233,
+       -5.077517
+      ],
+      [
+       54.162567,
+       -5.0304
+      ],
+      [
+       54.226833,
+       -4.977367
+      ],
+      [
+       54.280867,
+       -4.8964
+      ],
+      [
+       54.33485,
+       -4.81525
+      ],
+      [
+       54.388217,
+       -4.7347
+      ],
+      [
+       54.4421,
+       -4.653117
+      ],
+      [
+       54.495817,
+       -4.57115
+      ],
+      [
+       54.54945,
+       -4.488933
+      ],
+      [
+       54.60305,
+       -4.4065
+      ],
+      [
+       54.6566,
+       -4.32385
+      ],
+      [
+       54.7101,
+       -4.240967
+      ],
+      [
+       54.756867,
+       -4.148283
+      ],
+      [
+       54.772817,
+       -4.133917
+      ]
+     ],
+     "buffer_nm": 1.0
+    },
+    {
+     "kind": "route",
+     "points": [
+      [
+       53.644133,
+       -6.21895
+      ],
+      [
+       53.665067,
+       -6.1621
+      ],
+      [
+       53.791833,
+       -5.875533
+      ],
+      [
+       53.797467,
+       -5.8637
+      ],
+      [
+       53.801517,
+       -5.85335
+      ],
+      [
+       53.90425,
+       -5.61825
+      ],
+      [
+       53.910717,
+       -5.601983
+      ],
+      [
+       53.917083,
+       -5.588883
+      ],
+      [
+       54.001583,
+       -5.3927
+      ],
+      [
+       54.010983,
+       -5.366567
+      ],
+      [
+       54.0205,
+       -5.349867
+      ],
+      [
+       54.075333,
+       -5.222167
+      ],
+      [
+       54.089417,
+       -5.188967
+      ],
+      [
+       54.10425,
+       -5.163967
+      ],
+      [
+       54.3312,
+       -4.7613
+      ],
+      [
+       54.334667,
+       -4.75425
+      ],
+      [
+       54.35215,
+       -4.723
+      ],
+      [
+       54.360217,
+       -4.709567
+      ],
+      [
+       54.3874,
+       -4.661933
+      ],
+      [
+       54.4344,
+       -4.603567
+      ],
+      [
+       54.43975,
+       -4.595167
+      ],
+      [
+       54.4472,
+       -4.5852
+      ]
+     ],
+     "buffer_nm": 1.0
+    }
+   ],
+   "area_note": "IC1 and IC2 coordinates from the notice appendices (Irish EEZ part); 1 nm either side assumed",
+   "label": "real"
+  },
+  {
+   "number": "30/2026",
+   "title": "Celtic Interconnector Project Subsea Rock Installation Southeast Coast of Ireland",
+   "url": "https://assets.gov.ie/static/documents/b9dabc3b/Celtic_Interconnector_Project_Subsea_Rock_Installation_Southeast_Coast_of_Ireland.pdf",
+   "issued": "2026-06-12",
+   "amended": "2026-07-17",
+   "asset": "Celtic Interconnector",
+   "asset_kind": "power",
+   "work": "Subsea rock installation over the cable",
+   "valid_from": "2026-07-19",
+   "valid_to": "2026-07-29",
+   "end_note": "From 19 July, about 6 to 10 days",
+   "vessels": [
+    {
+     "name": "SEAPIPER",
+     "call_sign": "5BEN6",
+     "role": null,
+     "valid_from": null
+    }
+   ],
+   "areas": [
+    {
+     "kind": "route",
+     "points": [
+      [
+       51.864053,
+       -7.799114
+      ],
+      [
+       51.831339,
+       -7.775733
+      ],
+      [
+       51.798886,
+       -7.752006
+      ],
+      [
+       51.764864,
+       -7.768006
+      ],
+      [
+       51.731914,
+       -7.791103
+      ],
+      [
+       51.698364,
+       -7.81195
+      ],
+      [
+       51.664942,
+       -7.833231
+      ],
+      [
+       51.631156,
+       -7.823675
+      ],
+      [
+       51.597006,
+       -7.806372
+      ],
+      [
+       51.562997,
+       -7.787672
+      ],
+      [
+       51.528886,
+       -7.769508
+      ],
+      [
+       51.495628,
+       -7.748806
+      ],
+      [
+       51.461267,
+       -7.732786
+      ],
+      [
+       51.427206,
+       -7.714367
+      ],
+      [
+       51.393133,
+       -7.695972
+      ],
+      [
+       51.35905,
+       -7.677653
+      ],
+      [
+       51.324978,
+       -7.659311
+      ],
+      [
+       51.290908,
+       -7.641
+      ],
+      [
+       51.256861,
+       -7.622819
+      ],
+      [
+       51.221878,
+       -7.612808
+      ],
+      [
+       51.189817,
+       -7.590125
+      ],
+      [
+       51.158064,
+       -7.566375
+      ],
+      [
+       51.149475,
+       -7.565086
+      ]
+     ],
+     "buffer_nm": 0.38
+    }
+   ],
+   "area_note": "Cable centreline KP 9.44 to KP 94 from the notice; +/-250 m stated, plus 0.25 nm for position error",
+   "label": "real"
+  },
+  {
+   "number": "29/2026",
+   "title": "Celtic Interconnector Project Recovery of Seabed Frame off Co. Cork",
+   "url": "https://assets.gov.ie/static/documents/c6a60ed5/Celtic_Interconnector_Project_Recovery_of_Seabed_Frame_off_Co._Cork.pdf",
+   "issued": "2026-06-05",
+   "amended": "2026-10-02",
+   "asset": "Celtic Interconnector",
+   "asset_kind": "power",
+   "work": "Recovery of a seabed current-meter frame 3 km south of the Blackwater mouth, Youghal",
+   "valid_from": "2026-10-05",
+   "valid_to": "2026-10-05",
+   "end_note": "Recovery on 5 October, subject to weather",
+   "vessels": [
+    {
+     "name": "JAMES",
+     "call_sign": "EITT2",
+     "role": "workboat",
+     "valid_from": null
+    }
+   ],
+   "areas": [
+    {
+     "kind": "point",
+     "points": [
+      [
+       51.913617,
+       -7.834083
+      ]
+     ],
+     "buffer_nm": 0.5
+    }
+   ],
+   "area_note": "Single frame position from the notice; 0.5 nm radius assumed",
+   "label": "real"
+  },
+  {
+   "number": "25/2026",
+   "title": "Celtic Interconnector Project Cable Operations, Celtic Sea",
+   "url": "https://assets.gov.ie/static/documents/4e14491d/MN_25_of_2026_Celtic_Interconnector_Project_Cable_Operations.pdf",
+   "issued": "2026-05-14",
+   "amended": null,
+   "asset": "Celtic Interconnector",
+   "asset_kind": "power",
+   "work": "Cable operations within +/-1000 m of the route centreline",
+   "valid_from": "2026-05-15",
+   "valid_to": "2026-05-22",
+   "end_note": "From 15 May, about 7 days",
+   "vessels": [
+    {
+     "name": "CALYPSO",
+     "call_sign": "PDNV",
+     "role": null,
+     "valid_from": null
+    }
+   ],
+   "areas": [
+    {
+     "kind": "polygon",
+     "points": [
+      [
+       51.859655,
+       -7.799875
+      ],
+      [
+       51.842892,
+       -7.789347
+      ],
+      [
+       51.844562,
+       -7.782587
+      ],
+      [
+       51.861308,
+       -7.793142
+      ]
+     ],
+     "buffer_nm": 0.25
+    }
+   ],
+   "area_note": "Operational waypoints from the notice, plus 0.25 nm for position error",
+   "label": "real"
+  },
+  {
+   "number": "11/2026",
+   "title": "Cable Repair at KP35 on Celtic Interconnector Project, Celtic Sea",
+   "url": "https://assets.gov.ie/static/documents/4ec65c65/Cable_Repair_at_KP35_on_Celtic_Interconnector_Project_Celtic_Sea.pdf",
+   "issued": "2026-03-10",
+   "amended": null,
+   "asset": "Celtic Interconnector",
+   "asset_kind": "power",
+   "work": "Cable repair at KP35",
+   "valid_from": "2026-03-23",
+   "valid_to": "2026-04-17",
+   "end_note": "Arrival around 23 March, about 25 days",
+   "vessels": [
+    {
+     "name": "NEXANS AURORA",
+     "call_sign": "LALC8",
+     "role": null,
+     "valid_from": null
+    }
+   ],
+   "areas": [
+    {
+     "kind": "polygon",
+     "points": [
+      [
+       51.649167,
+       -7.85
+      ],
+      [
+       51.632167,
+       -7.8405
+      ],
+      [
+       51.638,
+       -7.813
+      ],
+      [
+       51.655,
+       -7.8225
+      ]
+     ],
+     "buffer_nm": 0.25
+    }
+   ],
+   "area_note": "Repair-area waypoints from the notice, plus 0.25 nm for position error",
+   "label": "real"
+  },
+  {
+   "number": "10/2026",
+   "title": "Celtic Interconnector Project Geophysical and UXO Surveys Ireland",
+   "url": "https://assets.gov.ie/static/documents/987a020c/Celtic_Interconnector_Project_Geophysical_and_UXO_Surveys_Ireland.pdf",
+   "issued": null,
+   "amended": null,
+   "asset": "Celtic Interconnector",
+   "asset_kind": "power",
+   "work": "Geophysical and unexploded-ordnance survey along the route",
+   "valid_from": "2026-02-20",
+   "valid_to": "2026-03-13",
+   "end_note": "From 20 February, about 21 days",
+   "vessels": [
+    {
+     "name": "ROMAN REBEL",
+     "call_sign": "2ICA5",
+     "role": null,
+     "valid_from": null
+    }
+   ],
+   "areas": [
+    {
+     "kind": "polygon",
+     "points": [
+      [
+       51.858,
+       -7.813
+      ],
+      [
+       51.808167,
+       -7.770167
+      ],
+      [
+       51.817833,
+       -7.7465
+      ],
+      [
+       51.871667,
+       -7.7885
+      ],
+      [
+       51.8735,
+       -7.796167
+      ],
+      [
+       51.873333,
+       -7.805167
+      ],
+      [
+       51.8635,
+       -7.812167
+      ]
+     ],
+     "buffer_nm": 0.25
+    },
+    {
+     "kind": "polygon",
+     "points": [
+      [
+       51.843833,
+       -7.803
+      ],
+      [
+       51.825,
+       -7.786667
+      ],
+      [
+       51.833,
+       -7.760833
+      ],
+      [
+       51.852,
+       -7.7775
+      ]
+     ],
+     "buffer_nm": 0.25
+    },
+    {
+     "kind": "polygon",
+     "points": [
+      [
+       51.649167,
+       -7.85
+      ],
+      [
+       51.632167,
+       -7.8405
+      ],
+      [
+       51.638,
+       -7.813
+      ],
+      [
+       51.655,
+       -7.8225
+      ]
+     ],
+     "buffer_nm": 0.25
+    },
+    {
+     "kind": "polygon",
+     "points": [
+      [
+       51.468833,
+       -7.752
+      ],
+      [
+       51.443,
+       -7.738
+      ],
+      [
+       51.448833,
+       -7.711
+      ],
+      [
+       51.475,
+       -7.725
+      ]
+     ],
+     "buffer_nm": 0.25
+    },
+    {
+     "kind": "polygon",
+     "points": [
+      [
+       51.81,
+       -7.773
+      ],
+      [
+       51.792,
+       -7.766833
+      ],
+      [
+       51.796167,
+       -7.737
+      ],
+      [
+       51.813833,
+       -7.743833
+      ]
+     ],
+     "buffer_nm": 0.25
+    },
+    {
+     "kind": "polygon",
+     "points": [
+      [
+       51.76,
+       -7.787
+      ],
+      [
+       51.753,
+       -7.761167
+      ],
+      [
+       51.773,
+       -7.746
+      ],
+      [
+       51.78,
+       -7.773
+      ]
+     ],
+     "buffer_nm": 0.25
+    },
+    {
+     "kind": "polygon",
+     "points": [
+      [
+       51.543,
+       -7.792
+      ],
+      [
+       51.523833,
+       -7.782
+      ],
+      [
+       51.528833,
+       -7.753833
+      ],
+      [
+       51.548,
+       -7.765
+      ]
+     ],
+     "buffer_nm": 0.25
+    },
+    {
+     "kind": "polygon",
+     "points": [
+      [
+       51.336167,
+       -7.68
+      ],
+      [
+       51.318833,
+       -7.671167
+      ],
+      [
+       51.324667,
+       -7.643833
+      ],
+      [
+       51.342,
+       -7.653
+      ]
+     ],
+     "buffer_nm": 0.25
+    },
+    {
+     "kind": "polygon",
+     "points": [
+      [
+       51.27,
+       -7.645
+      ],
+      [
+       51.15,
+       -7.58
+      ],
+      [
+       51.158833,
+       -7.552
+      ],
+      [
+       51.275,
+       -7.617
+      ]
+     ],
+     "buffer_nm": 0.25
+    },
+    {
+     "kind": "polygon",
+     "points": [
+      [
+       51.853167,
+       -7.792833
+      ],
+      [
+       51.844833,
+       -7.787333
+      ],
+      [
+       51.848167,
+       -7.773833
+      ],
+      [
+       51.8565,
+       -7.779333
+      ]
+     ],
+     "buffer_nm": 0.25
+    }
+   ],
+   "area_note": "Survey-area waypoints (Tables 1 to 10), plus 0.25 nm for position error",
+   "label": "real"
+  },
+  {
+   "number": "39/2026",
+   "title": "Corrib Gas Pipelines Offshore Survey",
+   "url": "https://assets.gov.ie/static/documents/76dc28ed/Corrib_Gas_Pipelines_Offshore_Survey.pdf",
+   "issued": "2026-08-19",
+   "amended": null,
+   "asset": "Corrib gas pipelines",
+   "asset_kind": "gas",
+   "work": "Visual and acoustic pipeline survey with an ROV",
+   "valid_from": "2026-09-03",
+   "valid_to": "2026-09-17",
+   "end_note": "From 3 September, about 14 days",
+   "vessels": [
+    {
+     "name": "CELTIC EXPLORER",
+     "call_sign": "EIGB",
+     "role": null,
+     "valid_from": null
+    }
+   ],
+   "areas": [
+    {
+     "kind": "route",
+     "points": [
+      [
+       54.339004,
+       -11.058547
+      ],
+      [
+       54.283277,
+       -9.820702
+      ]
+     ],
+     "buffer_nm": 1.0
+    }
+   ],
+   "area_note": "Approximate: the notice gives only the offshore field and the landfall; straight line, 1 nm either side",
+   "label": "real"
+  },
+  {
+   "number": "24/2026",
+   "title": "Corrib Gas Pipelines Inspection and Nearshore Survey, Co. Mayo",
+   "url": "https://assets.gov.ie/static/documents/2191273a/MN_24_of_2026_Corrib_Gas_Pipelines_Inspection_and_Nearshore_Survey_Co._Mayo_amended_130526.pdf",
+   "issued": "2026-05-12",
+   "amended": "2026-05-13",
+   "asset": "Corrib gas pipelines",
+   "asset_kind": "gas",
+   "work": "Nearshore pipeline inspection with towed side-scan sonar",
+   "valid_from": "2026-05-18",
+   "valid_to": "2026-05-28",
+   "end_note": "From 18 May, about 10 days",
+   "vessels": [
+    {
+     "name": "BELLA C",
+     "call_sign": "EI3325",
+     "role": "survey",
+     "valid_from": null
+    },
+    {
+     "name": "MACBEL",
+     "call_sign": "EIHL5",
+     "role": "safety support",
+     "valid_from": null
+    },
+    {
+     "name": "BLUE EAGLE",
+     "call_sign": "EI6808",
+     "role": "safety support",
+     "valid_from": null
+    }
+   ],
+   "areas": [
+    {
+     "kind": "point",
+     "points": [
+      [
+       54.283277,
+       -9.820702
+      ]
+     ],
+     "buffer_nm": 3.0
+    }
+   ],
+   "area_note": "Approximate: the notice gives only the landfall; 3 nm radius assumed",
+   "label": "real"
+  },
+  {
+   "number": "27/2026",
+   "title": "Greenlink Interconnector Cable Route Inspection Irish Sea",
+   "url": "https://assets.gov.ie/static/documents/6ae6780f/Greenlink_Interconnector_Cable_Route_Inspection_Irish_Sea.pdf",
+   "issued": "2026-05-21",
+   "amended": null,
+   "asset": "Greenlink",
+   "asset_kind": "power",
+   "work": "Drop-down camera inspection on transects at 12 stations along the route",
+   "valid_from": "2026-05-21",
+   "valid_to": "2026-06-10",
+   "end_note": "21 May to 10 June",
+   "vessels": [
+    {
+     "name": "NORTHERN STORM",
+     "call_sign": "MISA7",
+     "role": null,
+     "valid_from": null
+    }
+   ],
+   "areas": [
+    {
+     "kind": "route",
+     "points": [
+      [
+       52.17,
+       -6.83
+      ],
+      [
+       52.0,
+       -6.2
+      ],
+      [
+       51.8,
+       -5.5
+      ],
+      [
+       51.66,
+       -5.06
+      ]
+     ],
+     "buffer_nm": 2.0
+    }
+   ],
+   "area_note": "Approximate: the notice shows the route only on a map; our illustrative Greenlink route, 2 nm either side",
+   "label": "real"
+  }
+ ]
+}

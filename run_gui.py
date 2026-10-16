@@ -261,7 +261,7 @@ class ArgusApp:
         self._tile_pixels: OrderedDict = OrderedDict()  # Decoded tiles, so a zoom animation starts at once
         self._ring_queue: queue.Queue = queue.Queue()  # Cached tiles around the view, decoded in the background
         self._ring_pending: set[tuple[int, int, int]] = set()
-        self.map_layers = {name: tk.BooleanVar(value=True) for name in ("AIS track", "Dark prediction", "Radar contacts", "Cable", "Anchor reach", "Response assets", "World ports", "Historical cable routes", "Simulated alerts", "Rain and cloud", "Wind")}
+        self.map_layers = {name: tk.BooleanVar(value=True) for name in ("AIS track", "Dark prediction", "Radar contacts", "Cable", "Anchor reach", "Response assets", "World ports", "Historical cable routes", "Simulated alerts", "Real alerts", "Rain and cloud", "Wind")}
         self.map_layers["World ports"].set(True)
         self.irish_ports_only = tk.BooleanVar(value=True)
         self.map_tool: str | None = None
@@ -311,7 +311,7 @@ class ArgusApp:
             "ais": "AIS ship tracker", "sar_plan": "SAR next step",
             "satellite": "Satellite analysis",
             "investigation": "Investigation lab",
-            "views": "Saved map views",
+            "views": "Saved map views", "magnetics": "Magnetics",
         }
         self._decision_choice = tk.StringVar(value="")
         self._decision_acknowledged = tk.BooleanVar(value=False)
@@ -323,6 +323,8 @@ class ArgusApp:
         self.ais_tracker = DesktopAIS(self, cache_path=ROOT / "data/desktop/ais_latest.json")
         from desktop_satellite import DesktopSatellite
         self.satellite = DesktopSatellite(self, ROOT / 'data/satellite')
+        from desktop_magnetics import DesktopMagnetics
+        self.magnetics = DesktopMagnetics(self, ROOT / 'data/magnetics')
         self._build_modern()
         self.render()
         self.root.after(80, self._tick)
@@ -835,6 +837,8 @@ class ArgusApp:
         elif key == 'investigation':
             from desktop_investigation import InvestigationLab
             self.investigation_lab = InvestigationLab(self, frame)
+        elif key == 'magnetics':
+            self.magnetics.build(frame)
         elif key == "sar_plan":
             text = tk.Text(frame, wrap="word", padx=15, pady=12, font=("Segoe UI", 11),
                            bg=CARD, fg=INK, insertbackground=INK, relief="flat")
@@ -1932,6 +1936,8 @@ class ArgusApp:
             self.ais_tracker.close()
         if hasattr(self, 'satellite'):
             self.satellite.close()
+        if hasattr(self, 'magnetics'):
+            self.magnetics.close()
         self._tile_executor.shutdown(wait=False, cancel_futures=True)
         self._weather_executor.shutdown(wait=False, cancel_futures=True)
         # Cancel callbacks before Tk deletes their registered commands. This
@@ -2319,7 +2325,7 @@ class ArgusApp:
             return
         for item in reversed(self.map.find_overlapping(event.x - 3, event.y - 3, event.x + 3, event.y + 3)):
             for tag in self.map.gettags(item):
-                if tag.startswith("sim-alert:") and hasattr(self, "alert_board"):
+                if tag.startswith(("sim-alert:", "real-alert:")) and hasattr(self, "alert_board"):
                     self.map_status_label.configure(text=self.alert_board.describe(tag.split(":", 1)[1]))
                     return
                 if tag.startswith("ais-ship:") and hasattr(self, "ais_tracker"):
@@ -2348,7 +2354,7 @@ class ArgusApp:
         tags = [tag for item in reversed(self.map.find_overlapping(event.x - 5, event.y - 5, event.x + 5, event.y + 5))
                 for tag in self.map.gettags(item)]
         for tag in tags:
-            if tag.startswith("sim-alert:") and hasattr(self, "alert_board"):
+            if tag.startswith(("real-alert:", "sim-alert:")) and hasattr(self, "alert_board"):
                 self.alert_board.open(tag.split(":", 1)[1])
                 return
         for tag in tags:
@@ -2649,6 +2655,8 @@ class ArgusApp:
         self._draw_weather_overlay(width, height)
         if hasattr(self, 'satellite'):
             self.satellite.draw()
+        if hasattr(self, 'magnetics'):
+            self.magnetics.draw()
         if self.map_layers["Historical cable routes"].get():
             self._draw_world_cables(width, height)
         if self.map_layers["World ports"].get():
@@ -3034,6 +3042,8 @@ def main() -> int:
     modes.add_argument('--offline', action='store_true', help='open one offline window without login or Docker')
     modes.add_argument('--soc-client', action='store_true', help='sign-in only; do not offer local server startup')
     args = parser.parse_args()
+    from argus import supabase_ais
+    supabase_ais.enable_keyless_read()  # D108: read the team database without a secret key
     if args.coast_watch:
         args.offline = True  # Coast Watch runs in this computer's private workspace.
         from argus.satellite_scan import FRESH_DEFAULT_H
@@ -3058,6 +3068,8 @@ def main() -> int:
     if not args.old:
         import desktop_pro
         desktop_pro.apply_palette()
+    import desktop_real_alerts
+    desktop_real_alerts.allow_network()  # D107: live AIS alerts every 5 min; tests never call main, so stay offline
     root = ctk.CTk()
     if not args.offline:
         from desktop_soc import login_screen

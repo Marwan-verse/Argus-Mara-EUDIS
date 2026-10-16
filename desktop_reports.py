@@ -1,9 +1,19 @@
 """Vessel report form and analyst incident review for the native console."""
+from datetime import datetime, timezone
+import threading
+from tkinter import filedialog
+
 import customtkinter as ctk
 
+from argus import responders
 from argus.collab_crypto import validate_payload
+from argus import report_ai
+from argus.report_ai import build_pack, check_all, draft_report
+from argus.report_pdf import save_pdf, text_hash
 from argus.vessel_reports import CATEGORIES, make_report
 from desktop_soc_view import BG, CARD, MUTED, button, label
+
+WARN = "#ffb176"
 
 
 def live_snapshot(vessel):
@@ -33,30 +43,86 @@ def sharing_problem(app):
     return None
 
 
+def board_context(board, item):
+    """Incident, status and who can reach it, as the Incidents panel shows them (replay clock)."""
+    identifier = item["id"]
+    real = item.get("label") == "real"  # D107: a live AIS alert keeps real times, never the replay clock
+    now = None if real else board.replay.now
+    context = {"replay_time": None if now is None else board.stamp(int(now)), "status": board.status(identifier)}
+    if real or (not item.get("exercise") and now is not None):
+        context["raised_min"] = max(0, int(board.age_min(item)))
+    incident = board.incident(identifier)
+    if incident:
+        context["incident"] = {"id": incident["id"], "status": incident["status"],
+                               "peak_level": incident["peak_level"], "opened": board.stamp(int(incident["opened_t"])),
+                               "status_reason": incident.get("status_reason")}
+    result = board.response(identifier)
+    if result:
+        text, warn = responders.summary_line(result)
+        deadline = result.get("deadline_s")
+        context["responders"] = {"text": text, "warn": warn,
+                                 "deadline": None if deadline is None or result.get("at_line") else board.stamp(int(deadline))}
+    return context
+
+
+def evidence_pack(app, vessel, item=None):
+    """What the system holds on the reported vessel: the Brain item and panel, else its live AIS record."""
+    try:
+        board = getattr(app, "alert_board", None)
+        if item is not None:
+            current = board.by_id.get(item["id"], item) if board is not None else item
+            return build_pack(vessel, current, board_context(board, current) if board is not None else {})
+        tracker = getattr(app, "ais_tracker", None)
+        live = tracker.state.vessels.get(vessel["id"]) if tracker is not None else None
+        return build_pack(vessel, live=live)
+    except (KeyError, TypeError, ValueError, AttributeError):
+        # A report never depends on the evidence: fall back to the vessel snapshot alone.
+        return build_pack(vessel)
+
+
 class ReportDialog:
-    def __init__(self, app, vessel):
+    def __init__(self, app, vessel, item=None):
         self.app, self.vessel = app, dict(vessel)
         self.pending = False
+        self.busy = False
         self.report = None
+        self.generation = None
+        self.last_check = None
         self.scope = (app.soc_client, (app.soc_client.room or {}).get("room_id")) if app.soc_client else (None, None)
+        self.pack = evidence_pack(app, self.vessel, item)
         self.window = ctk.CTkToplevel(app.root)
         self.window.title("Report vessel")
-        self.window.geometry("570x580")
-        self.window.minsize(520, 540)
+        self.window.geometry("640x800")
+        self.window.minsize(580, 700)
         self.window.configure(fg_color=CARD)
         self.window.transient(app.root)
         self.window.protocol("WM_DELETE_WINDOW", self.close)
         label(self.window, "Report vessel", 22, True).pack(anchor="w", padx=22, pady=(20, 8))
         label(self.window, f"{vessel['name']} · {vessel['id']}\n{vessel['label']} · Analyst report for review",
-              wraplength=510, justify="left").pack(anchor="w", padx=22)
-        label(self.window, "Category", text_color=MUTED).pack(anchor="w", padx=22, pady=(16, 4))
+              wraplength=580, justify="left").pack(anchor="w", padx=22)
+        label(self.window, f"Evidence: {self.pack['summary']}", text_color=MUTED, wraplength=580,
+              justify="left").pack(anchor="w", padx=22, pady=(4, 0))
+        label(self.window, "Category", text_color=MUTED).pack(anchor="w", padx=22, pady=(12, 4))
         self.category = ctk.CTkOptionMenu(self.window, values=list(CATEGORIES), width=360)
         self.category.pack(fill="x", padx=22)
         label(self.window, "Why are you reporting this vessel? (required, up to 2000 characters)",
-              wraplength=510, text_color=MUTED).pack(anchor="w", padx=22, pady=(14, 4))
-        self.reason = ctk.CTkTextbox(self.window, height=160)
+              wraplength=580, text_color=MUTED).pack(anchor="w", padx=22, pady=(12, 4))
+        # Undo lets the analyst take back a draft that replaced their own text (Ctrl+Z).
+        self.reason = ctk.CTkTextbox(self.window, height=200, wrap="word", undo=True)
         self.reason.pack(fill="both", expand=True, padx=22)
-        self.problem = label(self.window, "", text_color="#ffb176", wraplength=510, justify="left")
+        tools = ctk.CTkFrame(self.window, fg_color="transparent")
+        tools.pack(fill="x", padx=22, pady=(10, 0))
+        self.draft_button = button(tools, "Draft with AI", self.draft, width=150)
+        self.draft_button.pack(side="left")
+        self.check_button = button(tools, "Check report", self.check, width=140)
+        self.check_button.pack(side="left", padx=(8, 0))
+        self.pdf_button = button(tools, "Save PDF", self.save_pdf, width=120)
+        self.pdf_button.pack(side="left", padx=(8, 0))
+        self.notes = ctk.CTkTextbox(self.window, height=150, wrap="word", fg_color=BG, text_color=MUTED)
+        self.notes.pack(fill="x", padx=22, pady=(8, 0))
+        self.show_notes("Draft with AI writes a draft from the evidence for you to edit. Check report compares "
+                        "your text with the system data. Nothing is sent until you create or share the report.")
+        self.problem = label(self.window, "", text_color=WARN, wraplength=580, justify="left")
         self.problem.pack(fill="x", padx=22, pady=6)
         scope = "Shared with your verified SOC session." if app.soc_client else "Local report · kept until this app closes."
         label(self.window, scope + " No operational action is triggered.", text_color=MUTED,
@@ -75,8 +141,142 @@ class ReportDialog:
         if not self.pending:
             self.window.destroy()
 
+    def show_notes(self, text):
+        self.notes.configure(state="normal")
+        self.notes.delete("1.0", "end")
+        self.notes.insert("1.0", text)
+        self.notes.configure(state="disabled")
+
+    def run(self, message, work, done):
+        """Run ``work`` off the Tk thread so the window stays responsive; ``done`` gets its result on it."""
+        if self.busy or self.pending:
+            return
+        self.busy = True
+        for widget in (self.draft_button, self.check_button, self.pdf_button, self.submit_button):
+            widget.configure(state="disabled")
+        self.problem.configure(text=message, text_color=MUTED)
+        box = {}
+
+        def worker():
+            try:
+                box["result"] = work()
+            except Exception as error:  # reported in the window; the form itself keeps working
+                box["error"] = error
+
+        thread = threading.Thread(target=worker, name="argus-report-ai", daemon=True)
+        thread.start()
+        self.app.root.after(50, lambda: self.finish(thread, box, done))
+
+    def finish(self, thread, box, done):
+        if not self.window.winfo_exists():
+            return
+        if thread.is_alive():
+            self.app.root.after(50, lambda: self.finish(thread, box, done))
+            return
+        self.busy = False
+        for widget in (self.draft_button, self.check_button, self.pdf_button, self.submit_button):
+            widget.configure(state="normal")
+        self.problem.configure(text="", text_color=WARN)
+        if "error" in box:
+            self.problem.configure(text=f"Could not finish: {box['error']}")
+            return
+        done(box["result"])
+
+    def draft(self):
+        self.run("Drafting from the evidence… (AI when a key and budget allow)", lambda: draft_report(self.pack),
+                 self.drafted)
+
+    def drafted(self, result):
+        # One undo step: Ctrl+Z brings back exactly the text the draft replaced.
+        self.reason.configure(autoseparators=False)
+        self.reason.edit_separator()
+        self.reason.delete("1.0", "end")
+        self.reason.insert("1.0", result["text"])
+        self.reason.edit_separator()
+        self.reason.configure(autoseparators=True)
+        self.category.set(result["category"])
+        meta = result.get("ai") or {}
+        self.generation = {"method": result["method"], "model": result.get("model"),
+                           "generated_utc": result["generated_utc"], "evidence": result["evidence"],
+                           "cost_usd": meta.get("cost_usd"), "cached": meta.get("cached"),
+                           "fallback": result.get("fallback")}
+        if result["method"] == "ai":
+            head = (f"AI-assisted draft by {result['model']}. Code checked it against the evidence: times, "
+                    "positions, numbers, names, IDs, level, intent words and data label.")
+        else:
+            head = f"Template draft from system data, no AI used: {result['fallback']}."
+        lines = [head, *result.get("notes", ()),
+                 f"Category set to the suggestion: {result['category']}. Change it if you disagree.",
+                 f"Evidence used: {', '.join(result['evidence'])}."]
+        if meta:
+            lines.append(self.cost_line(meta))
+        lines.append("Edit the text before you send it; Ctrl+Z restores your previous text.")
+        self.show_notes("\n".join(lines))
+
+    def cost_line(self, meta):
+        spent = report_ai.budget()
+        total = "" if spent["reserved_usd"] is None else (
+            f" · report AI budget ${spent['reserved_usd']:.4f} of ${spent['limit_usd']:g} used")
+        cost = "from cache, no cost" if meta.get("cached") else f"cost ${meta['cost_usd']:.4f} (provider usage)"
+        return f"{meta['model']} · {cost}{total}"
+
+    def check(self):
+        text, category = self.reason.get("1.0", "end"), self.category.get()
+        self.run("Checking the report against the system data…", lambda: check_all(self.pack, text, category),
+                 lambda result: self.checked(result, text))
+
+    @staticmethod
+    def finding_lines(findings):
+        lines = []
+        for number, finding in enumerate(findings, 1):
+            quote = f" “{finding['quote']}”" if finding["quote"] else ""
+            evidence = f"  Evidence: {', '.join(finding['evidence'])}" if finding["evidence"] else ""
+            lines.append(f"{number}. {finding['kind'].capitalize()}{quote}: {finding['problem']}\n"
+                         f"   Fix: {finding['fix']}{evidence}")
+        return lines
+
+    def checked(self, result, text):
+        # The PDF reports this check only while the text is unchanged.
+        self.last_check = {"text_hash": text_hash(text), "result": result}
+        code, ai = result["code"], result["ai"]
+        lines = ["CODE CHECK (exact, no AI)"]
+        if code["consistent"]:
+            lines.append("Report is consistent with system data.")
+        lines += self.finding_lines(code["findings"]) + code["notes"]
+        if "unavailable" in ai:
+            lines += ["", f"AI CHECK (meaning) not run: {ai['unavailable']}."]
+        else:
+            lines += ["", f"AI CHECK (meaning, {ai['meta']['model']}) · findings are suggestions for the analyst"]
+            if ai["consistent"]:
+                lines.append("No meaning problems found.")
+            lines += self.finding_lines(ai["findings"])
+            if ai["rejected"]:
+                lines.append(f"{len(ai['rejected'])} AI finding(s) dropped by validation: "
+                             f"{', '.join(sorted(set(ai['rejected'])))}.")
+            lines.append(self.cost_line(ai["meta"]))
+        self.show_notes("\n".join(lines))
+
+    def save_pdf(self):
+        if self.busy or self.pending:
+            return
+        text, category = self.reason.get("1.0", "end").strip(), self.category.get()
+        if not text:
+            self.problem.configure(text="Write or draft the report before saving a PDF.", text_color=WARN)
+            return
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
+        path = filedialog.asksaveasfilename(parent=self.window, title="Save report as PDF", defaultextension=".pdf",
+                                            filetypes=[("PDF", "*.pdf")],
+                                            initialfile=f"argus-report-{self.vessel['id']}-{stamp}Z.pdf")
+        if not path:
+            return
+        check, generation = self.last_check, self.generation
+        self.run("Saving the PDF…", lambda: save_pdf(path, self.pack, text, category, check=check,
+                                                     generation=generation),
+                 lambda saved: self.show_notes(f"PDF saved: {saved}\nIt holds your text, the check status and an "
+                                               "evidence appendix built by code. Nothing was sent."))
+
     def submit(self):
-        if self.pending:
+        if self.pending or self.busy:
             return
         app = self.app
         problem = sharing_problem(app)
@@ -141,12 +341,13 @@ class ReportDialog:
         self.window.destroy()
 
 
-def open_report(app, vessel):
+def open_report(app, vessel, item=None):
+    """``item`` is the Brain board item when the report starts from the review window."""
     current = getattr(app, "report_dialog", None)
     if current and current.window.winfo_exists():
         current.window.lift()
         return current
-    app.report_dialog = ReportDialog(app, vessel)
+    app.report_dialog = ReportDialog(app, vessel, item)
     return app.report_dialog
 
 

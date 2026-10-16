@@ -20,6 +20,7 @@ import customtkinter as ctk
 from PIL import Image, ImageTk
 
 from argus import gfw_sar
+from argus.optical_localization import pixel_feature
 from argus.satellite import atomic_json, bounds
 from argus.satellite_ai import choose_model, get_key, read_ledger, save_key
 from argus.satellite_workspace import DEFAULT_QUESTION, SatelliteWorkspace
@@ -31,6 +32,7 @@ RADAR, RADAR_MUTED = '#c88cff', '#9d8bb5'  # Global Fishing Watch radar contacts
 RADAR_LABELS = {'no_team_ais': 'no team AIS', 'team_ais_match': 'AIS match', 'nearby_ais_review': 'AIS nearby · review',
                 'no_contemporaneous_ais': 'no team AIS history', 'time_unresolved': 'time unresolved',
                 'ais_unavailable': 'AIS lookup failed'}
+SPOT_LABEL_LIMIT = 12  # Above this many bright spots in one image, draw them as small unlabelled marks (D109).
 
 
 class DesktopSatellite:
@@ -567,8 +569,13 @@ class DesktopSatellite:
         self.selected_contact, self.selected_candidate = point, None
         self.latest_button.configure(state='disabled')
         scene = self.current['scene']
-        self.contact_title.configure(text=f"{point['id']} · {point['confidence'].upper()} confidence · AI ASSUMPTION\n"
-             f"{scene['sensor']} · {scene['acquired_utc']}\n{point['description']}")
+        quality = point.get('localization') or {}
+        origin = 'OPTICAL FEATURE · UNCLASSIFIED' if quality.get('status') == 'feature_only' else 'AI ASSUMPTION'
+        location_note = (f"\nPixel support: {quality['status'].replace('_', ' ')} · "
+                         f"{'verified water mask' if quality.get('water_mask_verified') else 'water quality unavailable'}"
+                         if quality else '')
+        self.contact_title.configure(text=f"{point['id']} · {point['confidence'].upper()} confidence · {origin}\n"
+             f"{scene['sensor']} · {scene['acquired_utc']}\n{point['description']}"+location_note)
         if self.image is not None:
             x, y = point['x']*self.image.width, point['y']*self.image.height
             left, top = max(0, min(self.image.width-120, x-60)), max(0, min(self.image.height-72, y-36))
@@ -607,20 +614,26 @@ class DesktopSatellite:
         evidence, latest = candidate['position_evidence'], candidate.get('latest')
         self.latest_button.configure(state='normal' if latest else 'disabled')
         self.candidate_info.set(f"{candidate['name']} · {candidate['mmsi']}\n"
-              f"Image-time error {candidate['distance_m']:.0f} m · fix offset {candidate.get('nearest_fix_offset_s')} s\n"
+              f"Separation from estimated AIS {candidate['distance_m']:.0f} m · fix offset {candidate.get('nearest_fix_offset_s')} s\n"
               f"{'Motion inconsistent · review required' if not candidate.get('motion_consistent', True) else 'Outside 300 m gate · alternative only' if not candidate['within_gate'] else 'AMBIGUOUS · several candidates' if self.selected_contact.get('ambiguous') else 'Provisional · identity unconfirmed'}\n"
               + (f"Latest {'STALE' if latest['stale'] else 'received'}: {latest['received_utc']}\n"
                  f"{latest['lat']:.5f}, {latest['lon']:.5f}\nDestination: {latest.get('destination') or 'Unavailable'}"
                  if latest else 'No latest received position is available.'))
         lines = [f"POSSIBLE IDENTITY · {candidate['name']} · {candidate['mmsi']}",
              f"Image UTC {self.current['scene']['acquired_utc']}",
-             f"Image-time spatial error: {candidate['distance_m']:.0f} m · 300 m gate {'passed' if candidate['within_gate'] else 'failed'}",
+             f"Separation from estimated AIS: {candidate['distance_m']:.0f} m · 300 m gate {'passed' if candidate['within_gate'] else 'failed'}",
              f"Nearest AIS fix: {candidate.get('nearest_fix_offset_s')} seconds from acquisition",
              f"Position method: {evidence['position_method'].replace('_', ' ')}",
              f"Interpolation bracket: {evidence.get('bracket_s', 'N/A')} s · projected fix age: {evidence.get('age_s', 'N/A')} s",
              f"Motion check: {evidence.get('kinematic_consistency', 'unavailable').replace('_', ' ')} · implied {evidence.get('implied_segment_speed_kn')} kn · 80 kn assumption",
              f"{'RECEPTION-TIME ASSUMPTION: observation time is not verified.' if evidence.get('observation_time_assumed') else 'Provider-reported AIS timestamp.'}",
-             f"{'AMBIGUOUS: several ships pass the gate.' if self.selected_contact.get('ambiguous') else 'Provisional association; identity is not confirmed.'}", '']
+             f"{'AMBIGUOUS: several spatial or temporally reachable candidates.' if self.selected_contact.get('ambiguous') else 'Provisional association; identity is not confirmed.'}", '']
+        support = evidence.get('temporal_support')
+        if support:
+            lines += [f"Temporal movement support: up to {support['center_radius_m']:.0f} m around the estimate",
+                      support['caveat'],
+                      'Inside endpoint reachability; no identity match inferred.' if candidate.get('within_temporal_support') and not candidate['within_gate']
+                      else 'Endpoint reachability does not confirm identity.', '']
         if latest:
             lines += [f"LATEST RECEIVED AIS · {'STALE' if latest['stale'] else 'recent reception'}", latest['received_utc'],
                       f"{latest['lat']:.6f}, {latest['lon']:.6f} · {latest['age_s']} seconds old",
@@ -674,9 +687,13 @@ class DesktopSatellite:
         lines = [f"{scene['sensor']} · {scene['label'].upper()} pixels", f"Acquired {scene['acquired_utc']}",
                  f"Historical AIS: {ais['coverage']['status']} · {len(ais['vessels'])} eligible ships", '']
         if visual:
+            observations = [p for p in result['contacts'] if not pixel_feature(p)]
+            spots = len(result['contacts'])-len(observations)
             lines += [f"AI ASSUMPTION · UNREVIEWED · {visual['model']}", visual['summary'],
-                      f"{len(result['contacts'])} possible contacts · {'cached' if visual.get('cached') else 'new request'}", '']
-            lines.extend(f"{p['id']} · {p['confidence']} confidence: {p['association'].replace('_', ' ')} · {p['description']}" for p in result['contacts'])
+                      f"{len(observations)} possible contacts · {'cached' if visual.get('cached') else 'new request'}", '']
+            lines.extend(f"{p['id']} · {p['confidence']} confidence: {p['association'].replace('_', ' ')} · {p['description']}" for p in observations)
+            if spots:
+                lines.append(f"{spots} unclassified bright spots on the water (OPT-n): pixel features for review, not AI vessel observations")
             cost_label = 'Reported cost of completed image requests' if visual.get('adaptive_version') else 'Reported cost of this answer'
             lines += ['', f"{cost_label}: ${visual['reported_cost_usd']:.6f}"]
             lines += [''] + visual['limitations']
@@ -864,7 +881,7 @@ class DesktopSatellite:
         def work():
             if not supabase_ais.valid_key(key):
                 raise ValueError('Expected a Supabase secret or service-role key')
-            state = supabase_ais.http_rpc(supabase_ais.base_url()+'/rest/v1/rpc/argus_ais_status', {}, key)
+            state = supabase_ais.http_rpc(supabase_ais.base_url(follow_link=False)+'/rest/v1/rpc/argus_ais_status', {}, key)
             supabase_ais.save_key(key)
             supabase_ais.link(self.workspace.root)
             return state
@@ -1129,12 +1146,17 @@ class DesktopSatellite:
                 canvas.create_oval(x-5, y-5, x+5, y+5, fill='#14354e', outline='#80bcf1', width=2, tags=tag)
                 canvas.tag_bind(tag, '<Button-1>', lambda event, v=vessel: self.show_vessel(v))
         if self.show_ai.get():
+            crowded = sum(map(pixel_feature, self.current['contacts'])) > SPOT_LABEL_LIMIT
             for point in self.current['contacts']:
                 x, y = self.app._project(point['lat'], point['lon'])
                 tag = 'satellite-contact-'+point['id']
-                canvas.create_rectangle(x-8, y-8, x+8, y+8, outline='#e1b164', width=2, dash=(3, 2), tags=tag)
-                canvas.create_text(x+11, y-8, anchor='nw', fill='#e1b164',
-                                   text=point['id']+' · '+point['confidence']+' confidence · AI assumption', font=('Segoe UI', 9), tags=tag)
+                if crowded and pixel_feature(point):
+                    canvas.create_rectangle(x-3, y-3, x+3, y+3, outline='#8f7a55', width=1, tags=tag)
+                else:
+                    canvas.create_rectangle(x-8, y-8, x+8, y+8, outline='#e1b164', width=2, dash=(3, 2), tags=tag)
+                    canvas.create_text(x+11, y-8, anchor='nw', fill='#e1b164',
+                                       text=point['id']+' · '+point['confidence']+' confidence · '+
+                                       ('unclassified optical feature' if point['id'].startswith('OPT-') else 'AI assumption'), font=('Segoe UI', 9), tags=tag)
                 canvas.tag_bind(tag, '<Button-1>', lambda event, p=point: self.show_contact(p))
         self.draw_coastal_contacts()
 
@@ -1153,7 +1175,8 @@ class DesktopSatellite:
             tag = f'coastal-contact-{index}'
             canvas.create_polygon(x, y-7, x+7, y, x, y+7, x-7, y, fill='#73532b', outline='#e1b164', width=2, tags=tag)
             if self.app.map_zoom >= 9:
-                canvas.create_text(x+10, y-8, anchor='nw', text='AI lead · '+point['ts'][5:16].replace('T', ' '), fill='#e1b164', font=('Segoe UI', 9), tags=tag)
+                origin = 'Unclassified feature' if point['id'].startswith('OPT-') else 'AI observation'
+                canvas.create_text(x+10, y-8, anchor='nw', text=origin+' · '+point['ts'][5:16].replace('T', ' '), fill='#e1b164', font=('Segoe UI', 9), tags=tag)
             canvas.tag_bind(tag, '<Button-1>', lambda event, p=point: self.open_map_contact(p))
         candidate = self.selected_candidate
         latest = (candidate or {}).get('latest')

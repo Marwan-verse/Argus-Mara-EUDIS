@@ -1,4 +1,6 @@
 """The docked incident board groups, labels and records decisions without sending anything."""
+from pathlib import Path
+import tempfile
 import tkinter as tk
 import unittest
 from types import SimpleNamespace
@@ -20,7 +22,10 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.root.attributes('-alpha', 0)
         self.errors = []
         self.root.report_callback_exception = lambda *error: self.errors.append(error)
-        with patch.dict('os.environ', {'ARGUS_AIS_AUTOCONNECT': '0', 'ARGUS_UI_PREFERENCES': ''}):
+        self.temp = tempfile.TemporaryDirectory()  # The signed decision log, away from the real one.
+        self.addCleanup(self.temp.cleanup)
+        with patch.dict('os.environ', {'ARGUS_AIS_AUTOCONNECT': '0', 'ARGUS_UI_PREFERENCES': '',
+                                       'ARGUS_DECISION_LOG': str(Path(self.temp.name) / 'decision-log.jsonl')}):
             self.app = ArgusApp(self.root, *load_demo())
         self.app.ais_tracker.cache_path = None
         self.app.ais_tracker.state = LiveState()
@@ -54,16 +59,17 @@ class DesktopAlertBoardTests(unittest.TestCase):
         ranks = [RANK[board.by_id[key]['assessment']['level']] for key in order]
         self.assertEqual(ranks, sorted(ranks, reverse=True))
         # SIM-06, SIM-44 and SIM-48 are raised one level: no responder reaches them before their line ETA.
-        # Stories SIM-50 to SIM-52 are watched at T+90 (SIM-53 starts at T+95).
+        # Stories SIM-50 to SIM-52 and the corrupted-feed story SIM-49 are watched at T+90 (SIM-53 starts at T+95).
         # Site contacts SIM-61 and SIM-64 are High, SIM-62 and SIM-63 Medium; SIM-54 is a Low stop (D63).
+        # SIM-56 runs survey lines over EWIC but is named in the exercise Marine Notice: Low (SIM-60 starts at T+100).
         self.assertEqual([board.tiles[f'{level}-count'].cget('text') for level in ('critical', 'high', 'medium', 'low')],
-                         ['6', '8', '12', '31'])
+                         ['6', '8', '12', '36'])
         self.assertEqual(board.cards['SIM-01']['stripe'].cget('bg'), STYLE['critical'][0])
         self.assertIn('In corridor', board.cards['SIM-01']['eta'].cget('text'))
         self.assertIn('26 new', app.alert_counts_label.cget('text'))
         self.assertEqual(board.summary.cget('text'), '26 open · 0 escalated')
         self.assertEqual(self.flags('SIM-45'), ['AIS spoofing?'])
-        self.assertEqual(len(self.map_tags('sim-alert:')), len(board.items) - 2)  # SIM-53 starts at T+95, SIM-55 at T+140
+        self.assertEqual(len(self.map_tags('sim-alert:')), len(board.items) - 3)  # SIM-53 starts at T+95, SIM-60 at T+100, SIM-55 at T+140
         badge = next(item for item in app.map.find_withtag('sim-badge') if app.map.type(item) == 'text')
         self.assertIn('SIMULATED', app.map.itemcget(badge, 'text'))
         board.set_filter('critical')
@@ -73,14 +79,14 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertIsNone(board.level_filter)
         board.set_filter('low')
         self.assertIn('SIM-40', self.packed_cards())
-        self.assertEqual(len(self.packed_cards()), 31)  # with stories SIM-50 to SIM-52 and the stop SIM-54
+        self.assertEqual(len(self.packed_cards()), 36)  # with stories SIM-50 to SIM-52, SIM-49, SIM-56 and the new detector stories and stop SIM-54
         self.assertEqual(self.flags('SIM-40'), ['Small craft · capped Low'])
         board.set_filter(None)
         board.toggle_watching()
-        self.assertEqual(len(self.packed_cards()), len(board.items) - 2)  # SIM-53 and SIM-55 are not raised until T+95 and T+140
+        self.assertEqual(len(self.packed_cards()), len(board.items) - 3)  # SIM-53, SIM-60, SIM-55 wait for T+95, T+100, T+140
         board.sort_mode.set('Time to asset')
         board.relayout(top=True)
-        self.assertEqual(len(self.packed_cards()), len(board.items) - 2)
+        self.assertEqual(len(self.packed_cards()), len(board.items) - 3)
 
     def test_hide_demo_alerts_clears_queue_counts_and_markers_but_keeps_reports(self):
         import json
@@ -114,6 +120,55 @@ class DesktopAlertBoardTests(unittest.TestCase):
             self.assertTrue(self.map_tags('sim-alert:'))
             self.app.tools.settings_path = None
 
+    def test_one_queue_by_importance_real_leads_first_low_folded_away(self):
+        """D94: real leads join the severity bands ahead of simulated contacts; Low folds away (remembered)."""
+        from desktop_alerts import CardRow, HeaderRow, LeadRow
+        board = self.board
+
+        def lead(name, priority, day, **extra):
+            return {'id': name, 'name': name, 'mmsi': '123456789', 'title': f'{name} title', 'kind': 'image_without_ais',
+                    'acquired_utc': f'2026-10-{day:02d}T12:00:00Z', 'source_label': 'real', 'reason': 'Synthetic.',
+                    'scene_id': 'a' * 24, 'priority': priority, 'priority_reason': f'{priority} because', **extra}
+        leads = [lead('LOW-A', 'low', 10), lead('HIGH-A', 'high', 11), lead('MED-OLD', 'medium', 9),
+                 lead('UNKNOWN-NEW', None, 14), lead('LOW-B', 'low', 12),
+                 lead('LOW-CHANGED', 'low', 8, evidence_changed=True), lead('HIGH-KEYED', 'high', 13, evidence_key='k')]
+        board.refresh_evidence({'leads': leads, 'reviews_checked': 7, 'reviews_pending': 0})
+        self.root.update()
+
+        def queue():
+            found = []
+            for row in board.list.rows:
+                if isinstance(row, HeaderRow):
+                    found.append(row.key)
+                elif isinstance(row, LeadRow):
+                    found.append(row.lead.title.split(' · ')[0])
+                elif isinstance(row, CardRow):
+                    found.append('card')
+            return found
+
+        rows = queue()
+        high = rows.index('header:high')
+        # High: real leads first (newest first), then the simulated incident cards.
+        self.assertEqual(rows[high + 1:high + 3], ['HIGH-KEYED', 'HIGH-A'])
+        self.assertEqual(rows[high + 3], 'card')
+        medium = rows.index('header:medium')
+        self.assertEqual(rows[medium + 1:medium + 3], ['UNKNOWN-NEW', 'MED-OLD'])  # Unknown priority is shown
+        self.assertNotIn('LOW-A', rows)  # Low folds away by default
+        self.assertIn('header:low', rows)
+        self.assertEqual([board.tiles[f'{level}-count'].cget('text') for level in ('critical', 'high', 'medium', 'low')],
+                         ['6', '10', '14', '39'])
+        keyed = next(row.lead for row in board.list.rows if isinstance(row, LeadRow) and row.lead.title.startswith('HIGH-KEYED'))
+        self.assertEqual(keyed.secondary.text, 'Record analyst outcome')
+        self.assertEqual(keyed.tag, 'SAT · REAL')
+        board.toggle_low()
+        rows = queue()
+        low = rows.index('header:low')
+        self.assertEqual(rows[low + 1:low + 4], ['LOW-CHANGED', 'LOW-B', 'LOW-A'])  # Changed evidence first, then newest
+        self.assertIs(self.app.tools.settings['show_low_alerts'], True)
+        board.toggle_low()
+        self.assertNotIn('LOW-A', queue())
+        self.assertIs(self.app.tools.settings['show_low_alerts'], False)
+
     def test_satellite_leads_remain_visible_with_demo_hidden_and_page_all_results(self):
         board = self.board
         board.show_demo_alerts.set(False)
@@ -135,6 +190,32 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertEqual(board.evidence_page, 1)
         self.assertEqual(len([link for link in board.evidence_frame.links if link.kind == 'entry']), 1)
         self.assertTrue(all(v == 0 for v in board.counts().values()))
+
+    def test_missing_history_explains_empty_incidents_and_offers_connection(self):
+        board = self.board
+        board.refresh_history({'summary': {}, 'vessels': [], 'worker': {
+            'state': 'unlinked', 'message': 'Link the team database to check every vessel history.'}})
+        history_text = str(board.history_frame.blocks)
+        self.assertIn('History checks are blocked', history_text)
+        self.assertNotIn('Inventory is still loading', history_text)
+        with patch.object(self.app.satellite, 'connect_database') as connect:
+            # Rebuild the section so the link binds the mocked action.
+            board.history_signature = None
+            board.refresh_history({'summary': {}, 'vessels': [], 'worker': {'state': 'unlinked'}})
+            next(link for link in board.history_frame.links if link.text == 'Connect team database').invoke()
+            connect.assert_called_once_with()
+        self.app.soc_client = object()
+        try:
+            board.history_signature = None
+            board.refresh_history({'summary': {}, 'vessels': [], 'worker': {'state': 'unlinked'}})
+            self.assertFalse(any(link.text == 'Connect team database' for link in board.history_frame.links))
+            self.assertIn('host administrator', str(board.history_frame.blocks))
+        finally:
+            self.app.soc_client = None
+        board.refresh_evidence({'leads': [], 'reviews_checked': 8, 'images_without_ais': 8,
+                                'image_contacts': 17})
+        self.assertIn('Comparison blocked', board.evidence_status)
+        self.assertIn('at acquisition time', board.evidence_status)
 
     def test_satellite_analyst_outcome_is_saved_and_can_be_shown_again(self):
         import tempfile
@@ -219,6 +300,146 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertEqual(board.replay.decisions, [])
         self.assertEqual([text for _t, text in board.history['SIM-01']], ['Incident INC-SIM-01-1 opened at Critical'])
 
+    def test_decisions_are_signed_and_a_changed_letter_is_caught(self):
+        board, dialog = self.board, self.board.dialog
+        self.assertEqual(board.decision_log.path.parent, Path(self.temp.name))
+        board.open('SIM-01')
+        dialog.open_form('escalate')
+        dialog.choice.set('Irish Coast Guard (MRCC)')
+        dialog.confirm()
+        records = board.decision_log.records()
+        self.assertEqual([record['kind'] for record in records], ['start', 'decision'])
+        decision = records[1]
+        self.assertEqual((decision['action'], decision['alert'], decision['to'], decision['simulated']),
+                         ('Escalated', 'SIM-01', 'Irish Coast Guard (MRCC)', True))
+        self.assertTrue(decision['operator'].endswith('(this computer)'))
+        board.open_log()
+        window = board.log_window
+        self.root.update()
+        self.assertIn('Escalated', window.text.get('1.0', 'end'))
+        window.verify()
+        self.assertIn('1 decision verified', window.result.cget('text'))
+        path = board.decision_log.path
+        lines = path.read_text(encoding='utf-8').splitlines()
+        lines[1] = lines[1].replace('Irish Coast Guard', 'Irish Coast Guarb')
+        path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+        window.verify()
+        self.assertIn('Record 1: the signature does not match', window.result.cget('text'))
+        self.assertIn('Escalated  · CHANGED AFTER SIGNING', window.text.get('1.0', 'end'))
+        window.window.destroy()
+
+    def real_check(self, *tracks):
+        """A live AIS check as the feed hands it to the board (D107), from synthetic tracks, without network."""
+        from argus.live_alerts import LiveTracks
+        from desktop_real_alerts import check
+        from test_live_alerts import NOW, STATIC, FakeDatabase, packet
+        live = LiveTracks(rpc=FakeDatabase(packet(*tracks, static=STATIC)))
+        with patch('desktop_real_alerts.can_read', return_value=True), \
+                patch('argus.watchlist_data.load', return_value=None):
+            return check(live, 'workspace', now=NOW)
+
+    def map_texts(self, tag):
+        return [self.app.map.itemcget(item, 'text') for item in self.app.map.find_withtag(tag)
+                if self.app.map.type(item) == 'text']
+
+    def centre_on(self, item):
+        app = self.app
+        app.fit_ireland()
+        app._change_map_center((item['lat'], item['lon']))
+        app._zoom_by(3)
+        app.motion.finish_zoom()  # Mid-glide the chart is one moving picture; markers return when it lands
+        self.root.update()
+
+    def test_real_alerts_from_live_ais_rank_first_open_for_review_and_are_signed(self):
+        """D107: a real alert joins its level's band ahead of the simulated contacts, on the map as NAME · REAL."""
+        from desktop_alerts import HeaderRow, LeadRow
+        from test_live_alerts import LOITERER, TRANSIT
+        board, dialog, alert = self.board, self.board.dialog, 'REAL-250000001'
+        self.assertFalse(board.real_frame.shown)  # Tests never start the feed: no live AIS block
+        board.refresh_real(self.real_check(LOITERER, TRANSIT))
+        self.centre_on(board.real.items[alert])
+
+        def queue():
+            return [row.key if isinstance(row, HeaderRow) else
+                    ('real' if isinstance(row, LeadRow) and row.lead.alert_id else 'other') for row in board.list.rows]
+        rows = queue()
+        high = rows.index('header:high')
+        self.assertEqual(rows[high + 1], 'real')  # ahead of the simulated incidents
+        lead = board.list.rows[high + 1].lead
+        self.assertEqual((lead.title, lead.tag), ('TEST LOITERER · 250000001', 'AIS · REAL'))
+        self.assertTrue(lead.detail.startswith('New · High'), lead.detail)
+        self.assertIn('LIVE AIS ALERTS · 1', board.real_frame.texts())
+        self.assertIn('header:sources', rows)
+        self.assertIn(f'real-alert:{alert}', self.map_tags('real-alert:'))
+        self.assertIn('TEST LOITERER · REAL', self.map_texts('real-alert'))
+        self.assertTrue(self.map_texts('real-badge')[0].startswith('REAL · 1 live AIS alert'))
+
+        lead.invoke()  # A click on the lead opens the review window
+        self.root.update()
+        self.assertEqual(board.selected, alert)
+        self.assertEqual(dialog.tag.cget('text'), 'REAL · LIVE AIS')
+        self.assertEqual(dialog.score.cget('text'), 'Score 9  ·  MMSI 250000001')
+        self.assertIn('REAL', dialog.body.texts())
+        self.assertNotIn('Open replay', self.actions())
+        self.assertIn('Acknowledge', self.actions())
+        self.assertEqual(board.status(alert), 'Reviewed')
+        opened = board.decision_log.records()[-1]
+        self.assertEqual((opened['action'], opened['real'], opened['simulated'], opened['mmsi'], opened['alert']),
+                         ('Reviewed', True, False, '250000001', alert))
+        self.assertNotIn('replay', opened)  # real times only
+
+        dialog.open_form('escalate')
+        self.assertTrue(any(text.startswith('Not worked out for real alerts') for text in dialog.body.texts()))
+        dialog.choice.set('Duty officer')
+        dialog.confirm()
+        self.assertEqual((board.status(alert), board.decision_log.records()[-1]['to']), ('Escalated', 'Duty officer'))
+        self.assertTrue(board.real_frame.blocks and any(
+            block[0] == 'entry' and block[1].detail.startswith('Escalated · Duty officer') for block in board.real_frame.blocks))
+
+        board.show_demo_alerts.set(False)  # Hiding the simulated alerts keeps the real one and its review
+        board.toggle_demo_alerts()
+        self.assertTrue(dialog.visible)
+        self.assertIn('real', queue())
+        self.assertIn(f'real-alert:{alert}', self.map_tags('real-alert:'))
+        board.show_demo_alerts.set(True)
+        board.toggle_demo_alerts()
+
+        dialog.open_form('reject')
+        dialog.choice.set('Authorised operation')
+        dialog.confirm()
+        self.assertEqual(board.real.band(alert), 'closed')
+        self.assertNotIn(f'real-alert:{alert}', self.map_tags('real-alert:'))
+        board.open_log()
+        self.root.update()
+        window = board.log_window
+        self.assertEqual(window.chip.cget('text'), 'REAL')
+        self.assertIn('REAL · Rejected', window.text.get('1.0', 'end'))
+        window.verify()
+        self.assertIn('3 decisions verified', window.result.cget('text'))
+        window.window.destroy()
+
+    def test_a_real_alert_on_the_map_opens_its_review_and_a_failed_check_keeps_it(self):
+        from test_live_alerts import LOITERER
+        board, alert = self.board, 'REAL-250000001'
+        board.refresh_real(self.real_check(LOITERER))
+        self.centre_on(board.real.items[alert])
+        marker = next(item for item in self.app.map.find_withtag(f'real-alert:{alert}')
+                      if self.app.map.type(item) in ('polygon', 'oval'))
+        x1, y1, x2, y2 = self.app.map.bbox(marker)
+        event = SimpleNamespace(x=(x1 + x2) / 2, y=(y1 + y2) / 2)
+        self.app._map_motion(event)
+        self.assertTrue(self.app.map_status_label.cget('text').startswith('Real · live AIS · TEST LOITERER'))
+        self.app._inspect_map_item(event)
+        self.root.update()
+        self.assertEqual((board.selected, board.dialog.visible), (alert, True))
+        board.refresh_real({'state': 'error', 'error': 'Cannot reach the Supabase database'})
+        self.root.update()
+        self.assertTrue(board.dialog.visible)
+        self.assertIn(alert, board.real.items)
+        self.assertTrue(any('Last check failed: Cannot reach the Supabase database' in text
+                            for text in board.real_frame.texts()))
+        self.assertTrue(self.map_texts('real-badge')[0].endswith('last check failed'))
+
     def test_exercise_incident_shares_review_status_and_map_click_opens_it(self):
         app, board, tools = self.app, self.board, self.app.tools
         exercise = next(item for item in board.items if item.get('exercise'))
@@ -272,6 +493,21 @@ class DesktopAlertBoardTests(unittest.TestCase):
         board.open('SIM-44')
         self.assertEqual(dialog.body.canvas.yview()[0], 0)
         self.assertTrue(any(text.startswith('Also named: Gas interconnector IC2') for text in texts()))
+
+    def test_corrupted_feed_is_scored_and_its_data_quality_shown(self):
+        board, dialog = self.board, self.board.dialog
+
+        def texts():
+            return dialog.body.texts()
+
+        # SIM-49's feed so far (T+90): three fixes without a position and one received twice.
+        self.assertIn('· 1 vessel with data issues', self.app.alert_counts_label.cget('text'))
+        board.open('SIM-49')
+        shown = texts()
+        self.assertIn('Data quality: 4 fixes ignored (no position 3, repeated time 1)', shown)
+        self.assertFalse([text for text in shown if text.startswith('Detector ')])  # no detector failed
+        board.open('SIM-01')
+        self.assertFalse([text for text in texts() if text.startswith('Data quality')])
 
     def test_who_can_reach_it_shows_on_card_window_and_map_and_a_storm_grounds_drones(self):
         board, dialog = self.board, self.board.dialog
