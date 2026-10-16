@@ -2345,16 +2345,19 @@ class ArgusApp:
 
     def _zoom_at(self, amount: int, screen_x: float, screen_y: float) -> None:
         motion = getattr(self, "motion", None)
-        if motion is not None:
-            motion.finish_zoom()  # A zoom still animating lands first, so steps never compound visually
+        reduced = hasattr(self, "tools") and self.tools.reduced_motion.get()
+        animate = motion is not None and hasattr(self, "map") and not reduced
+        if motion is not None and not animate:
+            motion.finish_zoom()
         maximum = max_zoom_for(self.map_mode.get())
         new_zoom = max(MIN_MAP_ZOOM, min(maximum, self.map_zoom + amount))
         if new_zoom == self.map_zoom:
             return
-        reduced = hasattr(self, "tools") and self.tools.reduced_motion.get()
-        animate = motion is not None and hasattr(self, "map") and not reduced
-        raster = motion.snapshot() if animate else None  # The chart as drawn now, before the zoom changes
-        under_cursor = world_to_geo(*self._world_at(screen_x, screen_y), self.map_zoom)
+        continuing = animate and motion.animating  # This step joins a zoom that is still gliding
+        raster = motion.snapshot() if animate and not continuing else None  # The chart as drawn, before it changes
+        # The geography the operator points at: mid-glide, what is on screen is not yet the target view.
+        anchor = motion.to_target(screen_x, screen_y) if continuing else (screen_x, screen_y)
+        under_cursor = world_to_geo(*self._world_at(*anchor), self.map_zoom)
         old_zoom, self.map_zoom = self.map_zoom, new_zoom
         point_x, point_y = geo_to_world(*under_cursor, new_zoom)
         center_x = point_x - (screen_x - self._map_size[0] / 2)

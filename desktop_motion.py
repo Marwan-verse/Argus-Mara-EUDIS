@@ -6,9 +6,11 @@ Before, every mouse move while dragging and every zoom step deleted and re-creat
 * Pan: one ``canvas.move`` per mouse event shifts what is already drawn (fixed overlays stay put,
   margin scale ticks slide along their own edge). The full redraw that fills in new edges and
   re-culls runs when the drag pauses, when it has moved a good part of the view, and on release.
-* Zoom: the view scales around the pointer over a few frames with an ease-out curve. Vector
-  items scale with ``canvas.scale``; the raster chart scales as one image built from the cached
-  tiles. Text keeps its size, as on professional charts. The real redraw at the new zoom follows.
+* Zoom: the view glides to the new scale in about a quarter of a second, timed by the clock and
+  eased out, keeping the point under the pointer still. A step taken while one is running joins
+  it, so wheel notches and pinches become one continuous movement. Vector items scale with
+  ``canvas.scale``; the raster chart scales as one image built from the cached tiles. Text keeps
+  its size, as on professional charts. The real redraw at the new zoom follows.
 * Other redraw requests (live AIS, arriving tiles) wait until the motion ends, so a drag or an
   animation is never interrupted by a full redraw.
 
@@ -17,6 +19,7 @@ final frame is always a normal full draw.
 """
 from __future__ import annotations
 
+import time
 import tkinter as tk
 
 from PIL import Image, ImageColor, ImageTk
@@ -25,8 +28,8 @@ FIXED = "chart-fixed"  # Overlays tied to the window, not to the chart: titles, 
 TILE = "map-tile"  # Raster tile images, replaced by one scaled image while zooming
 PAN_IDLE_MS = 110  # Redraw once the pointer rests this long during a drag
 PAN_REDRAW_SHARE = 0.35  # ... or once the drag has moved this share of the view
-ZOOM_FRAMES = 8
-ZOOM_FRAME_MS = 14
+ZOOM_SECONDS = 0.24  # Each zoom step glides this long; a new step continues the movement
+ZOOM_TICK_MS = 8  # Ask for the next frame this soon; the frame rate is whatever the canvas allows
 
 
 def ease_out(t: float) -> float:
@@ -117,39 +120,86 @@ class MapMotion:
         width, height = self.app._map_size
         return self._raster_snapshot(width, height, ImageColor.getrgb(self.app.map.cget("bg")))
 
+    @property
+    def animating(self) -> bool:
+        return self.zoom_state is not None
+
+    def to_target(self, x: float, y: float) -> tuple[float, float]:
+        """Where a point the operator sees now will sit once the running zoom lands.
+
+        The map's centre and zoom already hold the target, so a zoom step taken mid-animation
+        must find the geography under the pointer through this, not through the raw position.
+        """
+        state = self.zoom_state
+        if state is None:
+            return x, y
+        original_x, original_y = (x - state["tx"]) / state["a"], (y - state["ty"]) / state["a"]
+        return state["A"] * original_x + state["TX"], state["A"] * original_y + state["TY"]
+
     def zoom(self, factor: float, x: float, y: float, raster: Image.Image | None) -> None:
-        """Animate a zoom by ``factor`` around (x, y); the caller has already set the new zoom."""
-        self.finish_zoom()
-        canvas = self.app.map
-        sea = ImageColor.getrgb(canvas.cget("bg"))
-        if raster is not None:
-            canvas.delete(TILE, "map-land")  # The one scaled image stands in for both
-            item = canvas.create_image(0, 0, anchor="nw", tags=("zoom-raster",))
-            canvas.tag_raise(item, "map-sea")
-        self.zoom_state = {"factor": factor, "x": x, "y": y, "frame": 0, "scale": 1.0,
-                           "raster": raster, "photo": None, "sea": sea}
-        self._zoom_frame()
+        """Zoom by ``factor`` keeping the point under (x, y) still; the caller has set the new zoom.
+
+        The view on screen is the drawn chart under an affine map ``screen = a * drawn + t``; the
+        target is ``A, T``. A step taken while one is animating composes onto the target and the
+        motion continues from where it is, so several wheel notches or a pinch become one movement.
+        """
+        state = self.zoom_state
+        if state is None:
+            canvas = self.app.map
+            if raster is not None:
+                canvas.delete(TILE, "map-land")  # The one scaled image stands in for both
+                item = canvas.create_image(0, 0, anchor="nw", tags=("zoom-raster",))
+                canvas.tag_raise(item, "map-sea")
+            state = self.zoom_state = {"a": 1.0, "tx": 0.0, "ty": 0.0, "A": 1.0, "TX": 0.0, "TY": 0.0,
+                                       "raster": raster, "photo": None, "sea": ImageColor.getrgb(canvas.cget("bg"))}
+        # The drawn point now under the pointer must end under the pointer.
+        drawn_x, drawn_y = (x - state["tx"]) / state["a"], (y - state["ty"]) / state["a"]
+        state["A"] *= factor
+        state["TX"], state["TY"] = x - state["A"] * drawn_x, y - state["A"] * drawn_y
+        state["from"] = (state["a"], state["tx"], state["ty"])
+        state["started"] = time.perf_counter()
+        if self.zoom_after is None:
+            self._zoom_frame()
 
     def _zoom_frame(self) -> None:
         self.zoom_after = None
         state = self.zoom_state
         if state is None:
             return
-        state["frame"] += 1
-        target = state["factor"] ** ease_out(state["frame"] / ZOOM_FRAMES)
-        step = target / state["scale"]
-        state["scale"] = target
-        canvas, x, y = self.app.map, state["x"], state["y"]
-        # Everything tied to the chart scales; fixed overlays and the margin backgrounds do not.
-        canvas.scale("all&&!chart-fixed&&!ruler-x&&!ruler-y&&!zoom-raster", x, y, step, step)
-        canvas.scale("ruler-x", x, y, step, 1)
-        canvas.scale("ruler-y", x, y, 1, step)
+        progress = min(1.0, (time.perf_counter() - state["started"]) / ZOOM_SECONDS)
+        eased = ease_out(progress)
+        a0, tx0, ty0 = state["from"]
+        a = a0 * (state["A"] / a0) ** eased  # Even steps in scale, not in pixels
+        if abs(a0 - state["A"]) > 1e-12:
+            # Move along the path that keeps the zoom's fixed point still.
+            cx, cy = (state["TX"] - tx0) / (a0 - state["A"]), (state["TY"] - ty0) / (a0 - state["A"])
+            tx, ty = a0 * cx + tx0 - a * cx, a0 * cy + ty0 - a * cy
+        else:
+            tx, ty = tx0 + (state["TX"] - tx0) * eased, ty0 + (state["TY"] - ty0) * eased
+        self._apply(state, a, tx, ty)
         if state["raster"] is not None:
             self._draw_raster(state)
-        if state["frame"] >= ZOOM_FRAMES:
+        if progress >= 1.0:
             self.finish_zoom()
         else:
-            self.zoom_after = self.app.root.after(ZOOM_FRAME_MS, self._zoom_frame)
+            self.zoom_after = self.app.root.after(ZOOM_TICK_MS, self._zoom_frame)
+
+    def _apply(self, state: dict, a: float, tx: float, ty: float) -> None:
+        """Move every chart item from the current affine map to (a, tx, ty)."""
+        canvas = self.app.map
+        k = a / state["a"]
+        if abs(k - 1) > 1e-12:
+            # screen' = k * screen + (t - k * t_now), i.e. a scale by k about this origin:
+            ox, oy = (tx - k * state["tx"]) / (1 - k), (ty - k * state["ty"]) / (1 - k)
+            canvas.scale("all&&!chart-fixed&&!ruler-x&&!ruler-y&&!zoom-raster", ox, oy, k, k)
+            canvas.scale("ruler-x", ox, oy, k, 1)
+            canvas.scale("ruler-y", ox, oy, 1, k)
+        else:
+            dx, dy = tx - state["tx"], ty - state["ty"]
+            canvas.move("all&&!chart-fixed&&!ruler-x&&!ruler-y&&!zoom-raster", dx, dy)
+            canvas.move("ruler-x", dx, 0)
+            canvas.move("ruler-y", 0, dy)
+        state["a"], state["tx"], state["ty"] = a, tx, ty
 
     def finish_zoom(self) -> None:
         if self.zoom_state is None:
@@ -185,9 +235,9 @@ class MapMotion:
         return image if found else None
 
     def _draw_raster(self, state: dict) -> None:
-        raster, scale, x, y = state["raster"], state["scale"], state["x"], state["y"]
-        # Each window pixel u shows old-view pixel x + (u - x) / scale; outside the old view is sea.
-        matrix = (1 / scale, 0, x - x / scale, 0, 1 / scale, y - y / scale)
+        raster, a = state["raster"], state["a"]
+        # Each window pixel u shows drawn pixel (u - t) / a; outside the drawn view is sea.
+        matrix = (1 / a, 0, -state["tx"] / a, 0, 1 / a, -state["ty"] / a)
         frame = raster.transform(raster.size, Image.Transform.AFFINE, matrix, resample=Image.Resampling.BILINEAR,
                                  fillcolor=state["sea"])
         state["photo"] = ImageTk.PhotoImage(frame, master=self.app.map)

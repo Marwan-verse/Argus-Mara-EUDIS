@@ -81,11 +81,31 @@ class MapMotionTests(unittest.TestCase):
         self.assertAlmostEqual(under[0], after[0], places=9)
         self.assertAlmostEqual(under[1], after[1], places=9)
         self.assertFalse(app.map.find_withtag('zoom-raster'))
-        # A second zoom during an animation lands the first one, then animates on from there.
+        # Steps taken while a zoom glides join it: one movement, and the point under the pointer stays put.
         app._zoom_at(1, x, y)
-        app._zoom_at(-1, x, y)
+        self.root.update()
+        app._zoom_at(1, x + 30, y - 20)  # The pointer moved a little between wheel notches
+        app._zoom_at(-1, x + 30, y - 20)
+        self.assertTrue(app.motion.animating)
+        deadline = time.monotonic() + 3
+        while app.motion.busy and time.monotonic() < deadline:
+            self.root.update()
+            time.sleep(0.01)
+        self.assertEqual(app.map_zoom, zoom + 2)
+        self.assertFalse(app.motion.busy)
+
+    def test_a_point_seen_mid_glide_stays_under_the_pointer_when_zooming_again(self):
+        from run_gui import world_to_geo
+        app = self.app
+        app._zoom_at(1, 220, 180)
+        for _ in range(3):
+            self.root.update()  # Part of the glide: what is on screen is not yet the target view
+        seen = world_to_geo(*app._world_at(*app.motion.to_target(300, 200)), app.map_zoom)
+        app._zoom_at(1, 300, 200)
         app.motion.finish_zoom()
-        self.assertEqual(app.map_zoom, zoom + 1)
+        landed = world_to_geo(*app._world_at(300, 200), app.map_zoom)
+        self.assertAlmostEqual(seen[0], landed[0], places=9)
+        self.assertAlmostEqual(seen[1], landed[1], places=9)
 
 
 if __name__ == '__main__':
