@@ -230,8 +230,11 @@ def build(app):
     modes = ctk.CTkFrame(map_host, fg_color=ui.BG, corner_radius=8, border_width=1, border_color=ui.LINE)
     modes.place(x=16, rely=1, y=-54, anchor="sw")
     app.modes_bar = modes
-    for icon, text, action in (("layers", 'Map', lambda: app._change_map_mode("Offline coastline")),
-                              ("satellite", 'Satellite', lambda: app._change_map_mode(ui.ONLINE_MAP)),
+    pro = ui.UI_EDITION == "pro"
+    chart_mode = ui.desktop_basemap.TACTICAL_MAP if pro else "Offline coastline"
+    imagery_mode = ui.desktop_basemap.HD_IMAGERY if pro else ui.ONLINE_MAP
+    for icon, text, action in (("layers", 'Chart' if pro else 'Map', lambda: app._change_map_mode(chart_mode)),
+                              ("satellite", 'Satellite', lambda: app._change_map_mode(imagery_mode)),
                               ("ship", 'AIS', lambda: app.open_window("ais")),
                               ("replay", 'Exercise', app.show_exercise)):
         mode = ctk.CTkButton(modes, text=text, image=app.tools.icons.get(icon, ui.PURPLE),
@@ -241,7 +244,7 @@ def build(app):
         app.tools.style_button(mode, text + ' view')
     # Existing layer controls can still set this selector and weather indicator.
     app.map_selector = ctk.CTkOptionMenu(map_host, variable=app.map_mode,
-        values=["Offline coastline", ui.ONLINE_MAP], command=app._change_map_mode)
+        values=["Offline coastline", ui.ONLINE_MAP, *ui.desktop_basemap.SOURCES], command=app._change_map_mode)
     app.weather_label = ctk.CTkLabel(map_host, text="", text_color=ui.MUTED)
 
     app.replay_controls = ctk.CTkFrame(map_host, fg_color=ui.CARD, corner_radius=8,

@@ -1005,7 +1005,7 @@ class AlertBoard:
         left = 16 * scaling
         free = max(120, width - right - left)
         target_x, target_y = left + free / 2, height / 2 - 20 * scaling
-        maximum = ui.MAX_IMAGERY_ZOOM if app.map_mode.get() == ui.ONLINE_MAP else ui.MAX_MAP_ZOOM
+        maximum = ui.max_zoom_for(app.map_mode.get())
         if fit:
             points = list(item["track"]) + [(item["lat"], item["lon"])]
             nearest = nearest_point(item["lat"], item["lon"], line_path(item["line_id"], app.scenario))
@@ -1203,7 +1203,7 @@ class AlertBoard:
         self.draw_assigned(occupied)
         if items:
             text = f"SIMULATED · {len(items)} fictional contact{'s' if len(items) != 1 else ''}"
-            label = app.map.create_text(20, 40, text=text, anchor="w", fill=ui.INK, font=(SANS, 9, "bold"),
+            label = app.map.create_text(20 + getattr(app, "chart_margin", 0), 40 + getattr(app, "chart_margin", 0), text=text, anchor="w", fill=ui.INK, font=(SANS, 9, "bold"),
                                         tags=("sim-badge",))
             left, top, right, bottom = app.map.bbox(label)
             box = app.map.create_rectangle(left - 7, top - 3, right + 7, bottom + 3, fill=ui.BG, outline=ui.LINE,
