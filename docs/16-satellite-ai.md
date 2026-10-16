@@ -6,6 +6,21 @@ JSON contracts are unchanged. Opening the app, viewing AIS, searching scenes and
 loading imagery do not make paid AI calls. **Coast Watch** adds opt-in automatic
 new-image cycles; Start scan enables paid review under the same $20 pilot ceiling.
 
+## One-click start
+
+Double-click **`SATELLITE-WATCH-MAC.command`** (macOS) or **`SATELLITE-WATCH-WINDOWS.bat`**
+(Windows). The launcher does four things:
+
+1. It pulls the latest commits of the checked-out branch.
+2. It creates `.venv` with Python 3.12 or newer (Tkinter included) and installs the app and the satellite readers once (`requirements-satellite.txt`, `recorder/requirements.txt`).
+3. It runs `scripts/satellite_watch.py`:
+   - It asks once for the TensorX key and, if this computer is not linked yet, for the team database secret key. Both are typed hidden, checked with a free call (TensorX model discovery, database status) and saved only in the operating system's credential store.
+   - It prints the AIS feed state and the AI budget, including about how many image checks remain under the $20 ceiling.
+   - It lists the Sentinel-2 passes already in the catalogue, each with how many ships the database holds at its time. It also lists the next passes expected from the 10-day repeat orbit.
+4. It opens the app with `run_gui.py --coast-watch`: offline, on Satellite analysis, fitted to all Ireland. Coast Watch starts when TensorX is connected; without it, the free **AIS at image time** still works.
+
+A Coast Watch started this way reviews only images taken in the **last 36 hours**. The window is set by `ARGUS_SATELLITE_MAX_IMAGE_AGE_H` (6–168); when it is unset, the seven-day window applies. So a first start does not spend the pilot budget on older images that predate the team's AIS history. `python scripts/satellite_watch.py --check` prints the same readiness without asking anything (exit 0 = ready, 3 = something missing).
+
 ## Automatic Ireland coast watch
 
 Open **Satellite analysis → Start scan**. The app checks for newly available
