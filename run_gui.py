@@ -261,7 +261,7 @@ class ArgusApp:
         self._tile_pixels: OrderedDict = OrderedDict()  # Decoded tiles, so a zoom animation starts at once
         self._ring_queue: queue.Queue = queue.Queue()  # Cached tiles around the view, decoded in the background
         self._ring_pending: set[tuple[int, int, int]] = set()
-        self.map_layers = {name: tk.BooleanVar(value=True) for name in ("AIS track", "Dark prediction", "Radar contacts", "Cable", "Anchor reach", "Response assets", "World ports", "Historical cable routes", "Simulated alerts", "Rain and cloud", "Wind")}
+        self.map_layers = {name: tk.BooleanVar(value=True) for name in ("AIS track", "Dark prediction", "Radar contacts", "Cable", "Anchor reach", "Response assets", "World ports", "Historical cable routes", "Simulated alerts", "Real alerts", "Rain and cloud", "Wind")}
         self.map_layers["World ports"].set(True)
         self.irish_ports_only = tk.BooleanVar(value=True)
         self.map_tool: str | None = None
@@ -2317,7 +2317,7 @@ class ArgusApp:
             return
         for item in reversed(self.map.find_overlapping(event.x - 3, event.y - 3, event.x + 3, event.y + 3)):
             for tag in self.map.gettags(item):
-                if tag.startswith("sim-alert:") and hasattr(self, "alert_board"):
+                if tag.startswith(("sim-alert:", "real-alert:")) and hasattr(self, "alert_board"):
                     self.map_status_label.configure(text=self.alert_board.describe(tag.split(":", 1)[1]))
                     return
                 if tag.startswith("ais-ship:") and hasattr(self, "ais_tracker"):
@@ -2346,7 +2346,7 @@ class ArgusApp:
         tags = [tag for item in reversed(self.map.find_overlapping(event.x - 5, event.y - 5, event.x + 5, event.y + 5))
                 for tag in self.map.gettags(item)]
         for tag in tags:
-            if tag.startswith("sim-alert:") and hasattr(self, "alert_board"):
+            if tag.startswith(("real-alert:", "sim-alert:")) and hasattr(self, "alert_board"):
                 self.alert_board.open(tag.split(":", 1)[1])
                 return
         for tag in tags:
@@ -3058,6 +3058,8 @@ def main() -> int:
     if not args.old:
         import desktop_pro
         desktop_pro.apply_palette()
+    import desktop_real_alerts
+    desktop_real_alerts.allow_network()  # D107: live AIS alerts every 5 min; tests never call main, so stay offline
     root = ctk.CTk()
     if not args.offline:
         from desktop_soc import login_screen
