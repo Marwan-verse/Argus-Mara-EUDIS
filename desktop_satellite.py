@@ -875,7 +875,7 @@ class DesktopSatellite:
         def work():
             if not supabase_ais.valid_key(key):
                 raise ValueError('Expected a Supabase secret or service-role key')
-            state = supabase_ais.http_rpc(supabase_ais.base_url()+'/rest/v1/rpc/argus_ais_status', {}, key)
+            state = supabase_ais.http_rpc(supabase_ais.base_url(follow_link=False)+'/rest/v1/rpc/argus_ais_status', {}, key)
             supabase_ais.save_key(key)
             supabase_ais.link(self.workspace.root)
             return state
