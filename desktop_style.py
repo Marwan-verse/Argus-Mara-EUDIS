@@ -42,6 +42,12 @@ class Icons:
             oval((3, 3, 21, 21))
             oval((7, 7, 17, 17))
             line([(12, 12), (20, 4)])
+        elif name == 'magnet':  # a horseshoe magnet with solid pole tips
+            line([(7, 7), (7, 12)])
+            line([(17, 7), (17, 12)])
+            draw.arc(tuple(int(v * scale) for v in (7, 7, 17, 17)), 0, 180, fill=color, width=2 * scale)
+            for left in (5, 15):
+                draw.rectangle(tuple(int(v * scale) for v in (left, 2, left + 4, 7)), fill=color)
         elif name == 'weather':
             line([(5, 19), (3, 17), (3, 13), (6, 10), (9, 10), (11, 6), (16, 6), (19, 10), (19, 12), (22, 14), (22, 17), (20, 19), (5, 19)])
         elif name == 'layers':

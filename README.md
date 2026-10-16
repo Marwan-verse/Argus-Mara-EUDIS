@@ -40,6 +40,16 @@ at the radar time. *Radar contact without AIS* leads are violet on the map and l
 Incidents. Detections arrive 4–5 days late. Powered by Global Fishing Watch. See
 [how it works and what was checked](docs/19-gfw-radar.md).
 
+**Magnetics (optional, D89):** the magnet button on the left rail opens two real uses of
+magnetics; neither watches the sea, because a ship's field fades as 1/r³ (a seabed sensor
+sees a 200 m ship only within about 0.5–1 km). *Live magnetic data*, off by default, polls
+NOAA SWPC Kp and the Valentia observatory and shows a storm tier in the header: context
+for electrical cable alarms that never changes an alert. *Plan search* turns the exercise
+vessel's or the selected alert's track (slowdown → cable crossing → speed recovery) into a
+magnetometer search corridor with lines, line-km and hours per platform, ranked search
+points and a GeoJSON export to `data/magnetics/`; every number is a labelled assumption.
+`python -m argus.geomag` prints the live status; `python -m argus.survey_plan` the worked example.
+
 > *"Ireland can crew two ships. Argus Mara gives them a hundred eyes."*
 
 **What it is:** a rule-based early-warning demonstration for Ireland's undersea internet cables and gas and power lines. It works like this:
