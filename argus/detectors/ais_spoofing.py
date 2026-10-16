@@ -21,13 +21,6 @@ One GPS glitch is normal, so ``persistence`` decides whether the events set
 weak cue without it. Every threshold below is an assumption, not a regulation
 or a measured error rate. Findings say "possible spoofing, for review", never
 that spoofing is confirmed.
-
-Space weather: when ``context["space_weather"]`` (an ``argus.space_weather.status``
-dict) reports a geomagnetic storm of NOAA level G3 or stronger, GNSS on board may
-be degraded. Jumps, outliers and returns outside the reachable circle of up to
-``GNSS_MAX_NM`` then do not count towards ``spoof_signs``; the finding says the
-jump may be GPS error. One identity in two places, speed mismatches, inland
-positions and larger jumps still count. Without such a storm nothing changes.
 """
 
 from __future__ import annotations
@@ -63,12 +56,6 @@ SOG_NOT_AVAILABLE = 102.3  # AIS value for "speed not available"
 WEAK_STRENGTH = 0.25
 MAX_EVENT_REASONS = 5
 GRID_DEG = 0.5  # land and port lookup cells
-# Assumptions for storms (G3+, see argus.space_weather.GNSS_CAUTION_G). Event kinds a degraded GNSS fix
-# can produce for one vessel; "two_places" needs two positions at once, which a storm does not explain.
-GNSS_EXPLAINABLE = frozenset({"jump", "outlier", "reappearance"})
-# Storm GNSS errors are metres to tens of metres; a nautical-mile jump comes from a fix frozen during
-# a loss of lock and then catching up. Beyond STRONG_NM that would need a long outage, so it still counts.
-GNSS_MAX_NM = STRONG_NM
 
 # Physical top speed by AIS ship type (assumptions): the fastest a ship of the type can plausibly go,
 # so a return beyond it is impossible rather than unusual. Checks use the larger of this and
@@ -412,18 +399,6 @@ def persistence(events: list[dict]) -> str | None:
     return None
 
 
-def gnss_storm(context: dict) -> dict | None:
-    """The space weather status when it warns of degraded GNSS (G3 or stronger), else None."""
-    weather = context.get("space_weather")
-    return weather if isinstance(weather, dict) and weather.get("gnss_caution") else None
-
-
-def storm_text(weather: dict) -> str:
-    """For example "Geomagnetic storm G4 (Kp 8, NOAA SWPC, real)"."""
-    origin = "real, historical" if weather.get("origin") == "historical" else weather.get("label", "real")
-    return f"Geomagnetic storm G{weather['g']} (Kp {weather['kp_text']}, {weather['source']}, {origin})"
-
-
 def ais_spoofing(vessel: dict, context: dict) -> list[dict]:
     """One ``ais_spoofing`` finding per vessel with physically impossible positions; none for a clean track."""
     fixes = clean_track(vessel.get("track") or [], context.get("now"))
@@ -435,36 +410,23 @@ def ais_spoofing(vessel: dict, context: dict) -> list[dict]:
         return []
     events.sort(key=lambda event: event["t"])
     lead = max(events, key=lambda event: (event["kind"] == "two_places", event["distance_nm"] or 0))
-    storm = gnss_storm(context)
-    explained = [event for event in events if storm and event["kind"] in GNSS_EXPLAINABLE
-                 and (event["distance_nm"] or 0) <= GNSS_MAX_NM]
-    counted = [event for event in events if event not in explained] if explained else events
-    why = persistence(counted)
+    why = persistence(events)
     if why:
-        summary = f"Possible AIS spoofing, for review: {len(counted)} inconsistent position event(s); {why}."
-        strength = 0.9 if lead["kind"] == "two_places" else min(0.9, 0.5 + 0.1 * len(counted))
+        summary = f"Possible AIS spoofing, for review: {len(events)} inconsistent position event(s); {why}."
+        strength = 0.9 if lead["kind"] == "two_places" else min(0.9, 0.5 + 0.1 * len(events))
     else:
         summary = (f"{len(events)} isolated event(s), possibly a GPS glitch: not a spoofing sign under the rule "
                    f"({PERSIST_EVENTS} events within {PERSIST_WINDOW_S // 60} min, or one over {STRONG_NM:g} nm). "
                    "For review.")
         strength = WEAK_STRENGTH
-    reasons = [summary]
-    related = {"events": [{key: event[key] for key in ("kind", "t", "position", "distance_nm")} for event in events]}
-    if storm:
-        if explained:
-            reasons.append(f"{storm_text(storm)}: GNSS positions may be degraded — jump may be GPS error, not "
-                           f"spoofing. {len(explained)} jump or reappearance event(s) up to {GNSS_MAX_NM:g} nm "
-                           "not counted as a spoofing sign (assumption).")
-        if why:
-            reasons.append(f"{storm_text(storm)} noted, but a storm does not explain {why}.")
-        related["space_weather"] = {"g": storm["g"], "kp": storm["kp"], "source": storm["source"],
-                                    "origin": storm.get("origin"), "t": storm.get("t"), "not_counted": len(explained)}
-    reasons += [event["reason"] for event in events[:MAX_EVENT_REASONS]]
+    reasons = [summary] + [event["reason"] for event in events[:MAX_EVENT_REASONS]]
     if len(events) > MAX_EVENT_REASONS:
         reasons.append(f"...and {len(events) - MAX_EVENT_REASONS} more event(s).")
     return [{
         "detector": DETECTOR, "mmsi": vessel["mmsi"], "t": lead["t"], "position": lead["position"],
-        "strength": strength, "reasons": reasons, "related": related,
+        "strength": strength, "reasons": reasons,
+        "related": {"events": [{key: event[key] for key in ("kind", "t", "position", "distance_nm")}
+                               for event in events]},
         "label": vessel.get("label", "simulated"), "obs": {"spoof_signs": True} if why else {},
     }]
 
