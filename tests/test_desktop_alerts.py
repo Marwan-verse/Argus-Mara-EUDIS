@@ -378,7 +378,7 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.root.update()
         self.assertEqual(board.selected, alert)
         self.assertEqual(dialog.tag.cget('text'), 'REAL · LIVE AIS')
-        self.assertIn('MMSI 250000001', dialog.meta.cget('text'))
+        self.assertEqual(dialog.score.cget('text'), 'Score 9  ·  MMSI 250000001')
         self.assertIn('REAL', dialog.body.texts())
         self.assertNotIn('Open replay', self.actions())
         self.assertIn('Acknowledge', self.actions())

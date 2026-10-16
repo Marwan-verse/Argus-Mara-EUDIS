@@ -200,9 +200,11 @@ class RealAlerts:
 
     # ----- what the panel shows -------------------------------------------------------
     def ordered(self) -> list[str]:
-        """Alert ids, most severe first, then newest."""
-        return sorted(self.items, key=lambda identifier: (-RANK[self.items[identifier]["assessment"]["level"]],
-                                                          -self.items[identifier]["raised_t"], identifier))
+        """Alert ids: most severe first, then the higher score, then the newest."""
+        def key(identifier):
+            item = self.items[identifier]
+            return (-RANK[item["assessment"]["level"]], -item["assessment"]["score"], -item["raised_t"], identifier)
+        return sorted(self.items, key=key)
 
     def band(self, identifier: str) -> str:
         state = self.state[identifier]

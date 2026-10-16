@@ -122,6 +122,15 @@ class RealAlertTests(unittest.TestCase):
         self.assertEqual((self.real.band(ID), self.real.state[ID]['status']), ('high', 'New'))
         self.assertEqual(sum(text.startswith('Raised at') for _t, text in self.real.log_lines(ID)), 2)
 
+    def test_alerts_are_ordered_by_level_then_score_then_newest(self):
+        def ship(mmsi, level, score, raised_t):
+            item = alert(level, score, raised_t)
+            item.update(id=f'REAL-{mmsi}', mmsi=mmsi)
+            return item
+        self.real.update(answer(ship('1', 'high', 9, NOW), ship('2', 'high', 10, NOW - 60), ship('3', 'critical', 12, NOW - 600),
+                                ship('4', 'high', 9, NOW - 30)))
+        self.assertEqual(self.real.ordered(), ['REAL-3', 'REAL-2', 'REAL-1', 'REAL-4'])
+
     def test_a_failed_check_keeps_the_last_alerts_and_says_how_old_they_are(self):
         self.real.update(answer(alert()))
         self.real.update({'state': 'error', 'error': 'Cannot reach the Supabase database', 'checked_t': NOW + 300})

@@ -2242,12 +2242,12 @@ class ReviewDialog:
         if incident and RANK[incident["peak_level"]] > RANK[assessment["level"]]:
             level += f"  ·  PEAK {LEVEL_NAMES[incident['peak_level']].upper()}"
         self.level.configure(text=level, fg=STYLE[assessment["level"]][0])
-        self.score.configure(text=f"Score {assessment['score']}" + (f"  ·  {incident['id']}" if incident else ""))
+        suffix = (f"  ·  {incident['id']}" if incident else
+                  f"  ·  MMSI {item['mmsi']}" if item.get("label") == "real" else "")
+        self.score.configure(text=f"Score {assessment['score']}{suffix}")
         self.tag.configure(text=source(item)["long_tag"])
         self.name.configure(text=item["name"])
         meta = [item["vessel_type"]]
-        if item.get("label") == "real":
-            meta.insert(0, f"MMSI {item['mmsi']}")
         if item.get("length_m"):
             meta.append(f"{item['length_m']:.0f} m")
         meta += ["SOG n/a" if item["sog_kn"] is None else f"SOG {item['sog_kn']:.1f} kn",
