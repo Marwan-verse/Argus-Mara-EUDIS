@@ -37,7 +37,7 @@ vessel detections, and radar sees through cloud. Connect a free non-commercial t
 once with `python scripts/configure_gfw.py`, then press **Coast Watch → Fetch radar**
 (or run `python -m argus.gfw_sar fetch`). Each radar cell is compared with the team AIS
 at the radar time. *Radar contact without AIS* leads are violet on the map and listed in
-Incidents. Detections arrive about five days late. Powered by Global Fishing Watch. See
+Incidents. Detections arrive 4–5 days late. Powered by Global Fishing Watch. See
 [how it works and what was checked](docs/19-gfw-radar.md).
 
 > *"Ireland can crew two ships. Argus Mara gives them a hundred eyes."*

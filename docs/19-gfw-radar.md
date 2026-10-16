@@ -40,9 +40,9 @@ SAR detector. Each one is compared with the team AIS at the radar time:
    radar or AIS evidence reopens them. "Powered by Global Fishing Watch" is shown
    in the radar card, the details and the map attribution.
 
-**Timing limit.** GFW publishes detections about five days late, and the
+**Timing limit.** GFW publishes detections 4–5 days late (documented as 5; about 4 on 16 Oct), and the
 database AIS history starts on 15 Oct 2026 at 17:46 UTC. The first radar passes
-with team AIS will therefore appear around 20–21 Oct; older passes show
+with team AIS will therefore appear around 19–21 Oct; older passes show
 `no_contemporaneous_ais`. To compare older passes, import the Railway Parquet
 chunks (8–15 Oct; same recorder schema) with **Import AIS archive** or
 `python -m argus.satellite_workspace import-ais`, then run
@@ -65,7 +65,20 @@ Facts checked on 16 Oct 2026 in GFW's API documentation (no live token yet):
 | Caveats | about 20 m pixels, so most vessels under 15 m are missed; no detections within 1 km of shore; noise can cause false positives | [Data caveats](https://globalfishingwatch.org/our-apis/documentation/docs/v3/general-api-doc/data-caveats) |
 | Scene times | `sentinel-1-grd` items list start/end times and footprints; Sentinel-1C/1D passed Ireland around 06:55 and 18:05–18:22 UTC on 8–10 Oct 2026 | live query of the [Copernicus STAC](https://documentation.dataspace.copernicus.eu/APIs/STAC.html) catalogue |
 
-Not yet checked against the live API: the exact response wrapper (plain JSON
-or a ZIP with caveats; both are read), the real publication lag, and whether
-coordinates are exact centres rather than corners. The 1 km lead rule absorbs a
-half-cell offset.
+**Live check on 16 Oct 2026, with Misha's token:**
+- The report answer is plain JSON keyed `public-global-sar-presence:v4.0`.
+- For 2–16 Oct over the coastal bbox, GFW returned 303 unmatched and 630 matched
+  cells. The newest was from 12 Oct 18:00 UTC, so the lag was about 4 days.
+- Entry and exit timestamps cover a vessel's detections over the whole window, so
+  only equal values are used as an exact time.
+- For all 146 matched cells with an exact time, the Sentinel-1 scene midpoint from
+  the catalogue gave the same second. Scene timing therefore matches GFW's own.
+- A 14-day fetch took 18 s. It kept 562 cells in the belt and found 98 scenes.
+  Every cell was `no_contemporaneous_ais`, because those passes predate the
+  database history.
+- The database already holds AIS at the 15 Oct 18:05 and 16 Oct 06:55 UTC passes:
+  86 and 103 fixes around Dublin. Those passes will be compared once GFW publishes
+  them.
+
+Still unchecked: whether coordinates are exact centres rather than corners. The
+1 km lead rule absorbs a half-cell offset.
