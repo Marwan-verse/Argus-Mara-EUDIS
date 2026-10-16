@@ -23,7 +23,7 @@ from argus.space import finite
 API = 'https://api.tensorx.ai/v1'
 PILOT_USD = 20.0
 MAX_OUTPUT = 1536
-PROMPT_VERSION = 'maritime-review-v2'
+PROMPT_VERSION = 'maritime-review-v4'
 MODEL_REVISION = 'image-input-verified-v2'
 # Verified against https://tensorx.ai/pricing/ on 2026-10-15. No silent upgrade.
 # Require current account capability metadata as well as this dated price bound.
@@ -45,10 +45,15 @@ confused with ships. If uncertain, say so. Never claim exhaustive detection or
 proof of AIS shutdown or malicious conduct. Return JSON only with this shape:
 {"summary":"brief visible observations", "contacts":[{"x":0.5,"y":0.5,
 "confidence":"low|medium|high", "description":"brief visual evidence"}],
-"limitations":["visibility and interpretation limits"]}.
+"limitations":["visibility and interpretation limits"], "contact_limit_reached":false,
+"image_status":"usable|limited|unusable"}.
 x/y are fractional positions in this exact image, left-to-right/top-to-bottom,
 between 0 and 1. Maximum 24 contacts. Confidence is your subjective judgement,
-not a calibrated probability. Return an empty list if no contact is defensible.'''
+not a calibrated probability. Set contact_limit_reached to true if the output
+limit prevents listing further possible contacts. Return an empty list if no
+contact is defensible. Use image_status unusable for a blank or unreadable image;
+this is an abstention, never evidence of no ships. Limited means some visible
+features can be reviewed but visibility or resolution remains incomplete.'''
 
 
 def get_key():
@@ -138,22 +143,53 @@ def read_ledger(root):
     return value
 
 
+def mark_duplicate_contacts(contacts):
+    """Preserve observations but flag repeated model positions, including cached reviews."""
+    contacts = [dict(contact) for contact in contacts]
+    positions = {}
+    for contact in contacts:
+        if 'x' in contact and 'y' in contact:
+            positions.setdefault((contact.get('origin_window'), contact['x'], contact['y']), []).append(contact)
+    for group in positions.values():
+        if len(group) > 1:
+            for contact in group:
+                contact.update(overlap_ambiguous=True,
+                               duplicate_reason='Model reported multiple contacts at exactly the same image position')
+    return contacts
+
+
 def parse_result(value, scene):
     if not isinstance(value, dict) or not isinstance(value.get('summary'), str) or not isinstance(value.get('contacts'), list):
         raise ValueError('Vision response does not match the review schema')
     if len(value['contacts']) > 24 or not isinstance(value.get('limitations', []), list):
         raise ValueError('Vision response exceeds the review limits')
+    if not isinstance(value.get('contact_limit_reached', False), bool):
+        raise ValueError('Vision contact-limit flag must be boolean')
+    if any(not isinstance(item, str) for item in value.get('limitations', [])):
+        raise ValueError('Vision limitations must be text')
+    image_status = value.get('image_status', 'limited')
+    if image_status not in {'usable', 'limited', 'unusable'}:
+        raise ValueError('Vision image status must be usable, limited or unusable')
     contacts = []
     for index, contact in enumerate(value['contacts']):
         if (not isinstance(contact, dict) or contact.get('confidence') not in {'low', 'medium', 'high'} or
-                not isinstance(contact.get('description'), str)):
+                not isinstance(contact.get('description'), str) or 'x' not in contact or 'y' not in contact):
             raise ValueError('Invalid visual contact')
-        location = pixel_location(scene, contact['x'], contact['y'])
+        x, y = finite(contact['x'], 'x'), finite(contact['y'], 'y')
+        if scene.get('coordinate_space') == 'source_pixels':
+            if not 0 <= x <= 1 or not 0 <= y <= 1:
+                raise ValueError('Visual contact is outside the source image')
+            location = {'coordinate_space': 'source_pixels'}
+        else:
+            location = pixel_location(scene, x, y)
         contacts.append({**location, 'id': f'AI-{index+1}', 'label': 'assumption',
                          'confidence': contact['confidence'], 'description': contact['description'][:400],
-                         'x': contact['x'], 'y': contact['y'], 'ts': scene['acquired_utc']})
-    return {'summary': value['summary'][:1600], 'contacts': contacts,
-            'contact_limit_reached': len(contacts) >= 24,
+                         'x': x, 'y': y, 'ts': scene['acquired_utc']})
+    return {'summary': value['summary'][:1600],
+            'contacts': [] if image_status == 'unusable' else mark_duplicate_contacts(contacts),
+            'withheld_contacts': mark_duplicate_contacts(contacts) if image_status == 'unusable' else [],
+            'image_status': image_status, 'analysis_incomplete': image_status == 'unusable',
+            'contact_limit_reached': value.get('contact_limit_reached', False) or len(contacts) >= 24,
             'limitations': [str(item)[:400] for item in value.get('limitations', [])[:8]],
             'label': 'assumption', 'review_status': 'unreviewed'}
 
@@ -178,8 +214,10 @@ def visual_analysis(root, scene, image, question, *, transport=json_http):
         if (datetime.now(timezone.utc)-PRICE_VERIFIED).days > 30:
             raise ValueError('Verify current TensorX pricing before continuing the pilot')
         # Include mapping and acquisition UTC: identical pixels may have a different grid/date.
-        identity = json.dumps([PROMPT_VERSION, model['id'],
-                               {k: scene[k] for k in ('image_sha256', 'mercator_bounds', 'acquired_utc', 'sensor', 'label')},
+        mapping = {k: scene[k] for k in ('image_sha256', 'acquired_utc', 'sensor', 'label')}
+        mapping['mercator_bounds'] = scene.get('mercator_bounds') if scene.get('coordinate_space') == 'source_pixels' else scene['mercator_bounds']
+        mapping['coordinate_space'] = scene.get('coordinate_space', 'geographic')
+        identity = json.dumps([PROMPT_VERSION, model['id'], mapping,
                                question.strip()], sort_keys=True)
         cache_id = hashlib.sha256(identity.encode()).hexdigest()
         cache_path = root/'cache'/(cache_id+'.json')
@@ -227,6 +265,8 @@ def visual_analysis(root, scene, image, question, *, transport=json_http):
         except (KeyError, IndexError, TypeError, json.JSONDecodeError):
             raise ValueError('Incomplete vision response; reservation retained, no automatic retry') from None
         value.update({'model': model['id'], 'generated_utc': now_utc(), 'cache_id': cache_id,
+                      'prompt_version': PROMPT_VERSION, 'profile_revision': MODEL_REVISION,
+                      'input_image_sha256': scene['image_sha256'],
                       'question': question.strip(), 'usage': usage,
                       'image_input_verified': True,
                       'reported_cost_usd': actual, 'reservation_usd': reserve, 'cached': False})

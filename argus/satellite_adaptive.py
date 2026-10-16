@@ -136,7 +136,9 @@ def review_image(root, scene, image, question, *, analyse, dense=False):
                     raise ValueError('Saved detail-window image input is unverified')
                 parts.append(value)
                 points.extend(_global_points(scene, window, value))
-                if crowded(value):
+                if value.get('image_status') == 'unusable':
+                    state = 'unusable'
+                elif crowded(value):
                     state = 'capped'
             else:
                 state = entry.get('status', 'pending')

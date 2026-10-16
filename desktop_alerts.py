@@ -510,14 +510,25 @@ class AlertBoard:
         section = self.history_frame
         section.clear()
         summary = packet.get('summary', {})
+        worker = packet.get('worker', {})
+        unlinked = worker.get('state') == 'unlinked'
         section.add('title', f"FLEET HISTORY REVIEW · {self.history_lead_count}")
         text = (f"{summary.get('checked_vessels', 0)} / {summary.get('total_vessels', 0)} recorded vessels checked\n"
                 f"{summary.get('never_checked', 0)} never checked · {summary.get('new_evidence_pending', 0)} awaiting new evidence checks\n"
                 + source_health(summary)+'\n'
                 + packet.get('worker', {}).get('message', 'History inventory is loading.'))
-        if not packet.get('inventory_complete'):
+        if unlinked:
+            text = ('History checks are blocked: team database is not connected.\n'
+                    'Live map positions do not supply the recorded history needed for these checks.')
+        elif not packet.get('inventory_complete'):
             text += '\nInventory is still loading; missing entries are not clean results.'
         section.add('text', text)
+        if unlinked:
+            satellite = self.app.satellite
+            if satellite.remote:
+                section.add('text', 'The SOC host administrator must connect the team database on the host.')
+            else:
+                section.add('button', Link('Connect team database', satellite.connect_database, kind='button'))
         for row in packet.get('vessels', []):
             result = row.get('result') or {}
             findings = [f for f in result.get('findings', []) if f.get('review_required')]
@@ -544,6 +555,12 @@ class AlertBoard:
                                 f"{result.get('image_contacts', 0)} image contacts · "
                                 f"{result.get('images_without_ais', 0)} images without contemporaneous AIS\n"
                                 f"{result.get('partial_analysis_images', 0)} images with incomplete detail review")
+        if result.get('reviews_checked') and result.get('images_without_ais') == result.get('reviews_checked'):
+            self.evidence_status += ('\nComparison blocked: none of the checked images has AIS at acquisition time. '
+                                     'Image contacts alone cannot establish an AIS mismatch.')
+        if result.get('images_with_ais_conflicts'):
+            self.evidence_status += (f"\n{result['images_with_ais_conflicts']} images with conflicting AIS history; "
+                                     'unmatched-contact leads withheld pending source review.')
         if result.get('radar_detections'):
             self.evidence_status += (f"\n{result['radar_detections']} radar detections (Global Fishing Watch) · "
                                      f"{result.get('radar_leads', 0)} without AIS")
@@ -558,6 +575,8 @@ class AlertBoard:
         section.clear()
         section.add('title', f"SATELLITE / AIS REVIEW · {len(self.evidence_leads)} leads")
         section.add('text', self.evidence_status)
+        section.add('button', Link('Open satellite images and AIS coverage',
+                                  lambda: self.app.open_window('satellite'), kind='button'))
 
         def refilter():
             self.evidence_page = 0
@@ -964,7 +983,7 @@ class AlertBoard:
             shown = len(found)
         if not shown and self.level_filter != "low" and not self.app.vessel_reports.entries and not self.evidence_leads and not self.history_lead_count:
             self.empty.configure(text=("Fictional / simulated alerts hidden.\n"
-                                      "No satellite / AIS review leads loaded yet.")
+                                      "No real review leads available. See the history and image coverage status above.")
                                  if not self.show_demo_alerts.get() else
                                  ("No open incidents at this level." if self.level_filter else "No open incidents."))
             rows.append(EmptyRow(self, self.empty.cget("text")))

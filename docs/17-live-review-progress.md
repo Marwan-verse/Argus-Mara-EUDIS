@@ -1,5 +1,12 @@
 # Live review goal: acceptance evidence and remaining work
 
+**16 October update:** D89 deployed the complete database schema to
+`zibmytppznydhlggzlaq`, imported 11,989 local capture rows and verified automatic
+collection. The older project-access blockers below are historical. Native/host
+workers still need the new project's private key. D90's ongoing tracking,
+dark-contact, AI and Brain audit is in [the improvement record](20-tracking-brain-improvements.md);
+neither database deployment nor pipeline regression tests prove detector accuracy.
+
 The requested outcome remains: check every boat's stored history once if unchecked,
 make real evidence feed Incidents, expand and improve satellite review, list all
 boats, join images to AIS at the same time/location, and check AIS positions not

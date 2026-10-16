@@ -15,7 +15,7 @@ import time
 
 from argus import satellite, supabase_ais
 from argus.satellite_ais import ArchiveChanged, associate, attach_latest, historical_ais
-from argus.satellite_ai import PILOT_USD, get_key, read_ledger, visual_analysis
+from argus.satellite_ai import PILOT_USD, get_key, read_ledger, visual_analysis, mark_duplicate_contacts
 from argus.fleet_history import FleetHistoryWorker
 from argus.satellite_disposition import Dispositions, evidence_key
 
@@ -153,7 +153,9 @@ class SatelliteWorkspace:
             dense = screen(scene, self.image(identifier), self.scenes).get('candidate_count', 0) > 16
         visual = review_image(self.root/'ai', scene, self.image(identifier), question,
                               analyse=visual_analysis, dense=dense)
-        points = visual['contacts']
+        from argus.optical_localization import localize_optical
+        localization = localize_optical(scene, self.image(identifier), self.scenes, visual['contacts'])
+        points = localization.pop('contacts')
         excluded = 0
         if scene.get('quality_sha256'):
             from argus.satellite_screen import retain_water_contacts
@@ -161,7 +163,7 @@ class SatelliteWorkspace:
         elif automatic:
             raise ValueError('Automatic optical reviews require a verified quality mask')
         contacts = self.associate_current(points, ais, scene)
-        result = {'scene': scene, 'visual': visual, 'contacts': contacts, 'ais': ais,
+        result = {'scene': scene, 'visual': visual, 'contacts': contacts, 'ais': ais, 'localization': localization,
                   'budget': read_ledger(self.root/'ai'),
                   'assumptions': {'association_radius_km': .3, 'max_interpolation_gap_s': 600,
                                   'max_past_projection_age_s': 300},
@@ -214,6 +216,7 @@ class SatelliteWorkspace:
     def comparison_index(self):
         """All saved review leads and per-vessel results, independent of demo alerts."""
         rows, vessels, pending, reviewed, image_contacts, no_ais, partial = [], [], 0, 0, 0, 0, 0
+        ais_conflicts = 0
         for path in (self.root/'reviews').glob('*.json'):
             if not re.fullmatch(r'[0-9a-f]{24}\.json', path.name):
                 continue
@@ -229,6 +232,7 @@ class SatelliteWorkspace:
                 partial += bool(review.get('visual', {}).get('analysis_incomplete'))
                 image_contacts += len(review.get('contacts', []))
                 no_ais += not bool(review.get('ais', {}).get('vessels'))
+                ais_conflicts += bool(review.get('ais', {}).get('coverage', {}).get('excluded_vessels'))
                 confidences = {c.get('id'): c.get('confidence') for c in review.get('contacts', [])}
                 rows.extend(with_priority(self.dispositions.decorate(lead, evidence_key(review, lead)), confidences)
                             for lead in comparison.get('leads', []))
@@ -247,6 +251,7 @@ class SatelliteWorkspace:
                 'vessel_checks': vessels, 'reviews_checked': reviewed, 'reviews_pending': pending,
                 'image_contacts': image_contacts, 'images_without_ais': no_ais,
                 'partial_analysis_images': partial,
+                'images_with_ais_conflicts': ais_conflicts,
                 'radar_detections': radar_summary.get('detections', 0), 'radar_leads': len(radar),
                 'radar_newest_utc': radar_summary.get('newest_detection_utc'),
                 'complete_vessel_census': False}
@@ -273,7 +278,8 @@ class SatelliteWorkspace:
 
     def associate_current(self, points, ais, scene):
         from argus.satellite_capture import load_latest
-        contacts = attach_latest(associate(points, ais), load_latest(self.root/'scan/latest_ais.json'), scene['acquired_utc'])
+        contacts = attach_latest(associate(mark_duplicate_contacts(points), ais),
+                                 load_latest(self.root/'scan/latest_ais.json'), scene['acquired_utc'])
         for point in contacts:
             point['ambiguous'] = point.get('ambiguous', False) or point.get('overlap_ambiguous', False)
         return contacts
@@ -343,7 +349,18 @@ class SatelliteWorkspace:
                 # previous match, and latest fixes change independently of images.
                 ais = self.ais_for_scene(review['scene'])
                 review['ais'] = ais
-                review['contacts'] = self.associate_current(review['contacts'], ais, review['scene'])
+                from argus.optical_localization import localize_optical
+                raw = review['visual'].get('contacts')
+                if not isinstance(raw, list):
+                    raw = [p for p in review['contacts'] if not p.get('id', '').startswith('OPT-')]
+                localization = localize_optical(review['scene'], self.image(identifier), self.scenes, raw)
+                points = localization.pop('contacts')
+                if review['scene'].get('quality_sha256'):
+                    from argus.satellite_screen import retain_water_contacts
+                    points, excluded = retain_water_contacts(review['scene'], points, self.scenes)
+                    review['quality_excluded_contacts'] = excluded
+                review['localization'] = localization
+                review['contacts'] = self.associate_current(points, ais, review['scene'])
                 self.compare(review)
                 satellite.atomic_json(path, review)
                 return review

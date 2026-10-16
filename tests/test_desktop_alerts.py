@@ -136,6 +136,32 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertEqual(len([link for link in board.evidence_frame.links if link.kind == 'entry']), 1)
         self.assertTrue(all(v == 0 for v in board.counts().values()))
 
+    def test_missing_history_explains_empty_incidents_and_offers_connection(self):
+        board = self.board
+        board.refresh_history({'summary': {}, 'vessels': [], 'worker': {
+            'state': 'unlinked', 'message': 'Link the team database to check every vessel history.'}})
+        history_text = str(board.history_frame.blocks)
+        self.assertIn('History checks are blocked', history_text)
+        self.assertNotIn('Inventory is still loading', history_text)
+        with patch.object(self.app.satellite, 'connect_database') as connect:
+            # Rebuild the section so the link binds the mocked action.
+            board.history_signature = None
+            board.refresh_history({'summary': {}, 'vessels': [], 'worker': {'state': 'unlinked'}})
+            next(link for link in board.history_frame.links if link.text == 'Connect team database').invoke()
+            connect.assert_called_once_with()
+        self.app.soc_client = object()
+        try:
+            board.history_signature = None
+            board.refresh_history({'summary': {}, 'vessels': [], 'worker': {'state': 'unlinked'}})
+            self.assertFalse(any(link.text == 'Connect team database' for link in board.history_frame.links))
+            self.assertIn('host administrator', str(board.history_frame.blocks))
+        finally:
+            self.app.soc_client = None
+        board.refresh_evidence({'leads': [], 'reviews_checked': 8, 'images_without_ais': 8,
+                                'image_contacts': 17})
+        self.assertIn('Comparison blocked', board.evidence_status)
+        self.assertIn('at acquisition time', board.evidence_status)
+
     def test_satellite_analyst_outcome_is_saved_and_can_be_shown_again(self):
         import tempfile
         import time

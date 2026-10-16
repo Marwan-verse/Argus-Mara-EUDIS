@@ -61,6 +61,57 @@ class FakeTensorX:
 
 
 class SatelliteTests(unittest.TestCase):
+    def test_pixel_only_review_does_not_invent_geography_or_acquisition_time(self):
+        with tempfile.TemporaryDirectory() as temp:
+            _, scene, image = fixture(Path(temp)/'satellite')
+            scene.update(coordinate_space='source_pixels', acquired_utc=None)
+            scene.pop('mercator_bounds')
+            fake = FakeTensorX()
+            with patch('argus.satellite_ai.get_key', return_value='synthetic-key'):
+                value = visual_analysis(Path(temp)/'ai', scene, image, DEFAULT_QUESTION, transport=fake)
+            self.assertEqual(value['contacts'][0]['coordinate_space'], 'source_pixels')
+            self.assertNotIn('lat', value['contacts'][0])
+            self.assertNotIn('lon', value['contacts'][0])
+            self.assertIsNone(value['contacts'][0]['ts'])
+
+    def test_model_cap_and_duplicate_contacts_are_retained_as_uncertain(self):
+        with tempfile.TemporaryDirectory() as temp:
+            _, scene, _ = fixture(Path(temp)/'satellite')
+            point = {'x': .5, 'y': .5, 'confidence': 'low', 'description': 'Synthetic contact'}
+            value = parse_result({'summary': 'test', 'contacts': [point, point],
+                                  'contact_limit_reached': True}, scene)
+            self.assertTrue(value['contact_limit_reached'])
+            self.assertEqual(len(value['contacts']), 2)
+            self.assertTrue(all(p['overlap_ambiguous'] for p in value['contacts']))
+            unusable = parse_result({'summary': 'Image unreadable', 'contacts': [point],
+                                     'image_status': 'unusable'}, scene)
+            self.assertEqual(unusable['contacts'], [])
+            self.assertEqual(len(unusable['withheld_contacts']), 1)
+            self.assertTrue(unusable['analysis_incomplete'])
+            for bad in ({'summary': 'test', 'contacts': [], 'contact_limit_reached': 'false'},
+                        {'summary': 'test', 'contacts': [], 'limitations': [{}]},
+                        {'summary': 'test', 'contacts': [{'confidence': 'low', 'description': 'no coordinates'}]}):
+                with self.assertRaises(ValueError):
+                    parse_result(bad, scene)
+
+    def test_conflicting_vessel_does_not_hide_other_tracks_or_mix_epoch_metadata(self):
+        import csv
+        rows = [dict(mmsi=mmsi, msg_type='PositionReport', lat=53.33, lon=lon,
+                     sog=8, cog=90, recv_utc=WHEN, time_utc=WHEN, stream_id='current', label='real')
+                for mmsi, lon in [('123456789', -6.12), ('123456789', -6.14), ('987654321', -6.13)]]
+        rows.append(dict(mmsi='987654321', msg_type='ShipStaticData', ship_name='OLD EPOCH NAME',
+                         recv_utc='2026-10-13T11:59:00Z', stream_id='old', label='real'))
+        with tempfile.TemporaryDirectory() as temp:
+            with (Path(temp)/'input.csv').open('w', newline='') as stream:
+                writer = csv.DictWriter(stream, fieldnames=sorted(set().union(*(r.keys() for r in rows))))
+                writer.writeheader()
+                writer.writerows(rows)
+            result = historical_ais(temp, WHEN, AREA)
+            self.assertEqual([v['mmsi'] for v in result['vessels']], ['987654321'])
+            self.assertEqual(result['vessels'][0]['name'], '987654321')
+            self.assertEqual(result['coverage']['excluded_vessels'], [
+                {'mmsi': '123456789', 'reason': 'conflicting_positions_at_same_time'}])
+
     def test_mapping_is_from_grid_and_not_model_geographic_coordinates(self):
         with tempfile.TemporaryDirectory() as temp:
             _, scene, _ = fixture(Path(temp)/'satellite')

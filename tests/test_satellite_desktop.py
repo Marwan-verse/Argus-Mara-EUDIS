@@ -60,7 +60,9 @@ class SatelliteDesktopTests(unittest.TestCase):
                              'matched_mmsi': '123456789', 'ambiguous': False,
                              'candidates': [{'mmsi': '123456789', 'name': 'SYNTHETIC TEST SHIP', 'distance_m': 15,
                                 'nearest_fix_offset_s': 20, 'within_gate': True,
-                                'position_evidence': {'position_method': 'observed_fix', 'observation_time_assumed': True},
+                                'position_evidence': {'position_method': 'observed_fix', 'observation_time_assumed': True,
+                                    'temporal_support': {'center_radius_m': 200,
+                                                         'caveat': 'Screening assumption; not a confidence interval.'}},
                                 'broadcast_fields': {'destination': {'value': 'TEST PORT', 'received_utc': scene['acquired_utc']}},
                                 'latest': {'lat': 53.34, 'lon': -6.10, 'received_utc': '2026-10-13T13:00:00Z',
                                     'age_s': 30, 'stale': False, 'after_image': True, 'displacement_km': 2,
@@ -74,6 +76,19 @@ class SatelliteDesktopTests(unittest.TestCase):
                     self.assertEqual(satellite.selected_candidate['mmsi'], '123456789')
                     self.assertIn('TEST PORT', satellite.details.get('1.0', 'end'))
                     self.assertIn('RECEPTION-TIME ASSUMPTION', satellite.details.get('1.0', 'end'))
+                    self.assertIn('Temporal movement support: up to 200 m', satellite.details.get('1.0', 'end'))
+                    feature = {**point, 'id': 'OPT-1', 'candidates': [], 'matched_mmsi': None,
+                               'localization': {'status': 'feature_only', 'water_mask_verified': True}}
+                    satellite.show_contact(feature)
+                    self.assertIn('OPTICAL FEATURE · UNCLASSIFIED', satellite.contact_title.cget('text'))
+                    self.assertIn('verified water mask', satellite.contact_title.cget('text'))
+                    satellite.current['contacts'] = [feature]
+                    satellite.redraw()
+                    feature_labels = [app.map.itemcget(item, 'text') for item in app.map.find_withtag('satellite-contact-OPT-1')
+                                      if app.map.type(item) == 'text']
+                    self.assertTrue(any('unclassified optical feature' in label for label in feature_labels))
+                    satellite.current['contacts'] = [point]
+                    satellite.show_contact(point)
                     satellite.show_latest()
                     root.update()
                     self.assertTrue(app.map.find_withtag('satellite-latest'))

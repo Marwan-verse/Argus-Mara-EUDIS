@@ -6,6 +6,23 @@ the offline exercise and both demo JSON files remain unchanged.
 
 ## Deployment status and setup
 
+**16 October update (D89):** the new `argus-mara` project
+`zibmytppznydhlggzlaq` in marwan-verse's projects has all fleet-history and
+comparison migrations applied. Collection is active. The original project
+below remains inaccessible and unchanged. See [current deployment](../supabase/README.md)
+for connection instructions, imported recordings and the new keep-all-history
+storage policy. The worker still analyzes the latest 14 days, independently
+of the longer retained archive. A local secret key is still required.
+
+**D91 initial hosted check:** at the 16 October 13:33:30 UTC sync checkpoint,
+all 2,043 recorded ships had a saved Python result, no never-checked ships,
+no pending evidence and no active leases. The breakdown was 1,558 insufficient
+histories, 484 no-rule-cue results and one isolated cue. This was a one-time run
+through the connector using the existing lease/page/finish APIs. New evidence
+requeues vessels; ongoing automatic processing requires a configured worker.
+
+Original deployment record, 15 October:
+
 The new migration is **prepared and locally tested, not applied to the hosted
 Argus Mara database**. The connected Supabase account did not list that project;
 only an unrelated inactive project was accessible. This checkout also had no

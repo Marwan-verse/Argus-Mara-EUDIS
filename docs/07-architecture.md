@@ -220,6 +220,16 @@ with the existing private SOC host. Neither installs an OS scheduled task.
 
 ## Optional team database — 15 October 2026 (D74)
 
+D89 (16 October) deploys the complete schema to the user-selected new project
+`zibmytppznydhlggzlaq` in marwan-verse's projects, Ireland. The original project
+is unchanged. `ais_observations` additionally preserves complete received ship
+objects, and a forward migration disables automatic AIS history deletion.
+`scripts/export_ship_history_sql.py` prepares private idempotent import batches
+for the existing local capture archive; original CSV fields and source hashes
+remain stored alongside normalized query fields. The history worker's 14-day
+analysis window is separate from archive retention. See the current deployment
+in `supabase/README.md`; desktop/host secrets remain required for their access.
+
 `supabase/migrations/` holds the schema of the Supabase project `argus-mara`.
 Inside the database, `pg_cron` and `pg_net` copy the Railway AIS feed every 30
 seconds into the private `argus` schema; nothing on Railway changed.
