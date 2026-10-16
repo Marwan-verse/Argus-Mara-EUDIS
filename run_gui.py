@@ -836,8 +836,27 @@ class ArgusApp:
             text.configure(yscrollcommand=scrollbar.set)
             scrollbar.pack(side="right", fill="y")
             text.pack(fill="both", expand=True)
-            text.insert("1.0", (ROOT / "docs/08-sar-next-step.md").read_text(encoding="utf-8"))
-            text.configure(state="disabled")
+            from argus import s1_plan  # real Sentinel-1 looks first (D90, D92); reads files, never downloads
+            notes = (ROOT / "docs/08-sar-next-step.md").read_text(encoding="utf-8")
+            plan_job = {}
+
+            def show_plan():
+                # Every minute while open, so new catalogue answers from the app's service appear.
+                plan = s1_plan.window_text() + "\n\n" + notes
+                if text.get("1.0", "end-1c") != plan:
+                    top = text.yview()[0]
+                    text.configure(state="normal")
+                    text.delete("1.0", "end")
+                    text.insert("1.0", plan)
+                    text.configure(state="disabled")
+                    text.yview_moveto(top)
+                plan_job["after"] = text.after(60_000, show_plan)
+
+            def stop_plan(_event=None):
+                if plan_job.get("after"):
+                    text.after_cancel(plan_job.pop("after"))
+            text.bind("<Destroy>", stop_plan, add="+")
+            show_plan()
         elif key == "ports":
             self._build_port_directory(frame)
         elif key == "cables":
@@ -3050,6 +3069,8 @@ def main() -> int:
         if args.coast_watch:
             # After the satellite panel's own resume check (1.5 s) has run.
             root.after(2500, app.start_coast_watch)
+    from argus import s1_plan
+    s1_plan.start_service()  # D92: ESA plan at most daily, Copernicus catalogue every 30 min, in the background
     root.mainloop()
     return 0
 

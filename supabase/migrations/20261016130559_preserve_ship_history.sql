@@ -1,4 +1,4 @@
--- D89: retain received ship history, including all fields supplied by the feed.
+-- D95: retain received ship history, including all fields supplied by the feed.
 -- The legacy 14-day cleanup must never delete this project's AIS archive.
 do $$
 declare job record;

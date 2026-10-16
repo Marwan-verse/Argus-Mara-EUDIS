@@ -1,4 +1,4 @@
--- D91: raw corrections must remain evidence when normalized fixes conflict.
+-- D97: raw corrections must remain evidence when normalized fixes conflict.
 alter table argus.ais_observations add column position_received_utc timestamptz;
 alter table argus.ais_observations add column lat double precision;
 alter table argus.ais_observations add column lon double precision;

@@ -114,6 +114,55 @@ class DesktopAlertBoardTests(unittest.TestCase):
             self.assertTrue(self.map_tags('sim-alert:'))
             self.app.tools.settings_path = None
 
+    def test_one_queue_by_importance_real_leads_first_low_folded_away(self):
+        """D94: real leads join the severity bands ahead of simulated contacts; Low folds away (remembered)."""
+        from desktop_alerts import CardRow, HeaderRow, LeadRow
+        board = self.board
+
+        def lead(name, priority, day, **extra):
+            return {'id': name, 'name': name, 'mmsi': '123456789', 'title': f'{name} title', 'kind': 'image_without_ais',
+                    'acquired_utc': f'2026-10-{day:02d}T12:00:00Z', 'source_label': 'real', 'reason': 'Synthetic.',
+                    'scene_id': 'a' * 24, 'priority': priority, 'priority_reason': f'{priority} because', **extra}
+        leads = [lead('LOW-A', 'low', 10), lead('HIGH-A', 'high', 11), lead('MED-OLD', 'medium', 9),
+                 lead('UNKNOWN-NEW', None, 14), lead('LOW-B', 'low', 12),
+                 lead('LOW-CHANGED', 'low', 8, evidence_changed=True), lead('HIGH-KEYED', 'high', 13, evidence_key='k')]
+        board.refresh_evidence({'leads': leads, 'reviews_checked': 7, 'reviews_pending': 0})
+        self.root.update()
+
+        def queue():
+            found = []
+            for row in board.list.rows:
+                if isinstance(row, HeaderRow):
+                    found.append(row.key)
+                elif isinstance(row, LeadRow):
+                    found.append(row.lead.title.split(' · ')[0])
+                elif isinstance(row, CardRow):
+                    found.append('card')
+            return found
+
+        rows = queue()
+        high = rows.index('header:high')
+        # High: real leads first (newest first), then the simulated incident cards.
+        self.assertEqual(rows[high + 1:high + 3], ['HIGH-KEYED', 'HIGH-A'])
+        self.assertEqual(rows[high + 3], 'card')
+        medium = rows.index('header:medium')
+        self.assertEqual(rows[medium + 1:medium + 3], ['UNKNOWN-NEW', 'MED-OLD'])  # Unknown priority is shown
+        self.assertNotIn('LOW-A', rows)  # Low folds away by default
+        self.assertIn('header:low', rows)
+        self.assertEqual([board.tiles[f'{level}-count'].cget('text') for level in ('critical', 'high', 'medium', 'low')],
+                         ['6', '10', '14', '34'])
+        keyed = next(row.lead for row in board.list.rows if isinstance(row, LeadRow) and row.lead.title.startswith('HIGH-KEYED'))
+        self.assertEqual(keyed.secondary.text, 'Record analyst outcome')
+        self.assertEqual(keyed.tag, 'SAT · REAL')
+        board.toggle_low()
+        rows = queue()
+        low = rows.index('header:low')
+        self.assertEqual(rows[low + 1:low + 4], ['LOW-CHANGED', 'LOW-B', 'LOW-A'])  # Changed evidence first, then newest
+        self.assertIs(self.app.tools.settings['show_low_alerts'], True)
+        board.toggle_low()
+        self.assertNotIn('LOW-A', queue())
+        self.assertIs(self.app.tools.settings['show_low_alerts'], False)
+
     def test_satellite_leads_remain_visible_with_demo_hidden_and_page_all_results(self):
         board = self.board
         board.show_demo_alerts.set(False)

@@ -3,7 +3,7 @@
 An optional shared database for AIS history and satellite-versus-AIS comparison
 (decision D74). The offline exercise does not use it.
 
-## Current deployment — 16 October 2026 (D89)
+## Current deployment â€” 16 October 2026 (D95)
 
 The active project is **argus-mara** in **marwan-verse's projects**, region
 **eu-west-1 (Ireland)**, project ID `zibmytppznydhlggzlaq`:
@@ -38,7 +38,7 @@ original AIS radio message. Extra declarations are preserved as supplied,
 not validated identities. The private table has RLS and no public access.
 
 The 11,989 real rows in this computer's `data/ais/capture/` recordings from
-8–15 October were imported using `scripts/export_ship_history_sql.py`.
+8â€“15 October were imported using `scripts/export_ship_history_sql.py`.
 Imports retain original CSV fields and the source file's SHA-256 in
 `ais_observations`, plus queryable positions and supported static declarations.
 Import export time is `source_generated_utc`; original receipt times stay in
@@ -54,7 +54,7 @@ marker `data/satellite/database.link` is a local setting, not the database.
 No local key was available to connect this computer automatically. SOC hosts
 likewise need the new project's URL/key in their existing private configuration.
 
-D91 makes complete raw correction objects part of acquisition-time source-quality
+D97 makes complete raw correction objects part of acquisition-time source-quality
 checks. Conflicting positions and competing stream epochs appear in the private
 AIS RPC's `excluded_vessels`; the Python handoff and direct SQL comparison both
 withhold unsupported unmatched-image leads. SQL name/length lookups remain
@@ -68,7 +68,7 @@ retention cron, private-schema/RPC grants, RLS and the Supabase security advisor
 `node tests/test_ship_history_db.mjs` verifies no deletion, complete objects,
 corrections, duplicate imports and SQL escaping in isolated PostgreSQL.
 
-## Original deployment record — 15 October 2026
+## Original deployment record â€” 15 October 2026
 
 The following records describe the previous project and its then-pending work;
 the deployment above supersedes them.
@@ -107,7 +107,7 @@ PostgreSQL/PostGIS. This migration has not been applied to the hosted project.
 
 ## Connect a computer
 
-1. Supabase dashboard → project `argus-mara` → Project Settings → API Keys →
+1. Supabase dashboard â†’ project `argus-mara` â†’ Project Settings â†’ API Keys â†’
    Secret keys: create or copy a secret key (`sb_secret_...`). It can read and
    write the whole database: never paste it into chat, Git or a command line.
 2. Run `python scripts/configure_supabase.py` and paste the key when asked. It is
@@ -136,8 +136,8 @@ that only the secret key may call; the publishable key gets HTTP 401 (checked
 - AIS is only what the Railway collector receives from AISstream: partial coverage,
   and `received_utc` is the collector's receipt time, not the AIS message time.
 - Cloud collection starts on 16 October, supplemented by the 11,989 imported
-  real capture rows from 8�15 October. Older images still need acquisition-day AIS.
-- Received history is retained without automatic deletion (D89). Watch
+  real capture rows from 8–15 October. Older images still need acquisition-day AIS.
+- Received history is retained without automatic deletion (D95). Watch
   `database_mb` in `status` against the 500 MB free limit.
 - A free project can be paused after a period without use; check it before an event.
 

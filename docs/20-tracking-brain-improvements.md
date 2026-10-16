@@ -5,7 +5,7 @@ AI implementation and all aspects of Brain. Here "black knights" is interpreted
 as vessels with missing or inconsistent AIS identity, not a confirmed hostile
 category. This is an ongoing work record, not a completion declaration.
 
-## 16 October: input quality and honest association (D90)
+## 16 October: input quality and honest association (D96)
 
 - Brain's shared spoofing/route track cleaner sorts valid fixes before applying
   a replay cutoff, rejects nonfinite/boolean coordinates and timestamps,
@@ -36,7 +36,7 @@ results. This archive is too sparse to establish precision, recall or a false
 alarm rate. No-rule-cue results are not safety clearances. The script that
 produced the report did not change hosted fleet-check watermarks.
 
-## 16 October: hosted quality parity and initial fleet checks (D91)
+## 16 October: hosted quality parity and initial fleet checks (D97)
 
 `20261016132518_align_tracking_quality.sql` is deployed on the active project.
 It indexes valid receipt-time coordinates from complete archived observations,
@@ -69,7 +69,7 @@ Incoming evidence requeues ships normally. This one-time connector run is not
 a continuously deployed worker; desktop/SOC credentials are still required for
 ongoing automatic Python checks and local cache refresh.
 
-## 16 October: temporal support (D92)
+## 16 October: temporal support (D98)
 
 Acquisition-time joins now retain endpoint reachability in `argus/tracking.py`.
 A short interpolation uses the intersection of the two supporting fix circles;
@@ -93,7 +93,7 @@ positions queried. PostgreSQL/PostGIS tests verify old projections, long bracket
 recent supported projections and the unchanged identity gate. Python tests cover
 turns, both endpoint constraints, exact observations and expired/future-only fixes.
 
-## 16 October: imagery-pack evaluation and unusable-image abstention (D93)
+## 16 October: imagery-pack evaluation and unusable-image abstention (D99)
 
 The user identified `demo/imagery/` as existing evaluation material. Its manifest
 contains ten manually selected vessel-shaped regions, labelled assumptions, on
@@ -116,7 +116,7 @@ The existing compact optical triage, with its thresholds unchanged, recovered
 **6/10** selections at the same tolerance. This unmasked comparison can include
 land and port structures; its other features are unreviewed, not established false
 positives. `satellite_screen.compact_features` now exposes source-pixel locations
-for the same components the triage already counted. These components are not automatically classified as ships. D94 adds independent
+for the same components the triage already counted. These components are not automatically classified as ships. D100 adds independent
 pixel support as described below; held-out validation is still required.
 
 Vision prompt v4 adds usable/limited/unusable image status. Unusable output is an
@@ -147,7 +147,7 @@ Clean sources/crops, cached model answers and reports remain in ignored
 `data/satellite-imagery/` and `data/validation/`. `--analyse` explicitly requests
 up to ten bounded reviews, stops on failure, and skips completed/held results.
 
-## Independent optical locations (D94)
+## Independent optical locations (D100)
 
 New Sentinel-2 reviews retain raw model hints and their original coordinates.
 Only a unique, uncontested compact feature within an assumed 32 source pixels
@@ -188,6 +188,6 @@ checks cover eligibility, metadata retention, source types and public-role denia
 Remaining engineering work includes held-out localization validation, calibration of temporal uncertainty, robust data
 quality across every registered detector, empirical vision evaluation, global
 assignment parity (SQL still uses greedy association), and sustained live worker
-throughput. The new hosted database exists (D89) and the initial hosted backlog
-has been checked (D91); this computer still requires its project-specific secret
+throughput. The new hosted database exists (D95) and the initial hosted backlog
+has been checked (D97); this computer still requires its project-specific secret
 key for the native worker. Local work is not blocked by that configuration step.

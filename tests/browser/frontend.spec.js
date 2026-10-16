@@ -180,7 +180,7 @@ test("recorder produces a self-contained Svelte map with escaped broadcast names
   page,
 }) => {
   const directory = await mkdtemp(join(tmpdir(), "argus-recorder-browser-"));
-  const python = resolve(".venv/bin/python");
+  const python = resolve(process.platform === "win32" ? ".venv/Scripts/python.exe" : ".venv/bin/python");
   try {
     const seed = spawnSync(
       python,

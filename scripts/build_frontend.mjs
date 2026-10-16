@@ -27,6 +27,7 @@ for (const [entry, outfile, format] of [
   ["ui/src/live.js", "ui/live/dashboard.mjs", "esm"],
   ["ui/src/evidence.js", "ui/space/evidence.js", "iife"],
   ["ui/src/recorder.js", "ui/recorder.js", "iife"],
+  ["ui/src/admin.js", "ui/admin/app.mjs", "esm"],
 ]) {
   await build({
     entryPoints: [entry],

@@ -1,4 +1,4 @@
--- D94: independent pixel evidence and model positions remain auditable.
+-- D100: independent pixel evidence and model positions remain auditable.
 alter table argus.sat_contacts add column localization jsonb not null default '{}'::jsonb;
 alter table argus.sat_contacts drop constraint sat_contacts_source_check;
 alter table argus.sat_contacts add constraint sat_contacts_source_check check

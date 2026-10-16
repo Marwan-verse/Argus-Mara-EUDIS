@@ -1,4 +1,4 @@
--- D93: unreadable image output is abstention, never a zero-ship observation.
+-- D99: unreadable image output is abstention, never a zero-ship observation.
 -- compare_scene builds a per-call temporary table, so it must be volatile and
 -- refer to the table explicitly in pg_temp.
 create or replace function argus.compare_scene(p_scene text, gate_m double precision default 300,

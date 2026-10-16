@@ -1,7 +1,7 @@
 {
  "name": "Argus Mara response fleet (exercise)",
  "label": "assumption",
- "note": "Base locations are public places with approximate coordinates. Speeds, readiness, ranges, wind limits, drone sites and the patrol ship position are team assumptions for the exercise, not doctrine or real tasking. Irish Coast Guard is a civilian service; tasking it to look at a vessel is our assumption. Not part of the demo/scenario.json contract.",
+ "note": "Base locations are public places with approximate coordinates. Speeds, readiness, ranges, wind limits, drone sites and the patrol ship position are team assumptions for the exercise, not doctrine or real tasking. Irish Coast Guard is a civilian service; tasking it to look at a vessel is our assumption. The next Sentinel-1 look is read from ESA's published acquisition plan (real, planned, not confirmed). Not part of the demo/scenario.json contract.",
  "wind": {"normal_kn": 15, "storm_kn": 30, "label": "exercise value, not live weather"},
  "assets": [
   {"id": "MPA1", "name": "Air Corps maritime patrol aircraft", "kind": "aircraft", "counts": true,
@@ -38,6 +38,6 @@
    "base": "Dublin coast radio", "lat": 53.35, "lon": -6.20, "base_label": "approximate",
    "readiness_min": 2, "range_nm": 30, "label": "assumption"},
   {"id": "SAT", "name": "Next Sentinel-1 look", "kind": "satellite", "counts": false,
-   "base": "Copernicus Sentinel-1", "pass_times_s": [20400], "label": "assumption"}
+   "base": "ESA Sentinel-1 acquisition plan (argus.s1_plan)", "plan": "esa_s1", "label": "real"}
  ]
 }

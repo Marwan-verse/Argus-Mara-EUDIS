@@ -1,4 +1,4 @@
--- D92: endpoint reachability is not an exact AIS position or error probability.
+-- D98: endpoint reachability is not an exact AIS position or error probability.
 create function argus.ais_temporal_support(identity_mmsi text, epoch text, t timestamptz,
                                            tb timestamptz, ta timestamptz, method text,
                                            estimate_lat double precision, estimate_lon double precision)

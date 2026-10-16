@@ -6,6 +6,8 @@ RUN python -m pip install --no-cache-dir -r soc/requirements.txt \
     && groupadd --gid 10001 argus && useradd --uid 10001 --gid 10001 --no-create-home argus \
     && mkdir /data && chown argus:argus /data
 COPY argus/ /app/argus/
+COPY ui/admin/ /app/ui/admin/
+COPY ui/styles.css /app/ui/styles.css
 USER 10001:10001
 EXPOSE 8080
 CMD ["python", "-m", "argus.collab_server"]

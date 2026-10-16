@@ -10,7 +10,11 @@ ciphertext; `argus/collab_crypto.py` and `collab_client.py` run on endpoints.
 and administration. `soc/` provides an isolated Docker deployment behind HTTPS.
 See [SOC security boundaries and handoff](../soc/README.md). Existing map pings
 are shared annotations; no user-created threat alert or remote response is added.
-Both demo JSON contracts remain unchanged. The browser frontend is unchanged.
+Both demo JSON contracts remain unchanged. Private browser administration (D89)
+serves fixed assets under `/admin/` through the SOC relay, with cookie sessions and
+same-origin CSRF checks in `argus/admin_web.py`. It reuses the account/group
+handlers and store; the static offline demo remains independent.
+See [the browser panel guide](../soc/ADMIN-PANEL.md).
 
 **Manual vessel reports (D67, 15 October):** `argus/vessel_reports.py` validates
 structured analyst reports and groups an in-memory inbox by vessel identity and
@@ -220,7 +224,7 @@ with the existing private SOC host. Neither installs an OS scheduled task.
 
 ## Optional team database — 15 October 2026 (D74)
 
-D89 (16 October) deploys the complete schema to the user-selected new project
+D95 (16 October) deploys the complete schema to the user-selected new project
 `zibmytppznydhlggzlaq` in marwan-verse's projects, Ireland. The original project
 is unchanged. `ais_observations` additionally preserves complete received ship
 objects, and a forward migration disables automatic AIS history deletion.

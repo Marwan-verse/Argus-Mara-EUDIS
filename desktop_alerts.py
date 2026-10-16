@@ -62,9 +62,14 @@ DETECTOR_REASONS = 4
 IN_TIME, LATE, UNAVAILABLE = "#47c7da", "#ec8a3c", "#7d8b97"
 RESPONSE_SHAPE = {"aircraft": "square", "helicopter": "square", "ship": "circle", "drone": "diamond",
                   "hail": "ring"}
-# List groups after the open incidents by level: quiet incidents, watched contacts, closed incidents.
-GROUP_TITLES = {"critical": "CRITICAL", "high": "HIGH", "medium": "MEDIUM", "quiet": "QUIET · BELOW MEDIUM",
-                "watching": "WATCHING · LOW, NO INCIDENT", "closed": "CLOSED"}
+# D94: one queue by importance. Within a band, real data comes before simulated contacts; Low (quiet
+# incidents, watched contacts, low-priority satellite leads) and Closed fold away until asked for.
+GROUP_TITLES = {"critical": "CRITICAL", "high": "HIGH", "medium": "MEDIUM", "low": "LOW · QUIET AND WATCHED",
+                "closed": "CLOSED AND REVIEWED", "sources": "SOURCES · WHAT WAS CHECKED"}
+# A satellite or radar lead's review priority (argus.satellite_workspace.with_priority) decides its band;
+# an unknown priority is shown, not folded away.
+LEAD_BAND = {"high": "high", "medium": "medium", "low": "low", None: "medium"}
+PRIORITY_ORDER = {"high": 0, "medium": 1, None: 1, "low": 2}
 # How often the panel checks the exercise replay clock.
 FOLLOW_MS = 250
 
@@ -219,8 +224,61 @@ class CardRow:
         return height
 
 
+class Lead(Link):
+    """A real-data entry in the queue: a satellite or radar lead, a vessel history or an analyst report."""
+
+    def __init__(self, text: str, command, *, band: str, tag: str, when, title: str, lines: str, action: str,
+                 subtitle: str, detail: str, attention: bool = False, secondary: Link | None = None):
+        super().__init__(text, command, kind="entry", title=title, lines=lines, action=action)
+        self.band, self.tag, self.when = band, tag, str(when or "")
+        self.subtitle, self.detail, self.attention, self.secondary = subtitle, detail, attention, secondary
+        self.key = ""
+        self.hovered = False
+
+
+class LeadRow:
+    """A real lead drawn like an incident card: band stripe, name, time and source tag, what, status."""
+
+    def __init__(self, board, lead: Lead):
+        self.board, self.lead, self.key = board, lead, lead.key
+
+    def draw(self, view, y: float, width: float) -> float:
+        board, ui, lead = self.board, self.board.ui, self.lead
+        canvas = view.canvas
+        tags = (f"row:{self.key}", view.action(lead.command))
+        name_h = board.name_font.metrics("linespace")
+        line_h = board.meta_font.metrics("linespace")
+        reason_h = board.reason_font.metrics("linespace")
+        height = 10 + name_h + 2 + reason_h + 3 + line_h + (3 + line_h if lead.secondary else 0) + 10
+        canvas.create_rectangle(0, y, width, y + height, fill=ROW_HOVER if lead.hovered else ui.CARD,
+                                outline="", tags=tags)
+        canvas.create_line(12, y + height - 1, width - 4, y + height - 1, fill=ui.LINE, tags=tags)
+        stripe = ui.LINE if lead.band == "closed" else STYLE.get(lead.band, STYLE["none"])[0]
+        canvas.create_rectangle(6, y + 9, 9, y + height - 9, fill=stripe, outline="", tags=tags)
+        x, right, top = 20, width - 12, y + 10
+        canvas.create_text(right, top + 2, text=lead.tag, anchor="ne", fill=ui.TEAL, font=board.tag_font, tags=tags)
+        room = right - board.tag_font.measure(lead.tag) - 8
+        when = short_utc(lead.when) if lead.when else ""
+        if when:
+            canvas.create_text(room, top + 1, text=when, anchor="ne", fill=ui.MUTED, font=board.meta_font, tags=tags)
+            room -= board.meta_font.measure(when) + 8
+        canvas.create_text(x, top, text=clip(lead.title, board.name_font, max(60, room - x)), anchor="nw",
+                           fill=ui.INK, font=board.name_font, tags=tags)
+        top += name_h + 2
+        canvas.create_text(x, top, text=clip(lead.subtitle, board.reason_font, right - x), anchor="nw",
+                           fill=SECONDARY, font=board.reason_font, tags=tags)
+        top += reason_h + 3
+        canvas.create_text(x, top, text=clip(lead.detail, board.meta_font, right - x), anchor="nw",
+                           fill=STYLE["medium"][0] if lead.attention else ui.MUTED, font=board.meta_font, tags=tags)
+        top += line_h
+        if lead.secondary:
+            canvas.create_text(x, top + 3, text=lead.secondary.text.upper() + "  ›", anchor="nw", fill=ui.TEAL,
+                               font=(SANS, 8, "bold"), tags=(f"row:{self.key}", view.action(lead.secondary.command)))
+        return height
+
+
 class HeaderRow:
-    """A group title with its count; Watching and Closed fold open and shut when clicked."""
+    """A band title with its count; Low and Closed fold open and shut when clicked."""
 
     def __init__(self, board, key: str, text: str, count: str, gap: int, command=None):
         self.board, self.key, self.text, self.count, self.gap, self.command = board, key, text, count, gap, command
@@ -282,9 +340,11 @@ class SectionRow:
         top = y + 12
         background = canvas.create_rectangle(0, y, width, y + 1, fill=ui.CARD, outline="", tags=(row,))
         for kind, *values in self.section.blocks:
+            if kind == "entry" and isinstance(values[0], Lead):
+                continue  # Drawn in its band of the queue (LeadRow), not here
             if kind == "title":
-                canvas.create_text(x, top, text=values[0], anchor="nw", fill=ui.INK, font=(SANS, 10, "bold"), tags=(row,))
-                top += 22
+                canvas.create_text(x, top, text=values[0], anchor="nw", fill=ui.MUTED, font=(SANS, 8, "bold"), tags=(row,))
+                top += 18
             elif kind == "text":
                 item = canvas.create_text(x, top, text=values[0], anchor="nw", fill=ui.MUTED, font=(SANS, 9),
                                           width=right - x, tags=(row,))
@@ -366,7 +426,8 @@ class AlertBoard:
         self.hovered: str | None = None
         self.level_filter: str | None = None
         self.show_closed = False
-        self.show_watching = False
+        self.show_low = app.tools.settings.get("show_low_alerts", False) is True  # D94, saved like the demo switch
+        self.leads: dict[str, Lead] = {}
         self.evidence_leads = []
         self.show_reviewed_evidence = tk.BooleanVar(app.root, value=False)
         self.evidence_page = 0
@@ -432,7 +493,7 @@ class AlertBoard:
             command=self.toggle_demo_alerts, font=ctk.CTkFont(SANS, 12),
             checkbox_width=16, checkbox_height=16, height=26)
         self.demo_switch.pack(fill="x", padx=16, pady=(8, 0))
-        tk.Label(panel, text="Satellite / AIS review leads appear below.\n"
+        tk.Label(panel, text="Real leads rank first in their band; Low is folded.\n"
                  "Live AIS alone does not establish a threat.",
                  bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9), justify="left", anchor="w",
                  wraplength=250).pack(fill="x", padx=(20, 16), pady=(4, 6))
@@ -462,7 +523,7 @@ class AlertBoard:
             cell.grid(row=0, column=index * 2, sticky="nsew")
             line = tk.Frame(cell, bg=ui.CARD)
             line.pack(pady=(4, 0))
-            code = tk.Label(line, text="WATCH" if level == "low" else CODES[level], bg=ui.CARD, fg=ui.MUTED,
+            code = tk.Label(line, text=CODES[level], bg=ui.CARD, fg=ui.MUTED,
                             font=(MONO, 9), cursor="hand2")
             code.pack(side="left")
             count = tk.Label(line, text="0", bg=ui.CARD, fg=STYLE[level][0], font=(MONO, 12, "bold"), cursor="hand2")
@@ -471,7 +532,8 @@ class AlertBoard:
             underline.pack(fill="x", padx=12, pady=(5, 0))
             for widget in (cell, line, code, count, underline):
                 widget.bind("<Button-1>", lambda _event, value=level: self.set_filter(value))
-            app.tools.attach_tooltip(cell, "Show watched contacts: Low, not incidents" if level == "low"
+            app.tools.attach_tooltip(cell, "Show the Low band: quiet incidents, watched contacts, low-priority leads"
+                                     if level == "low"
                                      else f"Show {LEVEL_NAMES[level].lower()} incidents only")
             self.tiles[level] = (code, underline)
             self.tiles[level + "-count"] = count
@@ -535,9 +597,13 @@ class AlertBoard:
             title = f"{result.get('name') or row['mmsi']} · {row['mmsi']}"
             lines = (f"Motion history requires review\nChecked {short_utc(row.get('checked_utc'))} · derived assumption\n"
                      + '\n'.join(f['reason'] for f in findings[-2:]))
-            section.add('entry', Link(f"{title}\n{lines}\nOpen history evidence",
+            section.add('entry', Lead(f"{title}\n{lines}\nOpen history evidence",
                                       lambda mmsi=row['mmsi']: self.app.satellite.open_fleet(mmsi),
-                                      title=title, lines=lines, action="Open history evidence"), STYLE["medium"][0])
+                                      band="medium", tag="HISTORY · REAL", when=row.get('checked_utc'), title=title,
+                                      lines=lines, action="Open history evidence",
+                                      subtitle="Motion history requires review",
+                                      detail=findings[-1]['reason'] if findings else "Derived assumption"),
+                        STYLE["medium"][0])
         section.add('button', Link('Open all vessel histories', lambda: self.app.satellite.open_fleet(), kind='button'))
         if relayout:
             self.relayout()
@@ -584,8 +650,13 @@ class AlertBoard:
             self.relayout(top=True)
         section.add('toggle', 'Show reviewed outcomes', self.show_reviewed_evidence, refilter)
         visible = [r for r in self.evidence_leads if self.show_reviewed_evidence.get() or r.get('review_status') not in CLOSED_OUTCOMES]
+        # D94: evidence that changed first, then review priority, then the newest image.
+        visible.sort(key=lambda r: str(r.get('acquired_utc') or ''), reverse=True)
+        visible.sort(key=lambda r: (not r.get('evidence_changed'), PRIORITY_ORDER.get(r.get('priority'), 1)))
         self.evidence_page = min(self.evidence_page, max(0, (len(visible)-1)//50))
-        section.add('text', f'{len(visible)} shown · analyst outcomes retain the original evidence')
+        low = sum(1 for r in visible if r.get('priority') == 'low' and r.get('review_status') not in CLOSED_OUTCOMES)
+        section.add('text', f'{len(visible)} shown · {low} low-priority folded under LOW · '
+                            'analyst outcomes retain the original evidence')
         start = self.evidence_page*50
         for lead in visible[start:start+50]:
             state = OUTCOMES.get(lead.get('review_status'), 'Unreviewed')
@@ -598,14 +669,20 @@ class AlertBoard:
             lines = f"{lead['title']}\n{source} · {state}\n{lead['reason']}"
             action = lead.get('action_text') or 'Open image evidence'
             closed = lead.get('review_status') in CLOSED_OUTCOMES
-            section.add('entry', Link(f"{title}\n{lines}\n{action}", lambda row=lead: self.open_evidence(row),
-                                      title=title, lines=lines, action=action),
-                        self.ui.MUTED if closed else STYLE["high"][0])
+            secondary = None
             if lead.get('evidence_key'):
                 def review(row=lead):
                     from desktop_evidence_review import EvidenceReview
                     EvidenceReview(self, row)
-                section.add('button', Link('Record analyst outcome', review, kind='button'))
+                secondary = Link('Record analyst outcome', review, kind='button')
+            band = "closed" if closed else LEAD_BAND.get(lead.get('priority'), "medium")
+            why = lead.get('priority_reason') or lead['reason']
+            section.add('entry', Lead(f"{title}\n{lines}\n{action}", lambda row=lead: self.open_evidence(row),
+                                      band=band, tag="RADAR · REAL" if lead.get('radar') else "SAT · REAL",
+                                      when=lead.get('acquired_utc'), title=title, lines=lines, action=action,
+                                      subtitle=lead['title'], detail=f"{state} · {why}",
+                                      attention=bool(lead.get('evidence_changed')), secondary=secondary),
+                        self.ui.MUTED if closed else STYLE["high"][0])
         if len(visible) > 50:
             def turn(delta):
                 self.evidence_page += delta
@@ -637,8 +714,10 @@ class AlertBoard:
                 vessel = report["vessel"]
                 title = f"{vessel['name']} · {vessel['id']}"
                 lines = f"{report['category']}\n{entries[-1]['sender']} · {vessel['label']} · {len(entries)} report(s)"
-                link = Link(f"{title}\n{lines}\nReview concern", lambda found=entries: review_reports(self.app, found),
-                            title=title, lines=lines, action="Review concern")
+                link = Lead(f"{title}\n{lines}\nReview concern", lambda found=entries: review_reports(self.app, found),
+                            band="high", tag="REPORT · ANALYST", when=report.get('created_utc'), title=title,
+                            lines=lines, action="Review concern", subtitle=report['category'],
+                            detail=f"{entries[-1]['sender']} · {vessel['label']} · {len(entries)} report(s)")
                 section.add('entry', link, self.ui.TEAL)
                 self.report_cards.append(link)
         if relayout:
@@ -911,17 +990,20 @@ class AlertBoard:
 
     def hover_row(self, key: str | None) -> None:
         """The pointer moved onto another row of the list (None: off the list)."""
-        previous, self.hovered = self.hovered, key if key in self.cards else None
+        previous, self.hovered = self.hovered, key if key in self.cards or key in self.leads else None
         for identifier in {previous, self.hovered} - {None}:
             if identifier in self.cards:
                 self.paint(identifier)
+            elif identifier in self.leads:
+                self.leads[identifier].hovered = identifier == self.hovered
+                self.list.redraw(identifier)
 
     def matches_filter(self, identifier: str) -> bool:
         group = self.group(identifier)
         if self.level_filter is None:
             return True
         if self.level_filter == "low":
-            return group == "watching"
+            return group in ("watching", "quiet")  # The Low band: watched contacts and quiet incidents
         return group == self.level_filter
 
     def visible_items(self) -> list[dict]:
@@ -933,17 +1015,31 @@ class AlertBoard:
         incident = self.incident(identifier)
         return (not (incident and incident.get("needs_review_again")), sort_key(self.by_id[identifier]))
 
+    def current_leads(self) -> list[Lead]:
+        """Real entries of the shown sources, each with its band (D94)."""
+        found = []
+        for section in (self.reports_frame, self.evidence_frame, self.history_frame):
+            if section.shown:
+                found.extend(block[1] for block in section.blocks if block[0] == "entry" and isinstance(block[1], Lead))
+        return found
+
     def relayout(self, top: bool = False) -> None:
         ui = self.ui
         rows = []
         for section in (self.history_frame, self.evidence_frame, self.reports_frame):
             section.shown = section is not self.reports_frame or bool(self.app.vessel_reports.entries)
-            if section.shown and section.blocks:
-                rows.append(SectionRow(self, section))
         groups = {item["id"]: self.group(item["id"]) for item in self.items}
         first = True
         self.order = []
-        toggles = {"closed": self.toggle_closed, "watching": self.toggle_watching}
+        self.leads = {}
+        bands: dict[str, list[Lead]] = {band: [] for band in GROUP_TITLES}
+        for lead in self.current_leads():
+            bands.setdefault(lead.band, []).append(lead)
+        for band in bands.values():
+            # Newest first, then anything whose evidence changed (stable sort keeps the rest in order).
+            band.sort(key=lambda lead: lead.when, reverse=True)
+            band.sort(key=lambda lead: not lead.attention)
+        toggles = {"closed": self.toggle_closed, "low": self.toggle_low}
 
         def header(key, count):
             nonlocal first
@@ -957,55 +1053,90 @@ class AlertBoard:
             self.order.append(item["id"])
             first = False
 
+        def lead_row(lead):
+            nonlocal first
+            lead.key = f"lead:{len(self.leads)}"
+            lead.hovered = lead.key == self.hovered
+            self.leads[lead.key] = lead
+            rows.append(LeadRow(self, lead))
+            first = False
+
         def members(group):
             return sorted((item for item in self.items if groups[item["id"]] == group
                            and self.matches_filter(item["id"])), key=lambda item: self._order(item["id"]))
 
+        def band_leads(band):
+            return bands.get(band, []) if self.level_filter in (None, band) else []
+
         mode = self.sort_mode.get()
         shown = 0
         if mode == "Severity":
-            for group in ("critical", "high", "medium", "quiet"):
-                found = members(group)
-                if found:
-                    header(group, len(found))
+            for band in ("critical", "high", "medium"):
+                leads, found = band_leads(band), members(band)
+                if leads or found:
+                    header(band, len(leads) + len(found))
+                    for lead in leads:  # Real data first
+                        lead_row(lead)
                     for item in found:
                         card(item)
-                    shown += len(found)
+                    shown += len(leads) + len(found)
         else:
             def time_key(item):
                 observations = item["observations"]
                 eta = 0.0 if observations.get("in_corridor") else observations.get("eta_min")
                 return (eta if eta is not None else 1e9, sort_key(item))
             key = time_key if mode == "Time to asset" else (lambda item: (item.get("raised_min_ago", 0), sort_key(item)))
-            found = sorted((item for group in ("critical", "high", "medium", "quiet") for item in members(group)), key=key)
+            for band in ("critical", "high", "medium"):
+                for lead in band_leads(band):
+                    lead_row(lead)
+                    shown += 1
+            found = sorted((item for group in ("critical", "high", "medium") for item in members(group)), key=key)
             for item in found:
                 card(item)
-            shown = len(found)
-        if not shown and self.level_filter != "low" and not self.app.vessel_reports.entries and not self.evidence_leads and not self.history_lead_count:
+            shown += len(found)
+        if not shown and self.level_filter != "low":
             self.empty.configure(text=("Fictional / simulated alerts hidden.\n"
                                       "No real review leads available. See the history and image coverage status above.")
                                  if not self.show_demo_alerts.get() else
-                                 ("No open incidents at this level." if self.level_filter else "No open incidents."))
+                                 ("Nothing at this level." if self.level_filter else
+                                  "Nothing above Low. Low items are folded below."))
             rows.append(EmptyRow(self, self.empty.cget("text")))
-        watching = members("watching")
-        if watching:
-            expanded = self.show_watching or self.level_filter == "low"
-            header("watching", f"{len(watching)} · {'hide' if expanded else 'show'}")
+        low_leads = bands.get("low", []) if self.level_filter in (None, "low") else []
+        quiet, watching = members("quiet"), members("watching")
+        low_count = len(low_leads) + len(quiet) + len(watching)
+        if low_count:
+            expanded = self.show_low or self.level_filter == "low"
+            header("low", f"{low_count} · {'hide' if expanded else 'show'}")
             if expanded:
-                for item in watching:
+                for lead in low_leads:
+                    lead_row(lead)
+                for item in quiet + watching:
                     card(item)
+        closed_leads = bands.get("closed", []) if self.level_filter is None else []
         closed = members("closed")
-        if closed:
-            header("closed", f"{len(closed)} · {'hide' if self.show_closed else 'show'}")
-            if self.show_closed:
+        if closed or closed_leads:
+            expanded = self.show_closed or bool(closed_leads and self.show_reviewed_evidence.get())
+            header("closed", f"{len(closed) + len(closed_leads)} · {'hide' if expanded else 'show'}")
+            if expanded:
+                for lead in closed_leads:
+                    lead_row(lead)
                 for item in closed:
                     card(item)
+        # The sources' own summaries (how much was checked, how fresh) close the list.
+        sources = [section for section in (self.history_frame, self.evidence_frame)
+                   if section.shown and any(block[0] != "entry" for block in section.blocks)]
+        if sources:
+            header("sources", "")
+            rows.extend(SectionRow(self, section) for section in sources)
         counts = {level: 0 for level in LEVELS}
         for group in groups.values():
             if group in counts:
                 counts[group] += 1
-            elif group == "watching":
+            elif group in ("watching", "quiet"):
                 counts["low"] += 1
+        for lead in self.current_leads():
+            if lead.band in counts:
+                counts[lead.band] += 1
         for level in LEVELS:
             code, underline = self.tiles[level]
             active = self.level_filter == level
@@ -1068,12 +1199,17 @@ class AlertBoard:
         self.show_closed = not self.show_closed
         self.relayout()
 
-    def toggle_watching(self) -> None:
+    def toggle_low(self) -> None:
+        """Open or fold the Low band (quiet incidents, watched contacts, low-priority leads); remembered."""
         if self.level_filter == "low":
             self.set_filter(None)
             return
-        self.show_watching = not self.show_watching
+        self.show_low = not self.show_low
+        self.app.tools.settings["show_low_alerts"] = self.show_low
+        self.app.tools.schedule_save()
         self.relayout()
+
+    toggle_watching = toggle_low  # The older name, kept for callers and tests
 
     def set_width(self, pixels: int) -> None:
         wrap = max(150, pixels - 92)
