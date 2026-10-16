@@ -92,8 +92,11 @@ class MapMotionTests(unittest.TestCase):
             mx, my = app.motion.margin
             self.assertGreater(mx, 0)
             self.assertEqual(canvas.coords('motion-picture'), [40.0 - mx, 20.0 - my])
-            self.assertNotEqual(app.motion.picture.getpixel((round(x) + mx, round(y) + my)), app.motion._sea(),
-                                'the moving picture lacks the cable that was drawn there')
+            # A 1-pixel line may land one pixel off after rounding: look around the vertex.
+            around = [app.motion.picture.getpixel((round(x) + mx + dx, round(y) + my + dy))
+                      for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+            self.assertTrue(any(pixel != app.motion._sea() for pixel in around),
+                            'the moving picture lacks the cable that was drawn there')
             self.assertEqual(canvas.coords(canvas.find_withtag('map_title')[0]), title)
             app._draw_map()  # A live AIS update during the drag waits for the drag to end
             self.assertTrue(app.motion.pending_redraw)
