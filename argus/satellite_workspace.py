@@ -20,6 +20,28 @@ from argus.fleet_history import FleetHistoryWorker
 from argus.satellite_disposition import Dispositions, evidence_key
 
 DEFAULT_QUESTION = 'Find possible vessels in this image and describe the visible evidence and uncertainty.'
+PRIORITY_REASONS = {
+    'ais_not_detected': ('high', 'AIS places a large vessel on fully clear water, but the image shows nothing within 1 km'),
+    'radar_without_ais': ('medium', 'Radar sees a vessel with no AIS from Global Fishing Watch or the team feed'),
+}
+CONFIDENCE_PRIORITY = {'high': 'high', 'medium': 'medium', 'low': 'low'}
+
+
+def with_priority(lead, confidences):
+    """Add the AI contact confidence and a review priority for sorting/collapsing alert lists.
+
+    Applied after the analyst evidence key is computed, so recorded outcomes stay valid.
+    A lead whose confidence is unknown gets priority None: show it, do not collapse it.
+    """
+    confidence = confidences.get(lead.get('contact_id')) if lead.get('kind') == 'image_without_ais' else None
+    if lead.get('kind') in PRIORITY_REASONS:
+        priority, reason = PRIORITY_REASONS[lead['kind']]
+    elif confidence in CONFIDENCE_PRIORITY:
+        priority = CONFIDENCE_PRIORITY[confidence]
+        reason = f'AI rated this image contact {confidence} confidence; no AIS within 300 m'
+    else:
+        priority, reason = None, 'Priority unknown'
+    return {**lead, 'confidence': confidence, 'priority': priority, 'priority_reason': reason}
 
 
 class SatelliteWorkspace:
@@ -207,7 +229,8 @@ class SatelliteWorkspace:
                 partial += bool(review.get('visual', {}).get('analysis_incomplete'))
                 image_contacts += len(review.get('contacts', []))
                 no_ais += not bool(review.get('ais', {}).get('vessels'))
-                rows.extend(self.dispositions.decorate(lead, evidence_key(review, lead))
+                confidences = {c.get('id'): c.get('confidence') for c in review.get('contacts', [])}
+                rows.extend(with_priority(self.dispositions.decorate(lead, evidence_key(review, lead)), confidences)
                             for lead in comparison.get('leads', []))
                 vessels.extend({**v, 'scene_id': path.stem, 'acquired_utc': review['scene']['acquired_utc']}
                                for v in comparison.get('vessel_checks', []))
@@ -219,7 +242,7 @@ class SatelliteWorkspace:
             radar, radar_summary = gfw_sar.radar_index(self.root), gfw_sar.summary(self.root)
         except (OSError, ValueError, TypeError, KeyError):
             radar, radar_summary = [], {}
-        rows.extend(self.dispositions.decorate(lead, key) for lead, key in radar)
+        rows.extend(with_priority(self.dispositions.decorate(lead, key), {}) for lead, key in radar)
         return {'leads': sorted(rows, key=lambda r: (r['acquired_utc'], r['id']), reverse=True),
                 'vessel_checks': vessels, 'reviews_checked': reviewed, 'reviews_pending': pending,
                 'image_contacts': image_contacts, 'images_without_ais': no_ais,
