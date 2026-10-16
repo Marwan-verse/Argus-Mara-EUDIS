@@ -140,9 +140,14 @@ def main() -> int:
     app.alert_board.refresh_evidence({"leads": leads, "reviews_checked": 26, "reviews_pending": 0})
     pump(1.0)
     panel_shot("10-incidents-panel")
+    app.alert_board.list.see("header:high", margin=0)
+    pump(0.4)
+    panel_shot("11-incidents-high-band")
     app.alert_board.toggle_low()
     pump(0.6)
-    panel_shot("11-incidents-low-open")
+    app.alert_board.list.see("header:low", margin=0)
+    pump(0.4)
+    panel_shot("12-incidents-low-open")
     app.alert_board.toggle_low()
 
     report["flatten_ms"] = [round(value * 1000, 1) for value in app.motion.timings]

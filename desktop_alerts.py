@@ -493,7 +493,7 @@ class AlertBoard:
             command=self.toggle_demo_alerts, font=ctk.CTkFont(SANS, 12),
             checkbox_width=16, checkbox_height=16, height=26)
         self.demo_switch.pack(fill="x", padx=16, pady=(8, 0))
-        tk.Label(panel, text="Satellite / AIS review leads appear below.\n"
+        tk.Label(panel, text="Real leads rank first in their band; Low is folded.\n"
                  "Live AIS alone does not establish a threat.",
                  bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9), justify="left", anchor="w",
                  wraplength=250).pack(fill="x", padx=(20, 16), pady=(4, 6))
@@ -523,7 +523,7 @@ class AlertBoard:
             cell.grid(row=0, column=index * 2, sticky="nsew")
             line = tk.Frame(cell, bg=ui.CARD)
             line.pack(pady=(4, 0))
-            code = tk.Label(line, text="WATCH" if level == "low" else CODES[level], bg=ui.CARD, fg=ui.MUTED,
+            code = tk.Label(line, text=CODES[level], bg=ui.CARD, fg=ui.MUTED,
                             font=(MONO, 9), cursor="hand2")
             code.pack(side="left")
             count = tk.Label(line, text="0", bg=ui.CARD, fg=STYLE[level][0], font=(MONO, 12, "bold"), cursor="hand2")
@@ -532,7 +532,8 @@ class AlertBoard:
             underline.pack(fill="x", padx=12, pady=(5, 0))
             for widget in (cell, line, code, count, underline):
                 widget.bind("<Button-1>", lambda _event, value=level: self.set_filter(value))
-            app.tools.attach_tooltip(cell, "Show watched contacts: Low, not incidents" if level == "low"
+            app.tools.attach_tooltip(cell, "Show the Low band: quiet incidents, watched contacts, low-priority leads"
+                                     if level == "low"
                                      else f"Show {LEVEL_NAMES[level].lower()} incidents only")
             self.tiles[level] = (code, underline)
             self.tiles[level + "-count"] = count
