@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 import math
 from pathlib import Path
+import sys
 from urllib.request import Request, urlopen
 
 from PIL import Image, ImageChops, ImageEnhance, ImageFilter
@@ -204,8 +205,10 @@ GRID = "#2a4654"
 RULER_BG = "#070b0f"
 RULER_INK = "#9fb3bd"
 ACCENT = "#46d1c4"
-FONT = ("Menlo", 8)
-FONT_BOLD = ("Menlo", 9, "bold")
+# Menlo exists only on macOS; Windows has Consolas. A missing family would fall back to a proportional font.
+MONO = "Menlo" if sys.platform == "darwin" else "Consolas"
+FONT = (MONO, 8)
+FONT_BOLD = (MONO, 9, "bold")
 MARGIN_TAGS = ("chart-furniture", "chart-margin")
 
 
