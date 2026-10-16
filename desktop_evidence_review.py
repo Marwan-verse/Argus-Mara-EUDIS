@@ -22,8 +22,8 @@ class EvidenceReview:
         frame = ttk.Frame(self.window, padding=16)
         frame.pack(fill='both', expand=True)
         ttk.Label(frame, text=lead['title'], wraplength=570, font=('Segoe UI', 12, 'bold')).pack(anchor='w')
-        ttk.Label(frame, text=f"Image {lead['acquired_utc']} · {lead['source_label']} pixels\n{lead['reason']}",
-                  wraplength=570).pack(anchor='w', pady=8)
+        source = lead.get('evidence_text') or f"Image {lead['acquired_utc']} · {lead['source_label']} pixels"
+        ttk.Label(frame, text=f"{source}\n{lead['reason']}", wraplength=570).pack(anchor='w', pady=8)
         scope = 'Shared host audit · authenticated SOC analyst' if self.client else 'Private workspace audit · Local analyst'
         ttk.Label(frame, text=scope+'\nAnalyst judgment; identity and intent remain unconfirmed.', wraplength=570).pack(anchor='w')
         previous = lead.get('analyst_review')
@@ -46,7 +46,8 @@ class EvidenceReview:
         self.status.pack(fill='x', pady=6)
         buttons = ttk.Frame(frame)
         buttons.pack(fill='x')
-        ttk.Button(buttons, text='Open image evidence', command=lambda: board.open_evidence(lead)).pack(side='left')
+        ttk.Button(buttons, text=lead.get('action_text') or 'Open image evidence',
+                   command=lambda: board.open_evidence(lead)).pack(side='left')
         self.save_button = ttk.Button(buttons, text='Save analyst review', command=self.save)
         self.save_button.pack(side='right')
 

@@ -544,6 +544,9 @@ class AlertBoard:
                                 f"{result.get('image_contacts', 0)} image contacts · "
                                 f"{result.get('images_without_ais', 0)} images without contemporaneous AIS\n"
                                 f"{result.get('partial_analysis_images', 0)} images with incomplete detail review")
+        if result.get('radar_detections'):
+            self.evidence_status += (f"\n{result['radar_detections']} radar detections (Global Fishing Watch) · "
+                                     f"{result.get('radar_leads', 0)} without AIS")
         self.evidence_page = min(self.evidence_page, max(0, (len(self.evidence_leads)-1)//50))
         self.paint_evidence()
         if relayout:
@@ -572,11 +575,12 @@ class AlertBoard:
             if lead.get('evidence_changed'):
                 state = 'Evidence changed · review again'
             title = f"{lead['name']}" + (f" · {lead['mmsi']}" if lead.get('mmsi') else '')
-            lines = (f"{lead['title']}\nImage {lead['acquired_utc']}\n"
-                     f"{lead['source_label']} pixels · assumption · {state}\n{lead['reason']}")
+            source = lead.get('evidence_text') or f"Image {lead['acquired_utc']}\n{lead['source_label']} pixels · assumption"
+            lines = f"{lead['title']}\n{source} · {state}\n{lead['reason']}"
+            action = lead.get('action_text') or 'Open image evidence'
             closed = lead.get('review_status') in CLOSED_OUTCOMES
-            section.add('entry', Link(f"{title}\n{lines}\nOpen image evidence", lambda row=lead: self.open_evidence(row),
-                                      title=title, lines=lines, action="Open image evidence"),
+            section.add('entry', Link(f"{title}\n{lines}\n{action}", lambda row=lead: self.open_evidence(row),
+                                      title=title, lines=lines, action=action),
                         self.ui.MUTED if closed else STYLE["high"][0])
             if lead.get('evidence_key'):
                 def review(row=lead):
@@ -595,6 +599,9 @@ class AlertBoard:
     def open_evidence(self, lead):
         satellite = self.app.satellite
         self.app.open_window('satellite')
+        if lead.get('radar'):
+            satellite.open_radar_lead(lead)
+            return
         satellite.pending_contact = (lead['scene_id'], lead.get('contact_id'))
 
     def refresh_reports(self, relayout=True):
@@ -1323,10 +1330,10 @@ class AlertBoard:
         if items:
             text = f"SIMULATED · {len(items)} fictional contact{'s' if len(items) != 1 else ''}"
             label = app.map.create_text(20 + getattr(app, "chart_margin", 0), 40 + getattr(app, "chart_margin", 0), text=text, anchor="w", fill=ui.INK, font=(SANS, 9, "bold"),
-                                        tags=("sim-badge",))
+                                        tags=("sim-badge", "chart-fixed"))
             left, top, right, bottom = app.map.bbox(label)
             box = app.map.create_rectangle(left - 7, top - 3, right + 7, bottom + 3, fill=ui.BG, outline=ui.LINE,
-                                           tags=("sim-badge",))
+                                           tags=("sim-badge", "chart-fixed"))
             app.map.tag_lower(box, label)
 
     def draw_response(self, occupied) -> None:
@@ -1427,8 +1434,12 @@ class AlertBoard:
         if self.app.tools.reduced_motion.get():
             return
         radius = 17 if self.pulse else 13
-        for halo, x, y in self.halos:
-            self.app.map.coords(halo, x - radius, y - radius, x + radius, y + radius)
+        for halo, _x, _y in self.halos:
+            # Around the halo's current centre: a drag or zoom may have moved it since it was drawn.
+            box = self.app.map.coords(halo)
+            if len(box) == 4:
+                x, y = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+                self.app.map.coords(halo, x - radius, y - radius, x + radius, y + radius)
 
     def describe(self, identifier: str) -> str:
         item = self.by_id[identifier]
