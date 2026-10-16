@@ -130,3 +130,11 @@ JavaScript tests passed. `npm ci`, Svelte checks, the official Svelte analyzer,
 the compiled frontend build and the demo contract check also passed. Chromium
 screenshots were inspected at 1440 px and 390 px widths. Docker was stopped on
 the development host; the existing Docker installation was not upgraded.
+
+Follow-up validation on 16 October 2026: after merging upstream main at
+`6819bb6`, the SOC Docker image built successfully and the existing local
+relay was rebuilt with its account and certificate volumes retained. Verified
+HTTPS through Caddy at `https://localhost:8443` served all four admin assets.
+Administrator login, Secure/HttpOnly/SameSite cookies, CSRF rejection, native API
+isolation and logout passed against the running Docker deployment. This local
+verification does not establish the state of a separate production host.
