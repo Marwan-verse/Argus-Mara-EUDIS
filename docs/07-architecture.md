@@ -1,5 +1,17 @@
 # 7. Codebase architecture and team contracts
 
+## Investigation lab (D94, 16 October)
+
+`desktop_investigation.py` adds four local tabs: source timeline, pairwise
+encounter review, an editable fictional branch, and evaluation against a
+proximity baseline. `argus/investigation.py` preserves evidence provenance and
+computes review-only pair patterns. `argus/scenario_lab.py` uses existing Brain
+and responder calculations on observed branch fixes; hidden simulated motion
+cannot enter those calculations. `argus/evaluation.py` records episode counts,
+signed warning lead and case metrics against authored exercise labels. None
+changes shared demo contracts or triggers operational action. See
+[the lab guide](19-investigation-lab.md) for thresholds, limitations and validation.
+
 ## Private SOC companion (D52, 13 October)
 
 An explicitly requested private companion adds account authorization and

@@ -310,6 +310,7 @@ class ArgusApp:
             "decision": "Decision review", "weather": "Live weather",
             "ais": "AIS ship tracker", "sar_plan": "SAR next step",
             "satellite": "Satellite analysis",
+            "investigation": "Investigation lab",
             "views": "Saved map views",
         }
         self._decision_choice = tk.StringVar(value="")
@@ -453,6 +454,7 @@ class ArgusApp:
             nav("◇   SAR next step", lambda: self.open_window("sar_plan"))
             nav("◈   Satellite analysis", lambda: self.open_window("satellite"))
         nav("◷   Timeline", lambda: self.open_window("timeline"))
+        nav("◫   Investigation lab", lambda: self.open_window("investigation"))
         nav("◇   Map layers", lambda: self.open_window("layers"))
         nav("⚓   Port directory", lambda: self.open_window("ports"))
         nav("⌁   Cable directory", lambda: self.open_window("cables"))
@@ -788,6 +790,7 @@ class ArgusApp:
 
     def open_window(self, key: str, destination: str = "right") -> None:
         permission = {'evidence': 'evidence.share', 'sar_plan': 'evidence.share', 'satellite': 'evidence.share',
+                      'investigation': 'evidence.share',
                       'decision': 'response.review', 'responses': 'response.review'}.get(key, 'map.view')
         if not self.require_tool(permission):
             return
@@ -829,6 +832,9 @@ class ArgusApp:
             self.ais_tracker.build(frame)
         elif key == 'satellite':
             self.satellite.build(frame)
+        elif key == 'investigation':
+            from desktop_investigation import InvestigationLab
+            self.investigation_lab = InvestigationLab(self, frame)
         elif key == "sar_plan":
             text = tk.Text(frame, wrap="word", padx=15, pady=12, font=("Segoe UI", 11),
                            bg=CARD, fg=INK, insertbackground=INK, relief="flat")
@@ -1621,20 +1627,22 @@ class ArgusApp:
     def _position_console_panel(self) -> None:
         # The alert board is docked beside the rail; the map host holds the floating panels.
         self.layout_columns()
-        available = self.chart_host.winfo_width()
+        # Tk reports physical pixels; CustomTkinter configure/place use logical
+        # units. Convert once so panels stay inside the chart at Windows DPI scaling.
+        scaling = ctk.ScalingTracker.get_widget_scaling(self.chart_host)
+        available = self.chart_host.winfo_width() / scaling
         right_width = self.tools.detail_width
         if available > 500:
             right_width = min(right_width, max(330, available - 294))
         if getattr(self, "panel_visible", False):
             # Stay clear of the mode bar, and of the replay bar while the exercise is shown.
             bottom = 200 if self.exercise_visible.get() else 120
-            height = max(350, self.chart_host.winfo_height() - bottom)
+            height = max(350, self.chart_host.winfo_height() / scaling - bottom)
             if self.tools.panel_position is None:
                 self.floating_panel.configure(width=right_width, height=height)
                 self.floating_panel.place(relx=1, x=-70, y=16, anchor="ne")
             else:
                 # The operator dragged the panel: keep its right edge, so the left-edge resize still works.
-                scaling = ctk.ScalingTracker.get_widget_scaling(self.chart_host)
                 host_width = self.chart_host.winfo_width() / scaling
                 host_height = self.chart_host.winfo_height() / scaling
                 right, top = self.tools.clamp_panel(right_width, host_width, host_height)

@@ -292,7 +292,7 @@ class SatelliteWorkspace:
             for point in review['contacts']:
                 # Compact map/list index; full descriptions are loaded on click.
                 rows.append({key: point[key] for key in ('id', 'lat', 'lon', 'confidence', 'label', 'ts', 'matched_mmsi')})
-                rows[-1].update(scene_id=scene['id'], sensor=scene['sensor'])
+                rows[-1].update(scene_id=scene['id'], sensor=scene['sensor'], scene_label=scene['label'])
         return sorted(rows, key=lambda r: r['ts'], reverse=True)
 
     @staticmethod

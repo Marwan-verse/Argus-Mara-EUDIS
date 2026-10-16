@@ -104,6 +104,7 @@ def build(app):
         ("cables", "Historical cable routes", lambda: app.open_window("cables")),
         ("ports", "Port directory", lambda: app.open_window("ports")),
         ("radar", "Satellite analysis / historical AIS", lambda: app.open_window("satellite")),
+        ("search", "Investigation lab / encounters / challenge / evaluation", lambda: app.open_window("investigation")),
         ("weather", "Weather", lambda: app.open_window("weather")),
         ("layers", "Display layers", lambda: app.open_window("layers")),
     ):

@@ -38,6 +38,17 @@ class ReceivedTrackTests(unittest.TestCase):
         self.assertEqual([p['received_s'] for p in self.history.tracks[MMSI]],
                          [START.timestamp(), START.timestamp() + 60])
 
+    def test_identity_changes_use_observation_time_and_keep_streams_separate(self):
+        self.capture()
+        self.capture(60, name='NEW DECLARED NAME')
+        self.assertEqual(len(self.history.identity_events), 1)
+        event = self.history.identity_events[0]
+        self.assertEqual(event['before']['name'], 'TEST SHIP')
+        self.assertEqual(event['after']['name'], 'NEW DECLARED NAME')
+        self.assertEqual(event['observed_utc'], (START + timedelta(seconds=60)).isoformat())
+        self.capture(120, stream='new-stream', name='OTHER DECLARATION')
+        self.assertEqual(len(self.history.identity_events), 1)
+
     def test_gaps_and_source_changes_leave_separate_sections(self):
         self.capture()
         self.capture(60)

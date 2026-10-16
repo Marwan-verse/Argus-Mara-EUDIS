@@ -1,5 +1,6 @@
 """Bounded local received-fix history. No route prediction or departure inference."""
 from collections import OrderedDict
+from datetime import datetime, timezone
 import math
 
 from argus.live_client import MAX_VESSELS, utc_timestamp
@@ -14,10 +15,23 @@ class ReceivedTracks:
     def __init__(self):
         self.tracks = OrderedDict()
         self.total = 0
+        self.identity_events = []
+        self._identities = {}
 
     def capture(self, vessels, stream_id, now):
         self.prune(now, set(vessels))
         for mmsi, vessel in vessels.items():
+            # Observation time is when this client saw a declaration, not when
+            # the name became effective or the position was transmitted.
+            key = (mmsi, vessel.get('label', 'real'), stream_id)
+            identity = {field: vessel.get(field) for field in ('name', 'imo', 'callsign') if vessel.get(field)}
+            previous = self._identities.get(key)
+            if previous is not None and identity != previous:
+                self.identity_events.append({'mmsi': mmsi, 'label': key[1], 'stream_id': stream_id,
+                    'observed_utc': datetime.fromtimestamp(now, timezone.utc).isoformat(),
+                    'before': previous, 'after': identity})
+                self.identity_events = self.identity_events[-512:]
+            self._identities[key] = identity
             stamp = vessel['received_s']
             if stamp is None or stamp < now - RETENTION_SECONDS:
                 continue
@@ -37,6 +51,11 @@ class ReceivedTracks:
 
     def prune(self, now, contacts=None):
         cutoff = now - RETENTION_SECONDS
+        if contacts is not None:
+            self._identities = {key: value for key, value in self._identities.items() if key[0] in contacts}
+        # Bound stream epochs even if a provider reconnects repeatedly.
+        while len(self._identities) > MAX_VESSELS * 2:
+            self._identities.pop(next(iter(self._identities)))
         for mmsi, points in list(self.tracks.items()):
             if contacts is not None and mmsi not in contacts:
                 self.total -= len(self.tracks.pop(mmsi))
