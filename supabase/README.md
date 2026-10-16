@@ -3,6 +3,17 @@
 An optional shared database for AIS history and satellite-versus-AIS comparison
 (decision D74). The offline exercise does not use it.
 
+## Reading without a key (D108)
+
+Every copy of the app **reads** the team database with the project's publishable key, which
+ships in `argus/supabase_ais.py`. Pulling `main` is enough, and no one needs the secret key to
+see the AIS history, the fleet-history results or the real alerts. Migration
+`20261016152134_argus_public_read.sql` lets that key run only `argus_ais_status`,
+`argus_ais_rows`, `argus_recent_tracks` and `argus_history_index`. **Writing** (fleet-history
+checks, satellite scenes, comparisons) still needs the secret key, which only the computer
+that runs the checks holds. If this repository is ever made public, disable the publishable key
+or revoke those grants first.
+
 ## One team database again (16 October 2026 evening, D106)
 
 **The team database is argus-mara in the Argus Mara organisation, project `lcpgnzvkntqdhejrsgpa`**

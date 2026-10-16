@@ -320,9 +320,10 @@ class SatelliteWorkspace:
                                  'complete_regional_census': False,
                                  'caveat': 'Synthetic or unverified imagery cannot be associated with real archived AIS.'}}
         note = None
-        if supabase_ais.linked(self.root):
+        if supabase_ais.readable(self.root):
             # The team database records the Railway feed every 30 s even when no
             # app is open, so it is preferred over this computer's own capture.
+            # Reading needs no secret key (D108); publishing results still does.
             try:
                 ais = supabase_ais.historical_ais_from_database(scene['acquired_utc'], scene['bbox'])
                 if ais['coverage'].get('database_position_rows'):

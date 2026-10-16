@@ -226,16 +226,15 @@ def main(argv=None):
     readers = readers_installed()
     print('  Image readers  ', 'installed' if readers else 'missing: pip install -r requirements-satellite.txt')
 
-    if not supabase_ais.linked(root) and not args.check:
-        if supabase_ais.configured():
-            supabase_ais.link(root)  # The key is already stored; only this workspace was unlinked.
-            print('  Team database key found in this computer’s credential store; workspace linked.')
-        else:
-            print('The team database is not linked on this computer. Paste its secret key once.')
-            connect_database(root)
-    database = show_database(now) if supabase_ais.linked(root) else None
+    if not supabase_ais.linked(root) and not args.check and supabase_ais.configured():
+        supabase_ais.link(root)  # The key is already stored; only this workspace was unlinked.
+        print('  Team database key found in this computer’s credential store; workspace linked.')
+    # D108: reading the team database needs no key; only the computer that publishes holds one.
+    database = show_database(now) if supabase_ais.readable(root) else None
     if not supabase_ais.linked(root):
-        print('  Team database   not linked · only AIS this computer records from now on can be compared')
+        print('  Team database   read only with the built-in key; results are published by the computer that '
+              'holds the team key' if database is not None else
+              '  Team database   not reachable · only AIS this computer records from now on can be compared')
 
     if not tensorx_connected() and not args.check:
         print('TensorX is not connected. Paste its API key once; it is checked for free before saving.')
