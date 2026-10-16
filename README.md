@@ -25,6 +25,8 @@ once for optional image readers. **One click:** `SATELLITE-WATCH-MAC.command` or
 database keys and opens the app with Coast Watch running on images from the last 36 h
 (D83). See [setup and open-source accuracy plan](docs/16-satellite-ai.md).
 
+**Real alerts (D95):** with the team database linked, `python -m argus.live_alerts` runs the alert rules on real ships near the cable routes (last 3 h of AIS, harbour craft left out) and prints rule outcomes for review, labelled real. The read-only database function comes from migration `20261016134500_argus_recent_tracks.sql`. See [real alerts](docs/21-real-alerts.md).
+
 **Team database (optional):** the Supabase project `argus-mara` copies the shared
 Railway AIS feed every 30 seconds by itself, so Coast Watch can compare any image
 with AIS at its acquisition time even when no laptop was recording, both ways:
