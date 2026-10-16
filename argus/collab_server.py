@@ -16,10 +16,12 @@ from pathlib import Path
 import re
 import secrets
 import time
+from urllib.parse import urlsplit
 
 from aiohttp import web
 
 from argus.collab_store import Store, name, password
+from argus import admin_web
 
 SERVICE = web.AppKey("soc", object)
 KINDS = {"chat": "chat", "ping": "ping", "contact": "contact.share", "evidence": "evidence.share",
@@ -187,6 +189,25 @@ async def body(request):
 
 @web.middleware
 async def security(request, handler):
+    try:
+        response = await secured_request(request, handler)
+    except ValueError as error:
+        response = web.json_response({"error": str(error)}, status=400)
+    except web.HTTPException as error:
+        response = web.json_response({"error": error.text}, status=error.status,
+                                     headers={k: v for k, v in error.headers.items() if k.lower() == "retry-after"})
+    response.headers.update({"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+                             "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY",
+                             "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+                             "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"})
+    if request.path in admin_web.ASSETS:
+        response.headers["Content-Security-Policy"] += "; script-src 'self'; style-src 'self'; connect-src 'self'"
+    if not request.app[SERVICE].config.allow_loopback_http:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000"
+    return response
+
+
+async def secured_request(request, handler):
     relay = request.app[SERVICE]
     config = relay.config
     # Trust forwarded scheme only from the explicitly configured private proxy
@@ -205,14 +226,30 @@ async def security(request, handler):
     origin = request.headers.get("Origin")
     if origin and origin != config.origin:
         raise web.HTTPForbidden(text="Origin denied")
+    browser_api = request.path.startswith("/admin/api/")
+    if request.path.startswith("/admin/"):
+        if request.host.lower() != urlsplit(config.origin).netloc.lower():
+            raise web.HTTPForbidden(text="Host denied")
+        if browser_api and request.method not in {"GET", "HEAD"} and origin != config.origin:
+            raise web.HTTPForbidden(text="Same-origin request required")
     if request.path != "/healthz":
         client = request["client"] = relay.client_address(request)
         user = token = None
-        if request.path not in PUBLIC_PATHS:
+        public = request.path in PUBLIC_PATHS or request.path in admin_web.ASSETS or request.path == "/admin/api/login"
+        if browser_api and not public:
+            try:
+                user, token = admin_web.authenticate(request, relay)
+            except web.HTTPException:
+                relay.limit(("anonymous", client), 120)
+                relay.limit(("anonymous",), 6000)
+                raise
+        elif not public:
             header = request.headers.get("Authorization", "")
             if header.startswith("Bearer ") and 20 <= len(header[7:]) <= 128:
                 token = header[7:]
-                user = relay.store.authenticate(token)
+                browser_token = relay.store.db.execute("SELECT 1 FROM browser_sessions WHERE hash=?", (Store.token_hash(token),)).fetchone()
+                if not browser_token:
+                    user = relay.store.authenticate(token)
         if user:
             relay.limit(("user", user["id"]), 240)
             request["user"], request["token"] = user, token
@@ -221,23 +258,12 @@ async def security(request, handler):
             # first, so a flood of them cannot use up signed-in people's limits.
             relay.limit(("anonymous", client), 120)
             relay.limit(("anonymous",), 6000)
-            if request.path not in PUBLIC_PATHS:
+            if not public:
                 raise web.HTTPUnauthorized(text="Sign in required")
-    try:
-        response = await handler(request)
-    except ValueError as error:
-        response = web.json_response({"error": str(error)}, status=400)
-    except web.HTTPException as error:
-        response = web.json_response({"error": error.text}, status=error.status,
-                                     headers={k: v for k, v in error.headers.items() if k.lower() == "retry-after"})
-    response.headers.update({"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
-                             "Referrer-Policy": "no-referrer", "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'"})
-    if not config.allow_loopback_http:
-        response.headers["Strict-Transport-Security"] = "max-age=31536000"
-    return response
+    return await handler(request)
 
 
-async def login(request):
+async def verify_login(request):
     relay = request.app[SERVICE]
     data = await body(request)
     username = name(data.get("username"))
@@ -258,7 +284,13 @@ async def login(request):
     user = relay.store.user(current["id"])
     if not user["groups"] and not user["admin"]:
         raise web.HTTPForbidden(text="Your account is waiting for an administrator to add you to a group")
-    token, expires = relay.store.issue_token(current["id"], relay.config.token_ttl)
+    return user
+
+
+async def login(request):
+    relay = request.app[SERVICE]
+    user = await verify_login(request)
+    token, expires = relay.store.issue_token(user["id"], relay.config.token_ttl)
     return json_response({"token": token, "expires": expires, "user": user})
 
 
@@ -291,7 +323,10 @@ async def logout(request):
 
 
 def require(request, permission=None, admin=False):
-    user = request["user"]
+    user = request.app[SERVICE].store.authenticate(request["token"])
+    if not user:
+        raise web.HTTPUnauthorized(text="Sign in required")
+    request["user"] = user
     if (admin and not user["admin"]) or (permission and permission not in user["permissions"]):
         raise web.HTTPForbidden(text="Permission denied")
 
@@ -468,6 +503,7 @@ async def admin_user(request):
     data = await body(request)
     candidate = data.get("password")
     hashed = await relay.hash_work(relay.store.hasher.hash, password(candidate)) if candidate else None
+    require(request, admin=True)  # Hashing yields; recheck that this admin is still authorized.
     groups = data.get("groups", [])
     actor = request["user"]["id"]
     if request.method == "POST":
@@ -480,6 +516,15 @@ async def admin_user(request):
         relay.close_user_rooms(user_id=user_id)
         result = {"ok": True}
     return json_response(result)
+
+
+async def admin_revoke(request):
+    require(request, admin=True)
+    relay = request.app[SERVICE]
+    user_id = request.match_info["user_id"]
+    relay.store.revoke_user(user_id, request["user"]["id"])
+    relay.close_user_rooms(user_id=user_id)
+    return json_response({"ok": True})
 
 
 async def admin_group(request):
@@ -518,8 +563,11 @@ def create_app(config):
     app.router.add_get("/v1/admin", admin_state)
     app.router.add_post("/v1/admin/users", admin_user)
     app.router.add_put("/v1/admin/users/{user_id}", admin_user)
+    app.router.add_post("/v1/admin/users/{user_id}/revoke", admin_revoke)
     app.router.add_put("/v1/admin/groups/{group}", admin_group)
     app.router.add_delete("/v1/admin/groups/{group}", admin_group)
+    admin_web.install(app, SERVICE, verify_login, {"logout": logout, "state": admin_state,
+                      "user": admin_user, "group": admin_group, "revoke": admin_revoke})
     from argus.satellite_server import install as install_satellite
     install_satellite(app, require, body)
 
