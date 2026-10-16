@@ -5,6 +5,7 @@ the tactical chart, its fonts or its banners would go unnoticed. Tiles are gener
 the test makes no network requests.
 """
 import copy
+import gc
 from io import BytesIO
 import tempfile
 from pathlib import Path
@@ -30,6 +31,9 @@ class ProLookTests(unittest.TestCase):
         import customtkinter as ctk
         import desktop_pro
         import run_gui
+        # Collect earlier tests' Tk objects here, on the main thread. If a tile or weather worker
+        # collects them instead, a Font.__del__ waits forever on its destroyed interpreter.
+        gc.collect()
         theme = copy.deepcopy(ctk.ThemeManager.theme)
         saved = {name: getattr(run_gui, name) for name in (*desktop_pro.PALETTE, "UI_EDITION")}
 
@@ -64,6 +68,7 @@ class ProLookTests(unittest.TestCase):
             self.root.update()
             self.assertEqual(self.errors, [])
             self.app.close()
+            gc.collect()  # This test's Tk objects too, before any worker thread runs
 
     def wait_for_tiles(self):
         import time
