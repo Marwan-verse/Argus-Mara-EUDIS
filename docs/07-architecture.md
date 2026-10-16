@@ -102,7 +102,7 @@ layer draws downwind arrows coloured by speed. Map-bar "Rain" and "Wind" switche
 It shows current real weather, not the replay's, and is display-only: alerts,
 countdowns, ETAs and both JSON files are unchanged.
 
-*Magnetics (D89, 16 October):* `desktop_magnetics.py` is a rail panel with two parts.
+*Magnetics (D91, 16 October):* `desktop_magnetics.py` is a rail panel with two parts.
 Its opt-in storm feed (`argus/geomag.py`: NOAA SWPC 1-minute Kp with a rolling maximum
 over the current and previous 3-hour interval, and Valentia 1-minute H from INTERMAGNET via
 BGS GIN as |dH/dt|) shows tiers 0–3 in a header chip and caches the last status in

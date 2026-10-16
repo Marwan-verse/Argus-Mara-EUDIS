@@ -40,7 +40,7 @@ at the radar time. *Radar contact without AIS* leads are violet on the map and l
 Incidents. Detections arrive 4–5 days late. Powered by Global Fishing Watch. See
 [how it works and what was checked](docs/19-gfw-radar.md).
 
-**Magnetics (optional, D89):** the magnet button on the left rail opens two real uses of
+**Magnetics (optional, D91):** the magnet button on the left rail opens two real uses of
 magnetics; neither watches the sea, because a ship's field fades as 1/r³ (a seabed sensor
 sees a 200 m ship only within about 0.5–1 km). *Live magnetic data*, off by default, polls
 NOAA SWPC Kp and the Valentia observatory and shows a storm tier in the header: context
