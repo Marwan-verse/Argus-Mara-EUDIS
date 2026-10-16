@@ -76,6 +76,7 @@ class Flattener:
         self.tk = canvas.tk
         self.image_source = image_source  # (image name, tags) -> PIL image or None
         self.colours: dict[str, tuple | None] = {}
+        self.offset = (0.0, 0.0)
         self.fonts: dict[str, ImageFont.ImageFont] = {}
         self.tk.eval(_DUMP)
 
@@ -159,9 +160,10 @@ class Flattener:
                     left, on = pattern[index], not on
 
     # ----- drawing --------------------------------------------------------------------------
-    def render(self, tag: str, size: tuple[int, int], background) -> Image.Image:
-        image = Image.new("RGB", (max(1, int(size[0])), max(1, int(size[1]))), background)
+    def render(self, tag: str, image: Image.Image, offset: tuple[float, float] = (0, 0)) -> Image.Image:
+        """Draw the items carrying ``tag`` onto ``image``, canvas point (x, y) at pixel (x, y) + offset."""
         draw = ImageDraw.Draw(image)
+        self.offset = offset
         for entry in self.tk.splitlist(self.tk.call("::argusflat::dump", str(self.canvas), tag)):
             fields = self.tk.splitlist(entry)
             try:
@@ -170,10 +172,16 @@ class Flattener:
                 continue  # One odd item must not stop the picture
         return image
 
+    def points(self, value) -> list[float]:
+        """Canvas coordinates shifted into the picture."""
+        values = self.numbers(value)
+        dx, dy = self.offset
+        return [v + (dx if index % 2 == 0 else dy) for index, v in enumerate(values)]
+
     def item(self, image, draw, fields) -> None:
         kind = str(fields[0])
         if kind == "line":
-            values = self.numbers(fields[1])
+            values = self.points(fields[1])
             fill = self.colour(str(fields[2]))
             if fill is None or len(values) < 4:
                 return
@@ -185,14 +193,14 @@ class Flattener:
             else:
                 draw.line(points, fill=fill, width=width, joint="curve" if width > 2 else None)
         elif kind == "polygon":
-            values = self.numbers(fields[1])
+            values = self.points(fields[1])
             if len(values) < 6:
                 return
             fill, outline = self.colour(str(fields[2])), self.colour(str(fields[3]))
             draw.polygon(list(zip(values[0::2], values[1::2])), fill=fill, outline=outline,
                          width=self.width(fields[4]) if outline else 1)
         elif kind in ("rectangle", "oval"):
-            values = self.numbers(fields[1])
+            values = self.points(fields[1])
             if len(values) < 4:
                 return
             x1, y1, x2, y2 = values[:4]
@@ -210,7 +218,7 @@ class Flattener:
         elif kind == "text":
             value = fields[2]
             text = " ".join(str(part) for part in value) if isinstance(value, tuple) else str(value)
-            bbox = self.numbers(fields[1])
+            bbox = self.points(fields[1])
             fill = self.colour(str(fields[3]))
             angle = float(fields[6] or 0) if len(fields) > 6 else 0.0
             if fill is None or not text or len(bbox) < 4 or abs(angle) > 0.5:
@@ -218,7 +226,7 @@ class Flattener:
             draw.multiline_text((bbox[0] + 1, bbox[1]), text, fill=fill, font=self.font(fields[4]),
                                 align={"center": "center", "right": "right"}.get(str(fields[5]), "left"), spacing=2)
         elif kind == "image" and self.image_source is not None:
-            values = self.numbers(fields[1])
+            values = self.points(fields[1])
             source = self.image_source(str(fields[2]), [str(tag) for tag in self.tk.splitlist(fields[4])])
             if source is None or len(values) < 2:
                 return

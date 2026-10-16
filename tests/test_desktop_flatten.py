@@ -50,7 +50,7 @@ class FlattenTests(unittest.TestCase):
         def source(_name, tags):
             return tile if 'tile:1:2:3' in tags else None
 
-        picture = Flattener(canvas, source).render('chart', (220, 160), BACKGROUND)
+        picture = Flattener(canvas, source).render('chart', Image.new('RGB', (220, 160), BACKGROUND))
         self.assertEqual(picture.size, (220, 160))
         self.assertTrue(close(picture.getpixel((25, 25)), (255, 0, 0)))
         self.assertTrue(close(picture.getpixel((100, 20)), (0, 0, 255)))
@@ -65,6 +65,10 @@ class FlattenTests(unittest.TestCase):
         x1, y1, x2, y2 = canvas.bbox(text)
         inked = sum(1 for x in range(x1, x2) for y in range(y1, y2) if sum(picture.getpixel((x, y))) > 300)
         self.assertGreater(inked, 20, 'text was not drawn')
+        # With an offset, canvas point (x, y) lands at (x, y) + offset: room for a ring around the view.
+        shifted = Flattener(canvas, source).render('chart', Image.new('RGB', (260, 200), BACKGROUND), (20, 10))
+        self.assertTrue(close(shifted.getpixel((45, 35)), (255, 0, 0)))
+        self.assertTrue(close(shifted.getpixel((15, 15)), BACKGROUND, 2))
 
 
 if __name__ == '__main__':

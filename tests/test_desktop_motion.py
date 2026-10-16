@@ -89,14 +89,16 @@ class MapMotionTests(unittest.TestCase):
         with patch.object(app, '_draw_map', wraps=app._draw_map) as draw:
             app._pan_move(self.event(340, 320))
             self.assertEqual(self.chart_items(), [], 'chart items stayed behind while the map moved')
-            self.assertEqual(canvas.coords('motion-picture'), [40.0, 20.0])
-            self.assertNotEqual(app.motion.picture.getpixel((round(x), round(y))), app.motion._sea(),
+            mx, my = app.motion.margin
+            self.assertGreater(mx, 0)
+            self.assertEqual(canvas.coords('motion-picture'), [40.0 - mx, 20.0 - my])
+            self.assertNotEqual(app.motion.picture.getpixel((round(x) + mx, round(y) + my)), app.motion._sea(),
                                 'the moving picture lacks the cable that was drawn there')
             self.assertEqual(canvas.coords(canvas.find_withtag('map_title')[0]), title)
             app._draw_map()  # A live AIS update during the drag waits for the drag to end
             self.assertTrue(app.motion.pending_redraw)
             app._pan_move(self.event(350, 320))
-            self.assertEqual(canvas.coords('motion-picture'), [50.0, 20.0])
+            self.assertEqual(canvas.coords('motion-picture'), [50.0 - mx, 20.0 - my])
             app._pan_end(self.event(350, 320))
             self.assertFalse(app.motion.busy)
             self.assertGreaterEqual(draw.call_count, 2)
@@ -122,8 +124,13 @@ class MapMotionTests(unittest.TestCase):
         motion = app.motion
         self.assertTrue(1.0 < motion.a < 2.0, motion.a)
         frame = motion.frame(motion.a, motion.tx, motion.ty)
+        self.assertEqual(frame.size, tuple(app._map_size))
+        # The cable pixel of the picture shows up where the glide has taken it (bilinear: look around it).
         seen = (round(motion.a * round(x) + motion.tx), round(motion.a * round(y) + motion.ty))
-        self.assertEqual(frame.getpixel(seen), motion.picture.getpixel((round(x), round(y))))
+        expected = motion.picture.getpixel((round(x) + motion.margin[0], round(y) + motion.margin[1]))
+        around = [frame.getpixel((seen[0] + dx, seen[1] + dy)) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+        self.assertTrue(any(all(abs(a - b) <= 40 for a, b in zip(pixel, expected)) for pixel in around),
+                        f'{expected} not near {seen}: {around}')
         self.wait()
         self.assertEqual(app.map_zoom, zoom + 1)
         self.assertFalse(canvas.find_withtag('motion-picture'))

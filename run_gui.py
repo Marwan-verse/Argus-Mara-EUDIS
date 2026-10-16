@@ -42,7 +42,7 @@ from argus.map_view import coordinates, find_ports, geographic_extent, route_nam
 from argus.prediction import dark_countdown, last_gap, position_at, reappearance_check, v_max_kn
 from desktop_ais import DesktopAIS
 import desktop_basemap
-from desktop_motion import FIXED, TILE, MapMotion
+from desktop_motion import FIXED, TILE, MapMotion, margins
 import desktop_prediction
 
 
@@ -259,6 +259,8 @@ class ArgusApp:
         self._tile_fallback_pixels: dict[tuple[int, int, int], Image.Image] = {}  # Their pixels, for motion pictures
         self.motion = MapMotion(self)  # Smooth pan and animated zoom (desktop_motion.py)
         self._tile_pixels: OrderedDict = OrderedDict()  # Decoded tiles, so a zoom animation starts at once
+        self._ring_queue: queue.Queue = queue.Queue()  # Cached tiles around the view, decoded in the background
+        self._ring_pending: set[tuple[int, int, int]] = set()
         self.map_layers = {name: tk.BooleanVar(value=True) for name in ("AIS track", "Dark prediction", "Radar contacts", "Cable", "Anchor reach", "Response assets", "World ports", "Historical cable routes", "Simulated alerts", "Rain and cloud", "Wind")}
         self.map_layers["World ports"].set(True)
         self.irish_ports_only = tk.BooleanVar(value=True)
@@ -2000,12 +2002,13 @@ class ArgusApp:
                 pass
         return time.time() + 24 * 60 * 60
 
-    def _visible_tiles(self) -> list[tuple[int, int, int, int, int]]:
+    def _visible_tiles(self, margin: tuple[float, float] = (0, 0)) -> list[tuple[int, int, int, int, int]]:
+        """Tiles covering the view, or the view and a ring of ``margin`` points around it."""
         width, height = self._map_size
         z = self.map_zoom
         center_x, center_y = geo_to_world(*self.map_center, z)
-        left, right = center_x - width / 2, center_x + width / 2
-        top, bottom = center_y - height / 2, center_y + height / 2
+        left, right = center_x - width / 2 - margin[0], center_x + width / 2 + margin[0]
+        top, bottom = center_y - height / 2 - margin[1], center_y + height / 2 + margin[1]
         min_x, max_x = math.floor(left / TILE_SIZE), math.floor(right / TILE_SIZE)
         min_y = max(0, math.floor(top / TILE_SIZE))
         max_y = min((2 ** z) - 1, math.floor(bottom / TILE_SIZE))
@@ -2079,7 +2082,7 @@ class ArgusApp:
         except Exception as error:
             self._tile_queue.put((key, False, str(error), None, mode))
 
-    def _update_visible_tiles(self) -> None:
+    def _update_visible_tiles(self, draw: bool = True) -> None:
         mode = self.map_mode.get()
         if not is_raster(mode) or self._map_size[0] < 100:
             return
@@ -2089,7 +2092,10 @@ class ArgusApp:
             key = (z, x, y)
             path = self._tile_path(key)
             metadata = {} if chart else self._tile_metadata(key)
-            if path.exists() and key not in self._tile_images:
+            if key not in self._tile_images and key in self._tile_pixels:
+                # Decoded already (for instance by the ring decoder): no disk read needed.
+                self._tile_images[key] = ImageTk.PhotoImage(self._tile_pixels[key], master=self.map)
+            elif path.exists() and key not in self._tile_images:
                 try:
                     with Image.open(path) as image:
                         self._tile_images[key] = ImageTk.PhotoImage(self._remember_tile(key, image), master=self.map)
@@ -2105,7 +2111,29 @@ class ArgusApp:
             self._tile_status = f"Loading {mode}…" if missing else f"{mode} · local cache"
         else:
             self._tile_status = "Loading NASA imagery…" if missing else "NASA imagery · local cache"
-        self._draw_map()
+        self._warm_ring(mode)
+        if draw:
+            self._draw_map()
+
+    def _warm_ring(self, mode: str) -> None:
+        """Decode the cached tiles just outside the view in the background, so a drag or a zoom-out
+        shows real chart at its edges (desktop_motion's picture ring) instead of a blank."""
+        for z, x, y, _x_absolute, _y_absolute in self._visible_tiles(margins(self._map_size)):
+            key = (z, x, y)
+            if key in self._tile_pixels or key in self._ring_pending or len(self._ring_pending) >= 96:
+                continue
+            path = self._tile_path(key, mode)
+            if path.exists():
+                self._ring_pending.add(key)
+                self._tile_executor.submit(self._ring_worker, key, path, mode)
+
+    def _ring_worker(self, key: tuple[int, int, int], path: Path, mode: str) -> None:
+        try:
+            with Image.open(path) as image:
+                pixels = image.convert("RGB")
+        except (OSError, ValueError):
+            pixels = None
+        self._ring_queue.put((key, pixels, mode))
 
     def _schedule_tile_refresh(self, delay_ms: int = 240) -> None:
         if not is_raster(self.map_mode.get()):
@@ -2119,6 +2147,14 @@ class ArgusApp:
 
     def _poll_tiles(self) -> None:
         changed = False
+        while True:
+            try:
+                key, pixels, mode = self._ring_queue.get_nowait()
+            except queue.Empty:
+                break
+            self._ring_pending.discard(key)
+            if pixels is not None and mode == self.map_mode.get():
+                self._remember_tile(key, pixels)
         while True:
             try:
                 item = self._tile_queue.get_nowait()
@@ -2168,6 +2204,7 @@ class ArgusApp:
             # Every base map shares the z/x/y keys, so drop the images of the previous one.
             self._tile_images.clear()
             self._tile_pixels.clear()
+            self._ring_pending.clear()
             self._tile_fallback.clear()
             self._tile_fallback_pixels.clear()
             self._tile_retry_after.clear()

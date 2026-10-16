@@ -2,18 +2,24 @@
 
 Before, each mouse move and each zoom step re-created or moved all ~2,500 map items, and Tk
 repainted every one of them (40-70 ms a frame on a Retina Mac). Now, when a motion starts, the
-chart as drawn (tiles, land, cables, ships, alerts, labels; everything except window-fixed
-overlays) is copied into one image by ``desktop_flatten`` and those items are removed:
+chart as drawn (land, tiles, cables, ships, alerts, labels; everything except window-fixed
+overlays) is copied into one picture by ``desktop_flatten`` and those items are removed.
 
-* Drag: one ``canvas.move`` of that image per mouse event. When the drag rests or ends, the map is
-  redrawn normally (filling the edges the drag uncovered) and, if still dragging, copied again
-  while the pointer is still, so the next movement starts at once.
-* Zoom: the image glides to the new scale in about a quarter of a second, timed by the clock and
+The picture is bigger than the view by a quarter on every side. The extra ring is filled with
+chart tiles already decoded in memory (``run_gui`` decodes the cached tiles around the view in
+the background), so a drag or a zoom-out shows real chart at the edges instead of a blank.
+
+* Drag: one ``canvas.move`` of the picture per mouse event. When the drag rests, or uses up the
+  ring, the map is redrawn normally and copied again while the pointer is still, so the next
+  movement starts at once.
+* Zoom: the view glides to the new scale in about a quarter of a second, timed by the clock and
   eased out, keeping the point under the pointer still. A step taken while one is running joins
   it, so wheel notches and pinches become one continuous movement. The view on screen is tracked
-  as ``screen = a * drawn + t`` with a target ``A, T``. Then the map is redrawn crisp.
+  as ``screen = a * drawn + t`` with a target ``A, T``; each frame is one affine transform of the
+  picture pasted into the same photo image. Then the map is redrawn crisp.
 * Margin scale ticks stay live items: longitude ticks follow only sideways, latitude ticks only up
-  and down. Window-fixed overlays (``chart-fixed``) never move.
+  and down; while zooming out they are hidden instead of crowding together. Window-fixed overlays
+  (``chart-fixed``) never move.
 * Redraw requests during motion (live AIS, arriving tiles, the replay) wait and run once at the end.
 
 Geography is never approximated: ``map_center`` and ``map_zoom`` change exactly as before, and every
@@ -32,14 +38,19 @@ FIXED = "chart-fixed"  # Overlays tied to the window, not to the chart: titles, 
 TILE = "map-tile"  # Raster tile images; each also carries "tile:z:x:y"
 FLAT = "motion-flat"  # Items copied into the moving picture (and then removed)
 PICTURE = "motion-picture"  # The one image shown while the chart moves
+MARGIN_SHARE = 0.25  # The picture reaches this share of the view beyond each edge
 PAN_REST_MS = 120  # Redraw once the pointer rests this long during a drag
-PAN_REDRAW_SHARE = 0.5  # ... or once the drag has uncovered this share of the view
 ZOOM_SECONDS = 0.24  # Each zoom step glides this long; a new step continues the movement
 ZOOM_TICK_MS = 8  # Ask for the next frame this soon; the canvas sets the real frame rate
+DISK_TILES_PER_PICTURE = 24  # Tiles not yet in memory that one picture may read from disk
 
 
 def ease_out(t: float) -> float:
     return 1 - (1 - t) ** 3
+
+
+def margins(size: tuple[int, int]) -> tuple[int, int]:
+    return round(size[0] * MARGIN_SHARE), round(size[1] * MARGIN_SHARE)
 
 
 class MapMotion:
@@ -52,9 +63,13 @@ class MapMotion:
         self.zoom_state: dict | None = None
         self.pending_redraw = False
         self.drawing = False  # True while this module itself redraws the map
-        self.picture: Image.Image | None = None  # The chart as drawn when the motion began
-        self.photo: ImageTk.PhotoImage | None = None
-        self.a, self.tx, self.ty = 1.0, 0.0, 0.0  # How the picture sits on screen now
+        self.picture: Image.Image | None = None  # The chart as drawn when the motion began, with its ring
+        self.margin = (0, 0)  # Where the view starts inside the picture
+        self.view = (0, 0)
+        self.photo: ImageTk.PhotoImage | None = None  # Shows the whole picture while dragging
+        self.view_photo: ImageTk.PhotoImage | None = None  # Shows one transformed view while zooming
+        self.rulers_hidden = False
+        self.a, self.tx, self.ty = 1.0, 0.0, 0.0  # How the drawn chart sits on screen now
         self.flattener: Flattener | None = None
         self.timings: list[float] = []  # Seconds spent copying the chart, for tests and tuning
 
@@ -86,28 +101,56 @@ class MapMotion:
     def _sea(self):
         return ImageColor.getrgb(self.app.map.cget("bg"))
 
+    def _tile(self, key: tuple[int, int, int], disk: bool) -> Image.Image | None:
+        app = self.app
+        pixels = getattr(app, "_tile_pixels", {}).get(key)
+        if pixels is None:
+            pixels = getattr(app, "_tile_fallback_pixels", {}).get(key)
+        if pixels is None and disk:
+            path = app._tile_path(key)
+            if path.exists():
+                try:
+                    with Image.open(path) as opened:
+                        pixels = opened.convert("RGB")
+                except (OSError, ValueError):
+                    pixels = None
+        return pixels
+
     def _image_source(self, name: str, tags: list[str]) -> Image.Image | None:
         """The PIL pixels behind a map image item: chart tiles, their stand-ins, the weather layer."""
-        app = self.app
         for tag in tags:
             if tag.startswith("tile:"):
-                key = tuple(int(part) for part in tag.split(":")[1:])
-                pixels = getattr(app, "_tile_pixels", {}).get(key)
-                if pixels is None:
-                    pixels = getattr(app, "_tile_fallback_pixels", {}).get(key)
-                if pixels is None:
-                    path = app._tile_path(key)
-                    if path.exists():
-                        try:
-                            with Image.open(path) as opened:
-                                pixels = opened.convert("RGB")
-                        except (OSError, ValueError):
-                            pixels = None
-                return pixels
+                return self._tile(tuple(int(part) for part in tag.split(":")[1:]), disk=True)
             if tag == "weather-overlay":
-                overlay = getattr(app, "_weather_overlay", None) or {}
+                overlay = getattr(self.app, "_weather_overlay", None) or {}
                 return overlay.get("pil")
         return None
+
+    def _paste_tiles(self, picture: Image.Image) -> bool:
+        """Lay the chart tiles of the view and its ring into the picture; False for vector maps."""
+        app = self.app
+        from run_gui import TILE_SIZE, geo_to_world, is_raster
+        if not is_raster(app.map_mode.get()):
+            return False
+        width, height = self.view
+        mx, my = self.margin
+        center_x, center_y = geo_to_world(*app.map_center, app.map_zoom)
+        tiles = app._visible_tiles(self.margin)
+        # Nearest first, so a limited number of disk reads go where they are seen first.
+        middle_x, middle_y = center_x / TILE_SIZE, center_y / TILE_SIZE
+        tiles.sort(key=lambda t: (t[3] + .5 - middle_x) ** 2 + (t[4] + .5 - middle_y) ** 2)
+        disk_reads = DISK_TILES_PER_PICTURE
+        for z, tile_x, tile_y, x_absolute, y_absolute in tiles:
+            key = (z, tile_x, tile_y)
+            in_memory = key in getattr(app, "_tile_pixels", {}) or key in getattr(app, "_tile_fallback_pixels", {})
+            if not in_memory and disk_reads <= 0:
+                continue
+            pixels = self._tile(key, disk=not in_memory)
+            disk_reads -= not in_memory
+            if pixels is not None:
+                picture.paste(pixels, (round(x_absolute * TILE_SIZE - center_x + width / 2 + mx),
+                                       round(y_absolute * TILE_SIZE - center_y + height / 2 + my)))
+        return True
 
     def _flatten(self) -> None:
         """Replace the chart's items with one picture of them (fixed overlays and margin ticks stay)."""
@@ -121,32 +164,47 @@ class MapMotion:
         canvas.addtag_withtag(FLAT, "all")
         for keep in (FIXED, "ruler-x", "ruler-y", PICTURE):
             canvas.dtag(keep, FLAT)
-        width, height = self.app._map_size
-        self.picture = self.flattener.render(FLAT, (width, height), self._sea())
+        self.view = tuple(self.app._map_size)
+        self.margin = margins(self.view)
+        picture = Image.new("RGB", (self.view[0] + 2 * self.margin[0], self.view[1] + 2 * self.margin[1]), self._sea())
+        # Same order as the canvas: land, then chart tiles over it (with the ring), then everything else.
+        self.flattener.render(f"{FLAT}&&map-land", picture, self.margin)
+        if self._paste_tiles(picture):
+            self.flattener.render(f"{FLAT}&&!map-land&&!{TILE}", picture, self.margin)
+        else:
+            self.flattener.render(f"{FLAT}&&!map-land", picture, self.margin)
         canvas.delete(FLAT)
-        self.photo = ImageTk.PhotoImage(self.picture, master=canvas)
-        canvas.create_image(0, 0, anchor="nw", image=self.photo, tags=(PICTURE,))
+        self.picture = picture
+        self.photo = ImageTk.PhotoImage(picture, master=canvas)
+        canvas.create_image(-self.margin[0], -self.margin[1], anchor="nw", image=self.photo, tags=(PICTURE,))
+        self._place_picture()
+        self.a, self.tx, self.ty = 1.0, 0.0, 0.0
+        self.timings.append(time.perf_counter() - started)
+        del self.timings[:-20]
+
+    def _place_picture(self) -> None:
+        canvas = self.app.map
         if canvas.find_withtag("map-sea"):
             canvas.tag_raise(PICTURE, "map-sea")
         else:
             canvas.tag_lower(PICTURE)
-        self.a, self.tx, self.ty = 1.0, 0.0, 0.0
-        self.timings.append(time.perf_counter() - started)
-        del self.timings[:-20]
 
     def _restore(self) -> None:
         """Back to normal drawing: drop the picture and redraw the map."""
         self.app.map.delete(PICTURE)
         self.picture = None
         self.photo = None
+        self.view_photo = None
+        self.rulers_hidden = False
         self.offset = [0.0, 0.0]
         self.pending_redraw = False
         self.drawing = True  # Draws through even mid-drag (a rest, or a zoom that ended during a drag)
         try:
+            # Show the tiles of the new view at once (decoded ones need no disk read), then draw once.
+            self.app._update_visible_tiles(draw=False)
             self.app._draw_map(force_static=True)
         finally:
             self.drawing = False
-        self.app._schedule_tile_refresh()
 
     def _move_rulers(self, dx: float, dy: float) -> None:
         canvas = self.app.map
@@ -169,15 +227,15 @@ class MapMotion:
         self.ty += dy
         self.offset[0] += dx
         self.offset[1] += dy
-        width, height = self.app._map_size
         self._cancel("pan_after")
-        if abs(self.offset[0]) > width * PAN_REDRAW_SHARE or abs(self.offset[1]) > height * PAN_REDRAW_SHARE:
-            self._pan_rest()
+        mx, my = self.margin
+        if abs(self.offset[0]) > mx or abs(self.offset[1]) > my:
+            self._pan_rest()  # The ring is used up: draw the new view now
         else:
             self.pan_after = self.app.root.after(PAN_REST_MS, self._pan_rest)
 
     def _pan_rest(self) -> None:
-        """The drag paused (or went far): draw the map properly, and get the next picture ready."""
+        """The drag paused (or used up the ring): draw the map properly, and get the next picture ready."""
         self.pan_after = None
         self._restore()
         if self.dragging:
@@ -209,12 +267,13 @@ class MapMotion:
         if state is None:
             self._cancel("pan_after")
             self._flatten()
+            # Zooming shows one view-sized frame at a time instead of the whole picture.
             canvas = self.app.map
-            # A picture moved by a drag goes back to the corner; its offset becomes part of the view.
-            coords = canvas.coords(PICTURE)
-            if coords and (coords[0] or coords[1]):
-                canvas.coords(PICTURE, 0, 0)
-                self.photo.paste(self.frame(self.a, self.tx, self.ty))
+            canvas.delete(PICTURE)
+            self.view_photo = ImageTk.PhotoImage("RGB", self.view, master=canvas)
+            canvas.create_image(0, 0, anchor="nw", image=self.view_photo, tags=(PICTURE,))
+            self._place_picture()
+            self.view_photo.paste(self.frame(self.a, self.tx, self.ty))
             state = self.zoom_state = {"A": self.a, "TX": self.tx, "TY": self.ty}
         # The drawn point now under the pointer must end under the pointer.
         drawn_x, drawn_y = (x - self.tx) / self.a, (y - self.ty) / self.a
@@ -247,15 +306,17 @@ class MapMotion:
             self.zoom_after = self.app.root.after(ZOOM_TICK_MS, self._zoom_frame)
 
     def frame(self, a: float, tx: float, ty: float) -> Image.Image:
-        """The picture as seen under ``screen = a * drawn + t``; uncovered parts are sea."""
-        matrix = (1 / a, 0, -tx / a, 0, 1 / a, -ty / a)  # Each screen pixel shows drawn pixel (u - t) / a
-        return self.picture.transform(self.picture.size, Image.Transform.AFFINE, matrix,
+        """The view as seen under ``screen = a * drawn + t``; beyond the picture is sea."""
+        mx, my = self.margin
+        # Each screen pixel u shows drawn point (u - t) / a, found at that point plus the ring in the picture.
+        matrix = (1 / a, 0, mx - tx / a, 0, 1 / a, my - ty / a)
+        return self.picture.transform(self.view, Image.Transform.AFFINE, matrix,
                                       resample=Image.Resampling.BILINEAR, fillcolor=self._sea())
 
     def _show(self, a: float, tx: float, ty: float) -> None:
         canvas = self.app.map
-        if self.picture is not None and self.photo is not None:
-            self.photo.paste(self.frame(a, tx, ty))  # In place: no new Tk image per frame
+        if self.picture is not None and self.view_photo is not None:
+            self.view_photo.paste(self.frame(a, tx, ty))  # In place: no new Tk image per frame
         k = a / self.a
         if abs(k - 1) > 1e-12:
             # Margin ticks: screen' = k * screen + (t - k * t_now), a scale by k about this origin.
@@ -264,6 +325,11 @@ class MapMotion:
             canvas.scale("ruler-y", ox, oy, 1, k)
         else:
             self._move_rulers(tx - self.tx, ty - self.ty)
+        hide = a < 0.999  # Zooming out would crowd the ticks into an unreadable strip
+        if hide != self.rulers_hidden:
+            for tag in ("ruler-x", "ruler-y"):
+                canvas.itemconfigure(tag, state="hidden" if hide else "normal")
+            self.rulers_hidden = hide
         self.a, self.tx, self.ty = a, tx, ty
 
     def finish_zoom(self) -> None:

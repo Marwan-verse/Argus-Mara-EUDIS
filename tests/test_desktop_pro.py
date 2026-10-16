@@ -97,6 +97,45 @@ class ProLookTests(unittest.TestCase):
         self.assertTrue(app._tile_images)
         self.assertLessEqual(app.map_zoom, desktop_basemap.SOURCES[desktop_basemap.HD_IMAGERY].max_zoom)
 
+    def test_a_drag_shows_cached_chart_beyond_the_view_edges(self):
+        from types import SimpleNamespace
+        from desktop_motion import margins
+        app = self.app
+        self.wait_for_tiles()
+        app._draw_map()
+        ring = margins(app._map_size)
+        red = Image.new('RGB', (256, 256), (200, 40, 40))
+        for z, x, y, *_rest in app._visible_tiles(ring):
+            app._tile_pixels[(z, x, y)] = red
+        app._pan_start(SimpleNamespace(x=300, y=300))
+        app._pan_move(SimpleNamespace(x=310, y=300))
+        picture = app.motion.picture
+        self.assertEqual(picture.size, (app._map_size[0] + 2 * ring[0], app._map_size[1] + 2 * ring[1]))
+        samples = [picture.getpixel((ring[0] // 2, picture.height * share)) for share in (0.3, 0.5, 0.7)]
+        self.assertIn((200, 40, 40), samples, 'the ring left of the view is not filled with chart tiles')
+        app._pan_end(SimpleNamespace(x=310, y=300))
+        self.assertFalse(app.motion.busy)
+
+    def test_cached_tiles_around_the_view_are_decoded_in_the_background(self):
+        import time
+        from desktop_basemap import SOURCES, TACTICAL_MAP
+        from desktop_motion import margins
+        app = self.app
+        self.wait_for_tiles()
+        ring = [key[:3] for key in app._visible_tiles(margins(app._map_size))
+                if key[:3] not in app._tile_pixels][:4]
+        self.assertTrue(ring)
+        for key in ring:
+            path = app._tile_path(key)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(fake_tile(SOURCES[TACTICAL_MAP], *key))
+        app._warm_ring(app.map_mode.get())
+        deadline = time.monotonic() + 5
+        while not all(key in app._tile_pixels for key in ring) and time.monotonic() < deadline:
+            self.root.update()
+            time.sleep(0.05)
+        self.assertTrue(all(key in app._tile_pixels for key in ring), 'ring tiles were not decoded')
+
     @unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Only macOS and Windows ship a known monospace family')
     def test_the_chart_font_exists_on_this_platform(self):
         import desktop_basemap
