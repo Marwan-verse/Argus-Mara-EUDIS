@@ -110,7 +110,9 @@ def _identity(obs, factors):
     if (obs.get("length_mismatch_pct") or 0) > 25:
         items.append(("I4", 1, f"Radar length differs {obs['length_mismatch_pct']:.0f}% from the AIS length"))
     if (obs.get("identity_changes") or 0) >= 1:
-        items.append(("I5", 1, f"Name, flag or MMSI changed {obs['identity_changes']}× in 12 months"))
+        # Sanctions lists record former names without dates; their detector names that basis instead.
+        basis = f" ({obs['identity_changes_basis']})" if obs.get("identity_changes_basis") else " in 12 months"
+        items.append(("I5", 1, f"Name, flag or MMSI changed {obs['identity_changes']}×{basis}"))
     if obs.get("static_incomplete"):
         items.append(("I6", 1, "Static AIS data incomplete: destination or IMO number missing"))
     return _capped(items, "identity", IDENTITY_CAP, factors)
