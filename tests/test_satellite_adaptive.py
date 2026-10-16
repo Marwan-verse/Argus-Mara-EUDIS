@@ -21,7 +21,7 @@ from argus.satellite_screen import water_mask
 from argus import supabase_ais
 from test_satellite import FakeTensorX, DEFAULT_QUESTION, WHEN
 from test_satellite_compare import vessel
-from test_satellite_scan import image_fixture
+from test_satellite_scan import RASTERS_AVAILABLE, image_fixture
 
 
 class Provider(FakeTensorX):
@@ -142,6 +142,7 @@ class AdaptiveTests(unittest.TestCase):
         self.assertEqual(result['analysis_windows'][0]['status'], 'complete')
         self.assertEqual(result['analysis_windows'][1]['status'], 'blocked')
 
+    @unittest.skipUnless(RASTERS_AVAILABLE, 'Optional satellite raster readers not installed')
     def test_only_fully_reviewed_clear_footprints_can_raise_negative_leads(self):
         visual = self.run_provider(Provider(cap_at=1))
         self.assertGreaterEqual(len(visual['contacts']), 24)
@@ -161,6 +162,7 @@ class AdaptiveTests(unittest.TestCase):
         visual['analysis_windows'].pop()
         self.assertEqual(analysis_coverage(self.scene, points[1], visual), 'image_analysis_coverage_unavailable')
 
+    @unittest.skipUnless(RASTERS_AVAILABLE, 'Optional satellite raster readers not installed')
     def test_database_clear_areas_exclude_capped_and_unreviewed_detail_windows(self):
         visual = self.run_provider(Provider(cap_at=1))
         areas = supabase_ais.observed_rectangles(self.scene, self.workspace.scenes, tiles=8, analysis=visual)
@@ -171,6 +173,7 @@ class AdaptiveTests(unittest.TestCase):
         capped = {**visual, 'analysis_windows': None, 'contact_limit_reached': True}
         self.assertEqual(supabase_ais.observed_rectangles(self.scene, self.workspace.scenes, analysis=capped), [])
 
+    @unittest.skipUnless(RASTERS_AVAILABLE, 'Optional satellite raster readers not installed')
     def test_database_area_boundaries_have_complete_clear_footprints(self):
         quality = Image.new('L', (64, 64), 6)
         quality.paste(9, (40, 0, 64, 64))
@@ -185,6 +188,7 @@ class AdaptiveTests(unittest.TestCase):
             for lon, lat in [(w, s), (w, n), (e, s), (e, n), ((w+e)/2, (s+n)/2)]:
                 self.assertEqual(visibility(self.scene, {'lat': lat, 'lon': lon}, mask), 'clear_water')
 
+    @unittest.skipUnless(RASTERS_AVAILABLE, 'Optional satellite raster readers not installed')
     def test_workspace_preserves_a_held_first_window_without_inventing_an_empty_detection(self):
         provider = Provider(fail_at=1)
         ais = {'acquired_utc': WHEN, 'vessels': [vessel(str(100000000+i)) for i in range(17)],

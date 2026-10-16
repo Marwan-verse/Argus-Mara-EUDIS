@@ -225,3 +225,76 @@ class CanvasList(tk.Frame):
                 self.render()
         else:
             self._scrollregion(self.content_height())
+
+
+class CanvasDocument(CanvasList):
+    """A scrolling page laid out top to bottom on one canvas: headings, indented lines, chips, buttons.
+
+    Used for the incident review window, whose explanation is rebuilt on every change. Each call
+    draws at the cursor ``y`` and moves it down; ``finish()`` sets the scroll region. Button tips go
+    to ``on_tip`` while the pointer is over the button.
+    """
+
+    def __init__(self, master, background: str, scrollbar: str, scrollbar_hover: str):
+        super().__init__(master, background, scrollbar, scrollbar_hover)
+        self.y = 0.0
+        self.tips: dict[str, str] = {}
+        self.on_tip = None
+
+    def clear(self) -> None:
+        self.canvas.delete("all")
+        self.actions.clear()
+        self.tips.clear()
+        self.y = 0.0
+
+    def finish(self, bottom: float = 8) -> None:
+        self._scrollregion(self.y + bottom)
+
+    @property
+    def page_width(self) -> int:
+        return max(160, self.canvas.winfo_width())
+
+    def texts(self) -> list[str]:
+        """Every text on the page, top to bottom (what a reader of the window sees)."""
+        canvas = self.canvas
+        items = [item for item in canvas.find_all() if canvas.type(item) == "text"]
+        items.sort(key=lambda item: (round(canvas.coords(item)[1]), canvas.coords(item)[0]))
+        return [canvas.itemcget(item, "text") for item in items]
+
+    def bottom(self, *items) -> float:
+        return max(self.canvas.bbox(item)[3] for item in items if self.canvas.bbox(item))
+
+    def text(self, x: float, text: str, fill: str, font, width: float | None = None, anchor: str = "nw",
+             y: float | None = None, justify: str = "left") -> int:
+        options = {"width": width} if width else {}
+        return self.canvas.create_text(x, self.y if y is None else y, text=text, anchor=anchor, fill=fill,
+                                       font=font, justify=justify, **options)
+
+    def chip(self, x: float, y: float, tag: str, fill: str, background: str, font, min_width: float = 0) -> float:
+        """A small filled tag; returns its right edge."""
+        label = self.canvas.create_text(x + 5, y + 1, text=tag, anchor="nw", fill=fill, font=font)
+        left, top, right, bottom = self.canvas.bbox(label)
+        right = max(right + 5, x + min_width)
+        box = self.canvas.create_rectangle(x, y, right, bottom + 1, fill=background, outline="")
+        self.canvas.tag_lower(box, label)
+        return right
+
+    def button(self, right: float, y: float, text: str, command, fill: str, background: str, border: str,
+               font, tip: str | None = None) -> float:
+        """A flat bordered button drawn right-aligned at ``right``; returns its left edge."""
+        tag = self.action(command)
+        label = self.canvas.create_text(right - 8, y + 3, text=text, anchor="ne", fill=fill, font=font, tags=(tag,))
+        left, _top, _right, bottom = self.canvas.bbox(label)
+        box = self.canvas.create_rectangle(left - 8, y, right, bottom + 3, fill=background, outline=border,
+                                           tags=(tag,))
+        self.canvas.tag_lower(box, label)
+        if tip:
+            self.tips[tag] = tip
+        return left - 8
+
+    def _motion(self, event) -> None:
+        super()._motion(event)
+        if self.on_tip:
+            tip = next((self.tips[tag] for tag in self.canvas.gettags("current") if tag in self.tips), None)
+            if tip:
+                self.on_tip(tip)

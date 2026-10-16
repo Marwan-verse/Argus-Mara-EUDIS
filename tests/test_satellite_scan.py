@@ -203,6 +203,7 @@ class CoastalScanTests(unittest.TestCase):
             self.assertEqual(state['jobs']['one']['status'], 'failed_review_required')
             self.assertFalse(engine.halt.is_set())
 
+    @unittest.skipUnless(RASTERS_AVAILABLE, 'Optional satellite raster readers not installed')
     def test_ais_expected_vessel_bypasses_empty_bright_feature_triage(self):
         with tempfile.TemporaryDirectory() as temp:
             workspace, scene, _ = image_fixture(Path(temp)/'satellite', feature=False)
@@ -223,6 +224,7 @@ class CoastalScanTests(unittest.TestCase):
             self.assertEqual(engine.state['jobs']['one']['status'], 'review_ready')
             self.assertEqual(engine.state['jobs']['one']['screening']['status'], 'ais_expected_image_review')
 
+    @unittest.skipUnless(RASTERS_AVAILABLE, 'Optional satellite raster readers not installed')
     def test_partial_adaptive_result_is_saved_and_pauses_paid_work_while_ais_can_continue(self):
         with tempfile.TemporaryDirectory() as temp:
             workspace, scene, _ = image_fixture(Path(temp)/'satellite')

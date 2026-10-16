@@ -57,7 +57,7 @@ def apply_palette() -> None:
 
 def _banner(root, before, side: str):
     banner = ctk.CTkLabel(root, text=MARKING, fg_color=MARKING_BG, text_color="#ffffff", height=20,
-                          corner_radius=0, font=ctk.CTkFont("Menlo", 11, "bold"))
+                          corner_radius=0, font=ctk.CTkFont(desktop_basemap.MONO, 11, "bold"))
     banner.pack(side=side, fill="x", before=before)
     return banner
 
