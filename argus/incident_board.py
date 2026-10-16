@@ -158,7 +158,7 @@ class Replay:
     def __init__(self, items: list[dict], scenario: dict, start_s: float, step_s: int = STEP_S):
         self.items, self.scenario, self.start_s, self.step_s = items, scenario, int(start_s), step_s
         self.decisions: list[dict] = []
-        self.fleet = responders.load_fleet()
+        self.fleet = responders.load_fleet(t0_utc=scenario.get("t0_utc"))  # the satellite look reads real UTC
         self.storm = False
         self.scored = (0, 0.0)  # (contacts Brain scored at the last step, milliseconds)
         self._reset()

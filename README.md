@@ -487,3 +487,16 @@ two fingers scroll the queue, and on macOS a pinch zooms the map. Pinching needs
 optional PyObjC package in `requirements-mac.txt`; `UPDATE-AND-RUN-MAC.command`
 installs it on its next run. Full rules:
 [Argus Mara alert levels](docs/12-argus-mara-alert-levels.md).
+
+### Sanctions and shadow-fleet list check (real data)
+
+`python -m argus.watchlist_data update` keeps a daily copy of the OpenSanctions
+maritime list (EU, UK, US, Canadian, Swiss and UN sanctions, Ukraine GUR's shadow fleet
+and port-state detentions; CC BY-NC 4.0) in the git-ignored `data/watchlist/`, checking at
+most once a day. The `watchlist` detector then gives a real ship rule C1 (+2) when its MMSI
+or IMO is on a sanctions list or in GUR's shadow fleet, C2 (+1) for flag-risk signs from
+the bundled ITU MID table, and I5 (+1) for former names. It never matches by name.
+Port-state records, distress beacons (MMSI 970/972/974) and unallocated country codes are
+information only. `python -m argus.watchlist_data scan-live` checks every contact in the
+team's live feed; on 16 Oct it found 13 sanctioned and 6 suspected ships since 8 Oct.
+Details: [lists in the alert rules](docs/12-argus-mara-alert-levels.md#sanctions-and-shadow-fleet-lists-rules-c1-c2-and-i5) (D87).
