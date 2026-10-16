@@ -147,21 +147,32 @@ SOURCES = {
                  "Exercise · from track: the registered detectors scored the exercise vessel's AIS track"),
     "sim": ("SIM", "SIM · HAND-WRITTEN",
             "SIM · hand-written observations: the board's observations for this contact were written by hand"),
+    "real": ("REAL", "REAL · LIVE AIS",
+             "Real · live AIS: the registered detectors scored this ship's AIS track from the team database "
+             "(argus.live_alerts)"),
 }
+SHORT = {"sim": "hand-written", "real": "live AIS"}
 
 
 def source(item: dict) -> dict:
     """Where the contact's observations come from, for the card, the map label and the review window."""
-    key = "story" if item.get("story") else "exercise" if item.get("exercise") else "sim"
+    key = ("real" if item.get("label") == "real" else "story" if item.get("story")
+           else "exercise" if item.get("exercise") else "sim")
     tag, long_tag, text = SOURCES[key]
-    return {"key": key, "tag": tag, "long_tag": long_tag, "text": text,
-            "short": "from track" if key != "sim" else "hand-written"}
+    return {"key": key, "tag": tag, "long_tag": long_tag, "text": text, "short": SHORT.get(key, "from track")}
 
 
 def labels(item: dict) -> list[tuple[str, str]]:
     """Data labels for the review window: (tag, what it covers)."""
     found = [("SOURCE", source(item)["text"])]
-    if item.get("story"):
+    if item.get("label") == "real":
+        found.append(("REAL", "Ship name, MMSI, type and track: public AIS in the team database (the Railway "
+                              "feed, copied every 30 s)"))
+        found.append(("ILLUSTRATIVE", "Cable routes are drawn for illustration, not surveyed positions; distances "
+                                      "to them are approximate"))
+        found.append(("ASSUMPTION", "Harbour craft are not assessed: within 2.5 nm of a listed port, inside a "
+                                    "harbour, or moored for the last hour"))
+    elif item.get("story"):
         found.append(("SIMULATED", "Vessel and AIS track are fictional; no observation is written by hand"))
         found.append(("ILLUSTRATIVE", "The cable route is drawn for illustration"))
         found.append(("ASSUMPTION", "Route depth unknown: an anchor is assumed to reach the seabed along the whole "
