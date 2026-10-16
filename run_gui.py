@@ -347,7 +347,9 @@ class ArgusApp:
 
     def _configure_window(self) -> None:
         from desktop_gestures import speed_up_scrollbars
+        from desktop_tk_safety import guard_tk_finalizers
         speed_up_scrollbars()  # Before any panel creates a scrollable list
+        guard_tk_finalizers()  # Worker threads must never release Tk objects (they could hang for ever)
         self.root.title("Argus Mara — maritime intelligence")
         ctk.set_appearance_mode("dark")
         ctk.ThemeManager.theme['CTkFont']['family'] = 'Segoe UI'
