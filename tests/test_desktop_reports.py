@@ -77,7 +77,7 @@ class DesktopReportTests(unittest.TestCase):
         self.assertEqual(self.app.report_dialog.vessel, board_snapshot(board.by_id["SIM-40"]))
 
     def settle(self, dialog):
-        for _ in range(200):
+        for _ in range(1500):  # up to about 15 s: a PDF render is slower under a loaded test run
             self.root.update()
             if not dialog.busy:
                 return
@@ -162,8 +162,19 @@ class DesktopReportTests(unittest.TestCase):
         dialog.check_button.invoke()
         self.settle(dialog)
         self.assertIn("Placeholder left in the text", self.notes(dialog))
-        dialog.pdf_button.invoke()
-        self.assertIn("coming in the next step", self.notes(dialog))
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        target = Path(folder.name) / "report.pdf"
+        with patch("desktop_reports.filedialog.asksaveasfilename", return_value="") as cancelled:
+            dialog.pdf_button.invoke()
+        cancelled.assert_called_once()
+        self.assertFalse(dialog.busy)
+        with patch("desktop_reports.filedialog.asksaveasfilename", return_value=str(target)):
+            dialog.pdf_button.invoke()
+            self.settle(dialog)
+        self.assertIn("PDF saved", self.notes(dialog))
+        self.assertTrue(target.read_bytes().startswith(b"%PDF"))
+        self.assertEqual(self.app.vessel_reports.entries, [])  # saving a PDF sends nothing
         dialog.close()
 
     def test_soc_success_and_peer_receive_create_incidents_without_echo(self):
