@@ -258,9 +258,15 @@ The live-verified Qwen route reports image tokens. A response without positive
 image-token accounting is rejected instead of becoming a false zero-contact
 result. This connection check does not establish vessel-detection accuracy.
 
-Reported token cost is shown separately from this deliberately conservative
-reservation. Failed, malformed or uncertain calls keep their reservation; they
-are never retried automatically. A per-workspace exclusive file prevents racing
+**Settling at the real cost (D86).** When the provider answers with valid token usage, within the model's limits and not above the reservation, the call is settled at that reported cost and the rest of its reservation returns to the budget. `reserved_usd` therefore holds settled real costs plus the full reservation of any call that failed or is still open; `settled_calls` counts the settled ones.
+
+- Usage above the reservation still halts all spending.
+- Failed, malformed or uncertain calls, such as a timeout or a response without usage, keep the full reservation, because they may have been charged.
+- Every call still needs one full reservation of headroom when it starts.
+
+Measured on the 13 Oct Dublin Bay run: 34 calls reserved $1.81 but were reported at $0.0134, about $0.0004 per check. Settled this way, the $20 ceiling covers roughly 50,000 checks instead of about 375, which is enough for the whole coastal belt every day. Ledgers written before D86 keep their old reservations; only new calls settle.
+
+Failed, malformed or uncertain calls are never retried automatically. A per-workspace exclusive file prevents racing
 calls; after a crash, an operator must verify the old process has stopped before
 removing `data/satellite/ai/analysis.lock`. Do not delete `budget.json` to resume.
 

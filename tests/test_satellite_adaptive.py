@@ -133,7 +133,10 @@ class AdaptiveTests(unittest.TestCase):
 
     def test_budget_exhaustion_keeps_completed_window_and_withholds_unreviewed_areas(self):
         self.root.mkdir()
-        atomic_json(self.root/'budget.json', {'reserved_usd': 19.94, 'reported_usd': 0, 'calls': 0})
+        # D86 settles a verified call at its real cost, so leave room for exactly one
+        # reservation: the first window fits, and once it settles the next one does not.
+        reserve, actual = (256000*.20+1536*.50)/1e6, (300*.20+100*.50)/1e6
+        atomic_json(self.root/'budget.json', {'reserved_usd': 20-reserve-actual/2, 'reported_usd': 0, 'calls': 0})
         provider = Provider()
         result = self.run_provider(provider)
         self.assertEqual(len(provider.paid), 1)

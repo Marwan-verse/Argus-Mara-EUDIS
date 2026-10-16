@@ -2,8 +2,10 @@
 
 No tools, agent loop, automatic retries, chat history or AIS payload is sent.
 The full advertised input context is reserved before each paid call, because
-image token accounting can vary by model. Failed/ambiguous calls keep that
-reservation. Cached results are free to open and can be rejoined to new AIS.
+image token accounting can vary by model. Valid provider usage then settles the
+call at its real cost and returns the rest of the reservation; failed/ambiguous
+calls keep the full reservation. Cached results are free to open and can be
+rejoined to new AIS.
 """
 from __future__ import annotations
 
@@ -140,6 +142,8 @@ def read_ledger(root):
     for field in ('reserved_usd', 'reported_usd', 'calls'):
         if field not in value or finite(value[field], field) < 0:
             raise ValueError('Invalid budget ledger; restore the host ledger before spending')
+    if 'settled_calls' in value and not 0 <= finite(value['settled_calls'], 'settled_calls') <= value['calls']:
+        raise ValueError('Invalid budget ledger; restore the host ledger before spending')
     return value
 
 
@@ -250,6 +254,10 @@ def visual_analysis(root, scene, image, question, *, transport=json_http):
                 ledger['halted'] = True
                 atomic_json(root/'budget.json', ledger)
                 raise ValueError('Provider usage exceeded the reservation; further spending is halted')
+            # Valid usage is the real charge: settle at it and return the unused
+            # reservation. Calls that fail before this point keep it all.
+            ledger['reserved_usd'] = max(0., ledger['reserved_usd']-(reserve-actual))
+            ledger['settled_calls'] = ledger.get('settled_calls', 0)+1
             atomic_json(root/'budget.json', ledger)
             # The enabled Qwen deployment reported actual image tokens in the
             # live image-only challenge. A text-only reply must never become a
