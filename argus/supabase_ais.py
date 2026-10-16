@@ -23,7 +23,9 @@ from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-DEFAULT_URL = 'https://zibmytppznydhlggzlaq.supabase.co'
+# D106: the one team database is argus-mara in the Argus Mara organisation.
+DEFAULT_URL = 'https://lcpgnzvkntqdhejrsgpa.supabase.co'
+ROOT = Path(__file__).resolve().parents[1]
 SERVICE, ACCOUNT = 'ArgusMara.Supabase', 'secret-key'
 LIMIT = 16 * 1024 * 1024
 KEY_FORMAT = re.compile(r'sb_secret_[A-Za-z0-9_-]{16,200}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+')
@@ -40,8 +42,34 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def base_url():
-    url = os.environ.get('ARGUS_SUPABASE_URL', DEFAULT_URL).strip().rstrip('/')
+def linked_url(root=None):
+    """The project this workspace's key was checked against when it was linked, if recorded.
+
+    A secret key belongs to one project, so the client follows the link instead of a
+    default that may have changed since. Only https://<project>.supabase.co is accepted,
+    so an edited link file cannot send the key anywhere else.
+    """
+    path = Path(root or os.environ.get('ARGUS_SATELLITE_ROOT') or ROOT/'data/satellite')/LINK_FILE
+    try:
+        url = json.loads(path.read_text(encoding='utf-8')).get('url')
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not isinstance(url, str):
+        return None
+    url = url.strip().rstrip('/')
+    parts = urlsplit(url)
+    if parts.scheme != 'https' or parts.path or not (parts.hostname or '').endswith('.supabase.co'):
+        return None
+    return url
+
+
+def base_url(*, follow_link=True, root=None):
+    """ARGUS_SUPABASE_URL, else the project this workspace was linked to, else the team project.
+
+    New keys are checked against the explicit or team project (``follow_link=False``).
+    """
+    url = (os.environ.get('ARGUS_SUPABASE_URL', '').strip() or (linked_url(root) if follow_link else None)
+           or DEFAULT_URL).rstrip('/')
     parts = urlsplit(url)
     if parts.scheme != 'https' or not parts.hostname or parts.path:
         raise ValueError('ARGUS_SUPABASE_URL must be an https://<project>.supabase.co address')
@@ -114,7 +142,7 @@ def linked(root):
 def link(root):
     path = Path(root)/LINK_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({'url': base_url(), 'note': 'Coast Watch uses the team Supabase database. '
+    path.write_text(json.dumps({'url': base_url(follow_link=False), 'note': 'Coast Watch uses the team Supabase database. '
                                 'Delete this file to stop.'}, indent=2) + '\n', encoding='utf-8')
     return path
 

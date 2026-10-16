@@ -164,5 +164,43 @@ class SceneUploadTests(unittest.TestCase):
         self.assertTrue(all(AREA[1] - 1e-6 <= south < north <= AREA[3] + 1e-6 for _, south, _, north in areas))
 
 
+class ProjectAddressTests(unittest.TestCase):
+    """D106: a key is always used with the project it was linked to."""
+
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.root = Path(self.folder.name)
+        self.env = patch.dict(os.environ, {'ARGUS_SATELLITE_ROOT': str(self.root)})
+        self.env.start()
+        os.environ.pop('ARGUS_SUPABASE_URL', None)
+
+    def tearDown(self):
+        self.env.stop()
+        self.folder.cleanup()
+
+    def link_to(self, url):
+        (self.root/supabase_ais.LINK_FILE).write_text(json.dumps({'url': url}), encoding='utf-8')
+
+    def test_without_a_link_the_team_project_is_used(self):
+        self.assertEqual(supabase_ais.base_url(), 'https://lcpgnzvkntqdhejrsgpa.supabase.co')
+
+    def test_a_linked_workspace_keeps_the_project_its_key_was_checked_against(self):
+        self.link_to('https://otherprojectref.supabase.co/')
+        self.assertEqual(supabase_ais.base_url(), 'https://otherprojectref.supabase.co')
+        self.assertEqual(supabase_ais.base_url(follow_link=False), supabase_ais.DEFAULT_URL)
+        with patch.dict(os.environ, {'ARGUS_SUPABASE_URL': 'https://explicitref.supabase.co'}):
+            self.assertEqual(supabase_ais.base_url(), 'https://explicitref.supabase.co')
+
+    def test_a_link_file_cannot_send_the_key_outside_supabase(self):
+        for url in ('https://example.com', 'http://otherprojectref.supabase.co', 'https://x.supabase.co/rest', 42):
+            self.link_to(url)
+            self.assertEqual(supabase_ais.base_url(), supabase_ais.DEFAULT_URL, url)
+
+    def test_linking_records_the_explicit_or_team_project_not_an_old_link(self):
+        self.link_to('https://otherprojectref.supabase.co')
+        supabase_ais.link(self.root)
+        self.assertEqual(json.loads((self.root/supabase_ais.LINK_FILE).read_text())['url'], supabase_ais.DEFAULT_URL)
+
+
 if __name__ == '__main__':
     unittest.main()

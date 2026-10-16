@@ -66,7 +66,7 @@ def connect_database(root, ask=getpass, rpc=supabase_ais.http_rpc, save=supabase
             print('  Not saved: that is not a Supabase secret key (sb_secret_...)')
             continue
         try:
-            state = rpc(supabase_ais.base_url()+'/rest/v1/rpc/argus_ais_status', {}, key)
+            state = rpc(supabase_ais.base_url(follow_link=False)+'/rest/v1/rpc/argus_ais_status', {}, key)
             save(key)
             link(root)
         except (ValueError, OSError) as error:
