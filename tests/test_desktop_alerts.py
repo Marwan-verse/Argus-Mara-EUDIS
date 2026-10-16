@@ -1,4 +1,6 @@
 """The docked incident board groups, labels and records decisions without sending anything."""
+from pathlib import Path
+import tempfile
 import tkinter as tk
 import unittest
 from types import SimpleNamespace
@@ -20,7 +22,10 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.root.attributes('-alpha', 0)
         self.errors = []
         self.root.report_callback_exception = lambda *error: self.errors.append(error)
-        with patch.dict('os.environ', {'ARGUS_AIS_AUTOCONNECT': '0', 'ARGUS_UI_PREFERENCES': ''}):
+        self.temp = tempfile.TemporaryDirectory()  # The signed decision log, away from the real one.
+        self.addCleanup(self.temp.cleanup)
+        with patch.dict('os.environ', {'ARGUS_AIS_AUTOCONNECT': '0', 'ARGUS_UI_PREFERENCES': '',
+                                       'ARGUS_DECISION_LOG': str(Path(self.temp.name) / 'decision-log.jsonl')}):
             self.app = ArgusApp(self.root, *load_demo())
         self.app.ais_tracker.cache_path = None
         self.app.ais_tracker.state = LiveState()
@@ -294,6 +299,34 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertEqual(board.status('SIM-41'), 'New')
         self.assertEqual(board.replay.decisions, [])
         self.assertEqual([text for _t, text in board.history['SIM-01']], ['Incident INC-SIM-01-1 opened at Critical'])
+
+    def test_decisions_are_signed_and_a_changed_letter_is_caught(self):
+        board, dialog = self.board, self.board.dialog
+        self.assertEqual(board.decision_log.path.parent, Path(self.temp.name))
+        board.open('SIM-01')
+        dialog.open_form('escalate')
+        dialog.choice.set('Irish Coast Guard (MRCC)')
+        dialog.confirm()
+        records = board.decision_log.records()
+        self.assertEqual([record['kind'] for record in records], ['start', 'decision'])
+        decision = records[1]
+        self.assertEqual((decision['action'], decision['alert'], decision['to'], decision['simulated']),
+                         ('Escalated', 'SIM-01', 'Irish Coast Guard (MRCC)', True))
+        self.assertTrue(decision['operator'].endswith('(this computer)'))
+        board.open_log()
+        window = board.log_window
+        self.root.update()
+        self.assertIn('Escalated', window.text.get('1.0', 'end'))
+        window.verify()
+        self.assertIn('1 decision verified', window.result.cget('text'))
+        path = board.decision_log.path
+        lines = path.read_text(encoding='utf-8').splitlines()
+        lines[1] = lines[1].replace('Irish Coast Guard', 'Irish Coast Guarb')
+        path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+        window.verify()
+        self.assertIn('Record 1: the signature does not match', window.result.cget('text'))
+        self.assertIn('Escalated  · CHANGED AFTER SIGNING', window.text.get('1.0', 'end'))
+        window.window.destroy()
 
     def test_exercise_incident_shares_review_status_and_map_click_opens_it(self):
         app, board, tools = self.app, self.board, self.app.tools
