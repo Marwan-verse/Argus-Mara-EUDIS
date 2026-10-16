@@ -310,7 +310,7 @@ class ArgusApp:
             "decision": "Decision review", "weather": "Live weather",
             "ais": "AIS ship tracker", "sar_plan": "SAR next step",
             "satellite": "Satellite analysis",
-            "views": "Saved map views",
+            "views": "Saved map views", "magnetics": "Magnetics",
         }
         self._decision_choice = tk.StringVar(value="")
         self._decision_acknowledged = tk.BooleanVar(value=False)
@@ -322,6 +322,8 @@ class ArgusApp:
         self.ais_tracker = DesktopAIS(self, cache_path=ROOT / "data/desktop/ais_latest.json")
         from desktop_satellite import DesktopSatellite
         self.satellite = DesktopSatellite(self, ROOT / 'data/satellite')
+        from desktop_magnetics import DesktopMagnetics
+        self.magnetics = DesktopMagnetics(self, ROOT / 'data/magnetics')
         self._build_modern()
         self.render()
         self.root.after(80, self._tick)
@@ -829,6 +831,8 @@ class ArgusApp:
             self.ais_tracker.build(frame)
         elif key == 'satellite':
             self.satellite.build(frame)
+        elif key == 'magnetics':
+            self.magnetics.build(frame)
         elif key == "sar_plan":
             text = tk.Text(frame, wrap="word", padx=15, pady=12, font=("Segoe UI", 11),
                            bg=CARD, fg=INK, insertbackground=INK, relief="flat")
@@ -1924,6 +1928,8 @@ class ArgusApp:
             self.ais_tracker.close()
         if hasattr(self, 'satellite'):
             self.satellite.close()
+        if hasattr(self, 'magnetics'):
+            self.magnetics.close()
         self._tile_executor.shutdown(wait=False, cancel_futures=True)
         self._weather_executor.shutdown(wait=False, cancel_futures=True)
         # Cancel callbacks before Tk deletes their registered commands. This
@@ -2641,6 +2647,8 @@ class ArgusApp:
         self._draw_weather_overlay(width, height)
         if hasattr(self, 'satellite'):
             self.satellite.draw()
+        if hasattr(self, 'magnetics'):
+            self.magnetics.draw()
         if self.map_layers["Historical cable routes"].get():
             self._draw_world_cables(width, height)
         if self.map_layers["World ports"].get():
