@@ -60,6 +60,15 @@ create a virtual environment, run `python -m pip install -r requirements.txt`, t
 `python run_gui.py`. The app needs Python 3.10+ with Tkinter (Tcl/Tk) enabled; on
 Windows, include **Tcl/Tk and IDLE** in the Python installer. Use
 `python run_gui.py --check` to validate the local inputs without opening a window.
+
+The app opens in the **tactical chart** look: a detailed dark chart built from EMODnet
+Bathymetry relief (seabed and land), a satellite HD layer (Esri World Imagery, street level),
+a lat/lon margin scale, cursor position with MGRS, a nautical-mile scale bar and marking
+banners. Both maps are online and cached on the device; run
+`python scripts/prefetch_map_tiles.py` once before a demo to store Irish waters (about
+3,200 tiles, about 100 MB) for offline use. The **original look** stays available:
+`UPDATE-AND-RUN-OLD-MAC.command`, `UPDATE-AND-RUN-OLD-WINDOWS.bat`,
+`RUN-GUI-OLD-WINDOWS.bat`, or `python run_gui.py --old`.
 CustomTkinter styles the native dashboard and Pillow displays NASA JPEG imagery; the
 same two JSON files drive the replay. Choose **Continue offline** or use
 `python run_gui.py --offline` for a single session without Docker. The local
