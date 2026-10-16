@@ -250,13 +250,7 @@ class DesktopAlertBoardTests(unittest.TestCase):
         board, dialog = self.board, self.board.dialog
 
         def texts():
-            found, stack = [], list(dialog.body.winfo_children())
-            while stack:
-                widget = stack.pop(0)
-                stack.extend(widget.winfo_children())
-                if isinstance(widget, tk.Label):
-                    found.append(widget.cget('text'))
-            return found
+            return dialog.body.texts()
 
         board.set_filter('low')
         self.assertEqual(self.flags('SIM-47'), [])  # a lone GPS glitch is not flagged as spoofing
@@ -273,22 +267,16 @@ class DesktopAlertBoardTests(unittest.TestCase):
         for tag in ('SIMULATED', 'REAL', 'ASSUMPTION', 'ILLUSTRATIVE'):
             self.assertIn(tag, shown)
         self.assertIn('AIS spoofing?   Small craft · cap lifted', dialog.flags.cget('text'))
-        dialog.body._parent_canvas.yview_moveto(1)
+        dialog.body.canvas.yview_moveto(1)
         board.open('SIM-44')
-        self.assertEqual(dialog.body._parent_canvas.yview()[0], 0)
+        self.assertEqual(dialog.body.canvas.yview()[0], 0)
         self.assertTrue(any(text.startswith('Also named: Gas interconnector IC2') for text in texts()))
 
     def test_who_can_reach_it_shows_on_card_window_and_map_and_a_storm_grounds_drones(self):
         board, dialog = self.board, self.board.dialog
 
         def texts():
-            found, stack = [], list(dialog.body.winfo_children())
-            while stack:
-                widget = stack.pop(0)
-                stack.extend(widget.winfo_children())
-                if isinstance(widget, tk.Label):
-                    found.append(widget.cget('text'))
-            return found
+            return dialog.body.texts()
 
         card = board.cards['SIM-41']['respond']
         self.assertTrue(card.winfo_manager())
