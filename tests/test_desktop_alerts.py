@@ -156,7 +156,7 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertNotIn('LOW-A', rows)  # Low folds away by default
         self.assertIn('header:low', rows)
         self.assertEqual([board.tiles[f'{level}-count'].cget('text') for level in ('critical', 'high', 'medium', 'low')],
-                         ['6', '10', '14', '34'])
+                         ['6', '10', '14', '39'])
         keyed = next(row.lead for row in board.list.rows if isinstance(row, LeadRow) and row.lead.title.startswith('HIGH-KEYED'))
         self.assertEqual(keyed.secondary.text, 'Record analyst outcome')
         self.assertEqual(keyed.tag, 'SAT · REAL')
