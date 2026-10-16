@@ -119,6 +119,7 @@ def main() -> int:
     shot("09-zoom-out-end")
 
     report["flatten_ms"] = [round(value * 1000, 1) for value in app.motion.timings]
+    report["prepare_ms"] = round(app.motion.prepare_seconds * 1000, 1)
     (output / "timings.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps(report, indent=2))
     app.close()

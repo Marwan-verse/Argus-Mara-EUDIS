@@ -116,6 +116,35 @@ class ProLookTests(unittest.TestCase):
         app._pan_end(SimpleNamespace(x=310, y=300))
         self.assertFalse(app.motion.busy)
 
+    def test_a_zoom_picture_holds_the_tiles_that_were_drawn_not_the_target_level(self):
+        app = self.app
+        self.wait_for_tiles()
+        app._draw_map()
+        zoom = app.map_zoom
+        width, height = app._map_size
+        app._zoom_at(1, width / 2, height / 2)  # The map already holds the next level when the picture is made
+        picture, (mx, my) = app.motion.picture, app.motion.margin
+        samples = [picture.getpixel((mx + int(width * fx), my + int(height * fy)))
+                   for fx in (.3, .5, .7) for fy in (.3, .5, .7)]
+        self.assertIn((10 + zoom, 20, 30), samples, f'no level-{zoom} tile in the picture: {samples}')
+        app.motion.finish_zoom()
+
+    def test_zooming_out_shows_the_target_levels_tiles_around_the_shrinking_picture(self):
+        app = self.app
+        self.wait_for_tiles()
+        app._draw_map()
+        width, height = app._map_size
+        coarse = Image.new('RGB', (256, 256), (77, 88, 99))
+        for z, x, y, *_rest in app._visible_tiles(center=app.map_center, zoom=app.map_zoom - 1):
+            app._tile_pixels[(z, x, y)] = coarse
+        app._zoom_at(-1, width / 2, height / 2)  # About the centre, so the target centre is the same
+        motion = app.motion
+        self.assertIsNotNone(motion.backdrop)
+        state = motion.zoom_state
+        landed = motion.frame(state['A'], state['TX'], state['TY'])
+        self.assertEqual(landed.getpixel((2, 2)), (77, 88, 99), 'the corner the picture left is not chart')
+        motion.finish_zoom()
+
     def test_cached_tiles_around_the_view_are_decoded_in_the_background(self):
         import time
         from desktop_basemap import SOURCES, TACTICAL_MAP

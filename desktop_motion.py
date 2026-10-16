@@ -7,7 +7,9 @@ overlays) is copied into one picture by ``desktop_flatten`` and those items are 
 
 The picture is bigger than the view by a quarter on every side. The extra ring is filled with
 chart tiles already decoded in memory (``run_gui`` decodes the cached tiles around the view in
-the background), so a drag or a zoom-out shows real chart at the edges instead of a blank.
+the background), so a drag shows real chart at the edges instead of a blank. While zooming out,
+the parts of the view the picture no longer covers show the cached tiles of the level being
+zoomed to (the backdrop), so the chart around the shrinking picture is already there.
 
 * Drag: one ``canvas.move`` of the picture per mouse event. When the drag rests, or uses up the
   ring, the map is redrawn normally and copied again while the pointer is still, so the next
@@ -30,7 +32,7 @@ from __future__ import annotations
 import time
 import tkinter as tk
 
-from PIL import Image, ImageColor, ImageTk
+from PIL import Image, ImageColor, ImageDraw, ImageTk
 
 from desktop_flatten import Flattener
 
@@ -69,9 +71,28 @@ class MapMotion:
         self.photo: ImageTk.PhotoImage | None = None  # Shows the whole picture while dragging
         self.view_photo: ImageTk.PhotoImage | None = None  # Shows one transformed view while zooming
         self.rulers_hidden = False
+        self.cover: Image.Image | None = None  # Where the picture has real chart (255) rather than empty sea
+        self.backdrop: Image.Image | None = None  # Tiles of the zoom target, in target screen points
         self.a, self.tx, self.ty = 1.0, 0.0, 0.0  # How the drawn chart sits on screen now
         self.flattener: Flattener | None = None
         self.timings: list[float] = []  # Seconds spent copying the chart, for tests and tuning
+        self.prepared = False
+        self.prepare_seconds = 0.0
+        app.root.after(2500, self.prepare)
+
+    def prepare(self) -> None:
+        """Load the drawing code and fonts while the app is idle, so the first drag or zoom starts at once."""
+        app = self.app
+        if self.prepared or self.busy or not hasattr(app, "map") or not app.map.winfo_exists():
+            return
+        if not app.map.find_all():
+            app.root.after(1000, self.prepare)
+            return
+        self.flattener = Flattener(app.map, self._image_source)
+        started = time.perf_counter()
+        self.flattener.render("all", Image.new("RGB", (1, 1)))  # Resolves every font on the map once
+        self.prepared = True
+        self.prepare_seconds = time.perf_counter() - started
 
     # ----- shared -------------------------------------------------------------------------
     @property
@@ -126,30 +147,45 @@ class MapMotion:
                 return overlay.get("pil")
         return None
 
-    def _paste_tiles(self, picture: Image.Image) -> bool:
-        """Lay the chart tiles of the view and its ring into the picture; False for vector maps."""
+    def _lay_tiles(self, picture: Image.Image, center, zoom: int, size, offset, cover=None) -> int:
+        """Lay the chart tiles for a view of ``size`` at ``center`` and ``zoom`` into the picture, the
+        view's corner at ``offset``. Nearest tiles first, from memory, with a few disk reads."""
         app = self.app
-        from run_gui import TILE_SIZE, geo_to_world, is_raster
-        if not is_raster(app.map_mode.get()):
-            return False
-        width, height = self.view
-        mx, my = self.margin
-        center_x, center_y = geo_to_world(*app.map_center, app.map_zoom)
-        tiles = app._visible_tiles(self.margin)
-        # Nearest first, so a limited number of disk reads go where they are seen first.
+        from run_gui import TILE_SIZE, geo_to_world
+        center_x, center_y = geo_to_world(*center, zoom)
+        width, height = size
+        tiles = app._visible_tiles((max(0, offset[0]), max(0, offset[1])), center, zoom)
         middle_x, middle_y = center_x / TILE_SIZE, center_y / TILE_SIZE
         tiles.sort(key=lambda t: (t[3] + .5 - middle_x) ** 2 + (t[4] + .5 - middle_y) ** 2)
-        disk_reads = DISK_TILES_PER_PICTURE
+        disk_reads, laid = DISK_TILES_PER_PICTURE, 0
+        pixels_in_memory = getattr(app, "_tile_pixels", {})
+        stand_ins = getattr(app, "_tile_fallback_pixels", {})
+        draw = ImageDraw.Draw(cover) if cover is not None else None
         for z, tile_x, tile_y, x_absolute, y_absolute in tiles:
             key = (z, tile_x, tile_y)
-            in_memory = key in getattr(app, "_tile_pixels", {}) or key in getattr(app, "_tile_fallback_pixels", {})
+            in_memory = key in pixels_in_memory or key in stand_ins
             if not in_memory and disk_reads <= 0:
                 continue
             pixels = self._tile(key, disk=not in_memory)
             disk_reads -= not in_memory
             if pixels is not None:
-                picture.paste(pixels, (round(x_absolute * TILE_SIZE - center_x + width / 2 + mx),
-                                       round(y_absolute * TILE_SIZE - center_y + height / 2 + my)))
+                at = (round(x_absolute * TILE_SIZE - center_x + width / 2 + offset[0]),
+                      round(y_absolute * TILE_SIZE - center_y + height / 2 + offset[1]))
+                picture.paste(pixels, at)
+                laid += 1
+                if draw is not None:
+                    draw.rectangle((at[0], at[1], at[0] + TILE_SIZE - 1, at[1] + TILE_SIZE - 1), fill=255)
+        return laid
+
+    def _paste_tiles(self, picture: Image.Image) -> bool:
+        """Lay the chart tiles of the drawn view and its ring into the picture; False for vector maps."""
+        app = self.app
+        from run_gui import is_raster
+        if not is_raster(app.map_mode.get()):
+            return False
+        # The canvas shows the view as last drawn; the map's centre may already hold a zoom or drag target.
+        center, zoom = getattr(app, "_drawn_view", (app.map_center, app.map_zoom))
+        self._lay_tiles(picture, center, zoom, self.view, self.margin, self.cover)
         return True
 
     def _flatten(self) -> None:
@@ -166,7 +202,12 @@ class MapMotion:
             canvas.dtag(keep, FLAT)
         self.view = tuple(self.app._map_size)
         self.margin = margins(self.view)
-        picture = Image.new("RGB", (self.view[0] + 2 * self.margin[0], self.view[1] + 2 * self.margin[1]), self._sea())
+        size = (self.view[0] + 2 * self.margin[0], self.view[1] + 2 * self.margin[1])
+        picture = Image.new("RGB", size, self._sea())
+        # The view itself always counts as covered; the ring only where a tile was laid.
+        self.cover = Image.new("L", size, 0)
+        ImageDraw.Draw(self.cover).rectangle((self.margin[0], self.margin[1], self.margin[0] + self.view[0] - 1,
+                                              self.margin[1] + self.view[1] - 1), fill=255)
         # Same order as the canvas: land, then chart tiles over it (with the ring), then everything else.
         self.flattener.render(f"{FLAT}&&map-land", picture, self.margin)
         if self._paste_tiles(picture):
@@ -195,6 +236,8 @@ class MapMotion:
         self.picture = None
         self.photo = None
         self.view_photo = None
+        self.cover = None
+        self.backdrop = None
         self.rulers_hidden = False
         self.offset = [0.0, 0.0]
         self.pending_redraw = False
@@ -279,6 +322,7 @@ class MapMotion:
         drawn_x, drawn_y = (x - self.tx) / self.a, (y - self.ty) / self.a
         state["A"] *= factor
         state["TX"], state["TY"] = x - state["A"] * drawn_x, y - state["A"] * drawn_y
+        self._prepare_backdrop(state)
         state["from"] = (self.a, self.tx, self.ty)
         state["started"] = time.perf_counter()
         if self.zoom_after is None:
@@ -305,13 +349,37 @@ class MapMotion:
         else:
             self.zoom_after = self.app.root.after(ZOOM_TICK_MS, self._zoom_frame)
 
+    def _prepare_backdrop(self, state: dict) -> None:
+        """Zooming out: the tiles of the level being zoomed to, for what the picture does not cover."""
+        from run_gui import is_raster
+        app = self.app
+        if state["A"] >= 0.999 or not is_raster(app.map_mode.get()):
+            self.backdrop = None
+            return
+        self.backdrop = Image.new("RGB", self.view, self._sea())
+        # The map's centre and zoom hold exactly the target view; its screen points are the target's.
+        if not self._lay_tiles(self.backdrop, app.map_center, app.map_zoom, self.view, (0, 0)):
+            self.backdrop = None
+
     def frame(self, a: float, tx: float, ty: float) -> Image.Image:
-        """The view as seen under ``screen = a * drawn + t``; beyond the picture is sea."""
+        """The view as seen under ``screen = a * drawn + t``; beyond the picture, the backdrop or sea."""
         mx, my = self.margin
         # Each screen pixel u shows drawn point (u - t) / a, found at that point plus the ring in the picture.
         matrix = (1 / a, 0, mx - tx / a, 0, 1 / a, my - ty / a)
-        return self.picture.transform(self.view, Image.Transform.AFFINE, matrix,
-                                      resample=Image.Resampling.BILINEAR, fillcolor=self._sea())
+        picture = self.picture.transform(self.view, Image.Transform.AFFINE, matrix,
+                                         resample=Image.Resampling.BILINEAR, fillcolor=self._sea())
+        state = self.zoom_state
+        if self.backdrop is None or state is None or self.cover is None:
+            return picture
+        # Target screen v = A * drawn + T = (A / a) * (u - t) + T, so the backdrop moves with the glide.
+        k = state["A"] / a
+        backdrop = self.backdrop.transform(self.view, Image.Transform.AFFINE,
+                                           (k, 0, state["TX"] - k * tx, 0, k, state["TY"] - k * ty),
+                                           resample=Image.Resampling.BILINEAR, fillcolor=self._sea())
+        cover = self.cover.transform(self.view, Image.Transform.AFFINE, matrix,
+                                     resample=Image.Resampling.BILINEAR, fillcolor=0)
+        backdrop.paste(picture, (0, 0), cover)
+        return backdrop
 
     def _show(self, a: float, tx: float, ty: float) -> None:
         canvas = self.app.map

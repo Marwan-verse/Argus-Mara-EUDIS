@@ -2002,11 +2002,12 @@ class ArgusApp:
                 pass
         return time.time() + 24 * 60 * 60
 
-    def _visible_tiles(self, margin: tuple[float, float] = (0, 0)) -> list[tuple[int, int, int, int, int]]:
-        """Tiles covering the view, or the view and a ring of ``margin`` points around it."""
+    def _visible_tiles(self, margin: tuple[float, float] = (0, 0), center: tuple[float, float] | None = None,
+                       zoom: int | None = None) -> list[tuple[int, int, int, int, int]]:
+        """Tiles covering the view (or another centre and zoom), or that and a ring of ``margin`` points."""
         width, height = self._map_size
-        z = self.map_zoom
-        center_x, center_y = geo_to_world(*self.map_center, z)
+        z = self.map_zoom if zoom is None else zoom
+        center_x, center_y = geo_to_world(*(self.map_center if center is None else center), z)
         left, right = center_x - width / 2 - margin[0], center_x + width / 2 + margin[0]
         top, bottom = center_y - height / 2 - margin[1], center_y + height / 2 + margin[1]
         min_x, max_x = math.floor(left / TILE_SIZE), math.floor(right / TILE_SIZE)
@@ -2583,6 +2584,7 @@ class ArgusApp:
         motion = getattr(self, "motion", None)
         if motion is not None and motion.defer():
             return  # A drag or zoom animation is running; it redraws when it ends.
+        self._drawn_view = (self.map_center, self.map_zoom)  # What the canvas items show, for desktop_motion
         self.map.delete("all")
         self.map.create_rectangle(0, 0, width, height, fill=SEA, outline="", tags=("map-sea", FIXED))
         map_labels: list[tuple[int, str, str, float, float]] = []
