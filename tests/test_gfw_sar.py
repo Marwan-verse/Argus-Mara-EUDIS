@@ -99,7 +99,9 @@ def ais_rows():
 
 def database_lookup(fake):
     def lookup(when, area):
-        return supabase_ais.historical_ais_from_database(when, area, transport=fake)
+        # A synthetic key in the environment: tests never read this computer's credential store.
+        with patch.dict(os.environ, NO_TOKEN):
+            return supabase_ais.historical_ais_from_database(when, area, transport=fake)
     return lookup
 
 
@@ -398,6 +400,20 @@ class WorkspaceTests(unittest.TestCase):
             gfw_sar.rejoin(root, database_lookup(FakeDatabase(busier)))
             self.assertEqual(workspace.comparison_index()['radar_leads'], 0)
             self.assertEqual(gfw_sar.summary(root)['statuses']['team_ais_match'], 2)
+
+    def test_a_same_size_rewrite_in_one_clock_tick_is_not_served_from_cache(self):
+        with tempfile.TemporaryDirectory() as temp:
+            _result, path, *_ = fetched(temp)
+            before = path.stat()
+            self.assertEqual(gfw_sar.summary(temp)['leads'], 1)
+            saved = json.loads(path.read_text(encoding='utf-8'))
+            lead = next(d for d in saved['detections'] if gfw_sar.is_lead(d))
+            lead['status'] = 'NO_TEAM_AIS'  # same length, no longer a lead
+            gfw_sar.satellite.atomic_json(path, saved)
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))  # a coarse clock: same tick
+            after = path.stat()
+            self.assertEqual((after.st_size, after.st_mtime_ns), (before.st_size, before.st_mtime_ns))
+            self.assertEqual(gfw_sar.summary(temp)['leads'], 0)
 
     def test_newest_fetch_wins_and_files_never_hold_the_token(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -629,8 +629,10 @@ _cache, _cache_lock = {'key': None, 'rows': [], 'results': []}, threading.Lock()
 def _saved(root):
     folder = Path(root)/'radar'
     try:
-        key = (str(folder), tuple((p.name, p.stat().st_mtime_ns, p.stat().st_size)
-                                  for p in sorted(folder.glob('gfw-*.json')))) if folder.is_dir() else (str(folder), ())
+        # atomic_json writes a new file, so its inode changes even when a rewrite keeps
+        # the size and lands in the same coarse clock tick (Windows, ext4 jiffies).
+        stats = [(p.name, p.stat()) for p in sorted(folder.glob('gfw-*.json'))] if folder.is_dir() else []
+        key = (str(folder), tuple((name, s.st_ino, s.st_mtime_ns, s.st_size) for name, s in stats))
     except OSError:
         key = None
     with _cache_lock:
