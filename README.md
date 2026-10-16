@@ -219,6 +219,13 @@ Details and links: [plan §4.5](docs/04-work-plan.md).
 - [x] `argus/brain.py`: read `scenario.json` → write `alerts.json` from four review cues;
       countdown v1 and response options are in `argus/countdown.py`.
       *Owners:* **Nazar K., Myroslav**
+- [x] Brain detectors for a vessel stopped away from ports, a dark vessel seen by satellite radar
+      while its AIS is silent, and a declared status or destination that contradicts the track, with
+      replay stories SIM-54 to SIM-56. [What they find](docs/12-argus-mara-alert-levels.md#brain-detectors).
+      *Owner:* **Myroslav**
+- [ ] Agree whether `dark_vessel` may also score the fictional exercise: it would open the exercise
+      incident at Medium at T+40, when the radar sees the tanker in its AIS gap (D63).
+      *Owners:* **Nazar K., Myroslav, Mykhailo**
 - [x] `ui/index.html`: offline map, cable line, vessel replay, approval and evidence export.
       *Owners:* **Adam, Marwan**
 - [x] Four-minute [demo runbook](docs/demo-runbook.md) and [one-pager](docs/one-pager.md) drafted; live rehearsal and recording still required. *Owner:* **Mykhailo**

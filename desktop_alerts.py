@@ -1478,6 +1478,7 @@ class AlertBoard:
                 if self._label(x, y + 12, f"{selected['line_name']} · illustrative route",
                                STYLE[selected["assessment"]["level"]][0], ("sim-selected",), "n", occupied, force=False):
                     break
+        self.draw_radar(items, occupied)
         self.draw_response(occupied)
         self.draw_assigned(occupied)
         if items:
@@ -1488,6 +1489,23 @@ class AlertBoard:
             box = app.map.create_rectangle(left - 7, top - 3, right + 7, bottom + 3, fill=ui.BG, outline=ui.LINE,
                                            tags=("sim-badge", "chart-fixed"))
             app.map.tag_lower(box, label)
+
+    def draw_radar(self, items, occupied) -> None:
+        """Satellite radar contacts of the shown stories once the replay reaches them, drawn like the exercise's."""
+        app = self.app
+        layer = app.map_layers.get("Radar contacts")
+        if self.replay.now is None or (layer is not None and not layer.get()):
+            return
+        for item in items:
+            for detection in (item.get("story") or {}).get("detections", []):
+                if detection["t"] > self.replay.now:
+                    continue
+                x, y = app._project(detection["lat"], detection["lon"])
+                tags = ("sim-radar", f"sim-alert:{item['id']}")
+                app.map.create_polygon(x, y - 8, x + 8, y, x, y + 8, x - 8, y, fill="#f6d293", outline="#8f4d00",
+                                       width=2, tags=tags)
+                text = f"SAR {self.stamp(detection['t'])} · {detection.get('length_m', '?')} m · {detection['label']}"
+                self._label(x + 12, y + 12, text, self.ui.INK, tags, "w", occupied, force=item["id"] == self.selected)
 
     def draw_response(self, occupied) -> None:
         """For the selected incident: asset bases, the vessel's expected path and the best asset's dashed route."""
