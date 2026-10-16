@@ -181,6 +181,7 @@ class ConsoleTools:
             return
         tracker = self.app.ais_tracker
         data = {'alert_width': self.alert_width, 'detail_width': self.detail_width,
+            'show_demo_alerts': self.settings.get('show_demo_alerts', True) is True,
             'reduced_motion': self.reduced_motion.get(),
             'alerts_visible': self.alerts_visible, 'views': self.custom_views,
             'panel_position': list(self.panel_position) if self.panel_position else None,
@@ -459,7 +460,7 @@ class ConsoleTools:
             self.app._fit_points(view['points'])
         else:
             import run_gui as ui
-            self.app.map_zoom = min(view['zoom'], ui.MAX_IMAGERY_ZOOM if self.app.map_mode.get() == ui.ONLINE_MAP else ui.MAX_MAP_ZOOM)
+            self.app.map_zoom = min(view['zoom'], ui.max_zoom_for(self.app.map_mode.get()))
             self.app._change_map_center(tuple(view['center']))
 
     def open_search(self, _event=None):
@@ -549,7 +550,7 @@ class ConsoleTools:
             self.apply_view(target)
         else:
             import run_gui as ui
-            self.app.map_zoom = 8 if self.app.map_mode.get() == ui.ONLINE_MAP else 10
+            self.app.map_zoom = min(10, ui.max_zoom_for(self.app.map_mode.get()))
             self.app._change_map_center(target)
         return 'break'
 

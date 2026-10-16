@@ -26,6 +26,32 @@ This extends the annotation-only workflow described above.
 
 ## Browser frontend (D37, 9 October 2026)
 
+The native Incidents panel has a saved **Show fictional / simulated alerts**
+switch (D75). Turning it off hides replay incident cards, severity counts and
+their map markers, while keeping analyst vessel reports visible. Live AIS supplies
+map observations only: Brain's incident board still scores fictional replay tracks,
+and Coast Watch comparison leads are shown separately in Incidents (D76). An empty
+live incident queue is not a claim that received traffic is safe. `satellite_compare.py`
+classifies every eligible image-time AIS vessel; saved review comparisons are
+reconciled on the satellite worker without paid calls. The authenticated comparison
+index feeds Incidents independently of its fictional replay filter.
+
+D77 adds `argus/fleet_history.py` and a prepared Supabase migration for a private
+per-MMSI history queue. SQL owns revision snapshots and leases; Python owns motion
+detection. Atomic page checkpoints and a locally cached directory feed the native
+Fleet history tab and a separate Incidents review section. Automatic free checks
+are independent of paid image review, with the existing evidence permission on
+the optional SOC endpoint. The hosted migration remains pending correct database
+access; see [scope, recovery and verification](18-fleet-history.md).
+
+D78 adds `argus/satellite_adaptive.py`: up to four overlapping detail windows on
+crowded images, durable per-window paid-attempt state, original-grid coordinates
+and local coverage gates. Partial windows never become empty-image evidence.
+The map/list index retains all stored observations, with details loaded on click.
+The Python live client preserves optional AIS length, and versioned capture CSVs
+retain its supplied receipt time without altering older headers. Sensor accuracy
+and legacy SQL-comparison alignment remain separate outstanding validation work.
+
 All browser interactions use Svelte 5 components under `ui/src/`: offline replay,
 live dashboard, local evidence review and recorder map preview. The esbuild script
 compiles committed, self-contained bundles; Node 22+ is required for development,
@@ -158,3 +184,56 @@ Historical packs and fictional packs are separate. Real/reconstructed contacts
 cannot locally match fictional/simulated AIS; sourced dimensions expire after an assumed
 24 hours and cannot come from future observations. A page-local operator acknowledgement
 persists only until reload and never triggers a response.
+
+## Optional native satellite workspace — 15 October 2026 (D70)
+
+`desktop_satellite.py` adds catalogue search, bounded georeferenced image crops,
+historical AIS and manual TensorX review. `argus/satellite*.py` keeps acquisition
+geometry, archive joins, model validation, cost reservations and file caches apart
+from the stage contracts and Brain rules. Data lives in ignored `data/` locally
+or the private SOC's existing persistent volume. `argus/satellite_server.py` adds
+authenticated intelligence endpoints to that companion only; it creates no
+backend for the offline browser demo. The optional Docker image and Compose
+override reuse the existing account relay and forwarded-port transport.
+
+AI suggestions are assumptions and unreviewed; time/space associations never
+confirm identity or intent. No AI call runs from map redraws or UI status refresh.
+See [setup, evidence limits and open-source next steps](16-satellite-ai.md).
+
+D72 adds `argus/satellite_scan.py`: a persisted, opt-in coastal image queue with
+a single worker lease, 30-minute public catalogue discovery, quality-first optical
+triage (`satellite_screen.py`) and a separate 60-second AIS snapshot recorder
+(`satellite_capture.py`). The reproducible public-domain `argus/coastal_grid.json`
+is included in the optional Docker image. Queue state and compact status are
+atomic files under `data/satellite/scan/`; captures are dated private CSVs under
+the archive directory. AI failure/budget limits pause paid processing while AIS
+capture continues. The existing persistent ledger and exclusive AI lock remain
+authoritative. There is no backend added to the offline browser demo.
+
+`SatelliteWorkspace.contacts()` supplies a bounded map index; opening a contact
+rejoins actual archive evidence and current captured AIS locally, without AI
+tokens. A selected identity remains provisional. Stream epochs cannot be bridged,
+undated static fields cannot be backdated, and invalid motion fails matching.
+SOC read access requires `evidence.share`; starting/stopping shared cycles also
+requires administrator status. A local scan runs with the desktop, a shared scan
+with the existing private SOC host. Neither installs an OS scheduled task.
+
+## Optional team database — 15 October 2026 (D74)
+
+`supabase/migrations/` holds the schema of the Supabase project `argus-mara`.
+Inside the database, `pg_cron` and `pg_net` copy the Railway AIS feed every 30
+seconds into the private `argus` schema; nothing on Railway changed.
+`argus/supabase_ais.py` is the only client: it reads acquisition-time AIS rows in
+the recorder CSV shape, so `argus.satellite_ais.historical_ais` applies the same
+D70 rules, and it saves Coast Watch scenes, AI contacts and clear-water areas,
+then asks `argus.compare_scene` for both comparison directions. It acts only in a
+workspace with `database.link` (or `ARGUS_SUPABASE_LINK=1` on a host) and a secret
+key from the credential store, so tests and the offline demo never touch it.
+See [the database guide](../supabase/README.md).
+
+D80: `argus/satellite_disposition.py` stores immutable, reasoned analyst outcomes
+separately under the private satellite workspace. `desktop_evidence_review.py`
+submits a local outcome or authenticated `POST /v1/satellite/dispositions` with
+`evidence.share`; the host supplies actor identity. Acquisition evidence hashes
+reopen changed leads. Notes do not replicate via Supabase or change computed
+findings, scene JSON contracts, identity confidence or operational approval.

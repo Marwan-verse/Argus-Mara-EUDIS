@@ -33,7 +33,9 @@ def scroll_deltas(widget, delta: int) -> tuple[float, float]:
 
 
 def scroll_frame(frame, pixels: float) -> bool:
-    """Move a CTkScrollableFrame's view down by pixels (negative moves up)."""
+    """Move a CTkScrollableFrame's or a canvas list's view down by pixels (negative moves up)."""
+    if hasattr(frame, "scroll_pixels"):
+        return frame.scroll_pixels(pixels)
     canvas = getattr(frame, "_parent_canvas", None)
     if canvas is None:
         return False
@@ -46,9 +48,9 @@ def scroll_frame(frame, pixels: float) -> bool:
 
 
 def scrollable_under(widget):
-    """The CTkScrollableFrame containing a widget, including its own empty canvas."""
+    """The CTkScrollableFrame or canvas list containing a widget, including its own empty canvas."""
     while widget is not None:
-        if isinstance(widget, ctk.CTkScrollableFrame):
+        if isinstance(widget, ctk.CTkScrollableFrame) or hasattr(widget, "scroll_pixels"):
             return widget
         if isinstance(widget, tk.Canvas):
             for child in widget.winfo_children():
@@ -79,6 +81,25 @@ def install_touchpad_scroll(root) -> bool:
     except tk.TclError:
         return False
     return True
+
+
+def speed_up_scrollbars() -> None:
+    """Stop CustomTkinter scrollbars from forcing a full window redraw on every scroll step.
+
+    CTkScrollbar._draw ends with update_idletasks(), so each step of a long list redrew every
+    pending widget in the window at once (about 56 ms a step on the incident panel, under
+    20 frames a second). Tk redraws the scrollbar at the next idle moment anyway.
+    """
+    original = ctk.CTkScrollbar.__init__
+    if getattr(original, "argus_fast", False):
+        return
+
+    def init(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        self._canvas.update_idletasks = lambda: None
+
+    init.argus_fast = True
+    ctk.CTkScrollbar.__init__ = init
 
 
 class PinchZoom:

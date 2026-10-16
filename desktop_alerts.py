@@ -35,6 +35,7 @@ from argus.explain import data_issues, explain, source
 from argus.incident_board import OPEN_RANK, Replay
 from argus.incidents import QUIET_CLOSE_S, REASONS, STATUSES
 from argus.levels import LEVEL_NAMES, RANK
+from desktop_canvas_list import CanvasDocument, CanvasList, Field, Link
 
 LEVELS = ("critical", "high", "medium", "low")
 CODES = {"critical": "CRIT", "high": "HIGH", "medium": "MED", "low": "LOW", "none": "—"}
@@ -47,6 +48,7 @@ SANS = "Segoe UI"
 MONO = "Menlo" if sys.platform == "darwin" else "Consolas"
 SECONDARY = "#c3ced6"
 ROW_HOVER, ROW_SELECTED = "#18242f", "#203243"
+ENTRY_BG, ENTRY_HOVER = "#0f1820", "#16232d"  # Review entries in the fleet history and satellite sections
 RECIPIENTS = ("Duty officer", "Line operator", "Irish Coast Guard (MRCC)", "Naval Service operations")
 SORTS = ("Severity", "Time to asset", "Newest")
 STATUS_DETAIL = {"New": "Awaiting review", "Reviewed": "No decision", "Acknowledged": "Monitoring"}
@@ -113,6 +115,18 @@ def badges(item: dict, incident: dict | None) -> list[tuple[str, str]]:
     return found
 
 
+def short_utc(value) -> str:
+    """An ISO time as '16 Oct 09:48Z'; anything else unchanged."""
+    from datetime import datetime, timezone
+    try:
+        moment = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return str(value)
+    if moment.tzinfo is not None:
+        moment = moment.astimezone(timezone.utc)
+    return f"{moment:%d %b %H:%M}Z"
+
+
 def clip(text: str, font: tkfont.Font, width: int) -> str:
     """The text cut with an ellipsis to fit ``width`` pixels on one line."""
     if font.measure(text) <= width:
@@ -142,16 +156,198 @@ def nearest_point(lat: float, lon: float, path) -> tuple[float, float] | None:
     return best
 
 
-def recolour(widget, background: str) -> None:
-    """Set the background of a row's plain Tk widgets and the corners of its CustomTkinter ones."""
-    for child in widget.winfo_children():
-        if isinstance(child, ctk.CTkBaseClass):
-            child.configure(bg_color=background)
-            if isinstance(child, ctk.CTkFrame):
-                recolour(child, background)
-        elif isinstance(child, (tk.Frame, tk.Label)) and not getattr(child, "keep_colour", False):
-            child.configure(bg=background)
-            recolour(child, background)
+class CardRow:
+    """One incident card: level stripe, name, timer and tag; why; status and age; responder; flags."""
+
+    def __init__(self, board, key: str):
+        self.board, self.key = board, key
+
+    def draw(self, view, y: float, width: float) -> float:
+        board, ui, card = self.board, self.board.ui, self.board.cards[self.key]
+        canvas = view.canvas
+        tags = (f"row:{self.key}", view.action(lambda key=self.key: board.open(key, centre=True)))
+        name_h = board.name_font.metrics("linespace")
+        line_h = board.meta_font.metrics("linespace")
+        reason_h = board.reason_font.metrics("linespace")
+        flag_labels = [label for label in card["flag_labels"] if label.shown]
+        show_flags = card["flags"].shown and flag_labels
+        height = 10 + name_h + 2 + reason_h + 3 + line_h + 10
+        if card["respond"].shown:
+            height += 3 + line_h
+        if show_flags:
+            height += 6 + line_h + 2
+        card["frame"].item = canvas.create_rectangle(0, y, width, y + height, fill=card["frame"].cget("bg"),
+                                                     outline="", tags=tags)
+        canvas.create_line(12, y + height - 1, width - 4, y + height - 1, fill=ui.LINE, tags=tags)
+        card["stripe"].item = canvas.create_rectangle(6, y + 9, 9, y + height - 9, fill=card["stripe"].cget("bg"),
+                                                      outline="", tags=tags)
+        x, right, top = 20, width - 12, y + 10
+
+        def text(field, at_x, at_y, anchor, font):
+            field.view = view
+            field.item = canvas.create_text(at_x, at_y, text=field.cget("text"), anchor=anchor,
+                                            fill=field.cget("fg"), font=field.cget("font") or font, tags=tags)
+
+        text(card["tag"], right, top + 2, "ne", board.tag_font)
+        tag_width = board.tag_font.measure(card["tag"].cget("text"))
+        text(card["eta"], right - tag_width - 8, top, "ne", board.timer_font)
+        text(card["name"], x, top, "nw", board.name_font)
+        top += name_h + 2
+        text(card["reason"], x, top, "nw", board.reason_font)
+        top += reason_h + 3
+        text(card["status"], x, top, "nw", board.meta_font)
+        text(card["age"], right, top, "ne", board.meta_font)
+        top += line_h
+        card["respond"].item = None
+        if card["respond"].shown:
+            top += 3
+            text(card["respond"], x, top, "nw", board.meta_font)
+            top += line_h
+        for label in card["flag_labels"]:
+            label.item = None
+        if show_flags:
+            top += 6
+            chip_x = x
+            for label in flag_labels:
+                chip_w = board.flag_font.measure(label.cget("text")) + 10
+                canvas.create_rectangle(chip_x, top, chip_x + chip_w, top + line_h + 2, fill=label.cget("bg"),
+                                        outline="", tags=tags)
+                label.view = view
+                label.item = canvas.create_text(chip_x + 5, top + 1, text=label.cget("text"), anchor="nw",
+                                                fill=label.cget("fg"), font=board.flag_font, tags=tags)
+                chip_x += chip_w + 4
+        return height
+
+
+class HeaderRow:
+    """A group title with its count; Watching and Closed fold open and shut when clicked."""
+
+    def __init__(self, board, key: str, text: str, count: str, gap: int, command=None):
+        self.board, self.key, self.text, self.count, self.gap, self.command = board, key, text, count, gap, command
+
+    def draw(self, view, y: float, width: float) -> float:
+        ui, canvas = self.board.ui, view.canvas
+        tags = (f"row:{self.key}",) + ((view.action(self.command),) if self.command else ())
+        top = y + self.gap
+        height = self.gap + 26
+        canvas.create_rectangle(0, y, width, y + height, fill=ui.CARD, outline="", tags=tags)
+        title = canvas.create_text(12, top + 6, text=self.text, anchor="nw", fill=ui.MUTED,
+                                   font=(SANS, 8, "bold"), tags=tags)
+        left = canvas.bbox(title)[2] + 8
+        canvas.create_text(left, top + 6, text=self.count, anchor="nw", fill=ui.INK if not self.command else ui.MUTED,
+                           font=(MONO, 8, "bold"), tags=tags)
+        canvas.create_line(12, y + height - 1, width - 4, y + height - 1, fill=ui.LINE, tags=tags)
+        return height
+
+
+class Section:
+    """Fleet history, satellite review or reported vessels: titles, notes and clickable entries."""
+
+    def __init__(self, key: str):
+        self.key = key
+        self.blocks: list[tuple] = []
+        self.shown = False
+
+    def clear(self) -> None:
+        self.blocks = []
+
+    def add(self, kind: str, *values) -> None:
+        self.blocks.append((kind, *values))
+
+    @property
+    def links(self) -> list[Link]:
+        found = []
+        for block in self.blocks:
+            if block[0] in ("entry", "button"):
+                found.append(block[1])
+            elif block[0] == "pager":
+                found.extend(link for link in block[1] if link.command)
+        return found
+
+    def texts(self) -> list[str]:
+        return [block[1] for block in self.blocks if block[0] in ("title", "text")]
+
+    def winfo_manager(self) -> str:
+        return "canvas" if self.shown else ""
+
+
+class SectionRow:
+    def __init__(self, board, section: Section):
+        self.board, self.section, self.key = board, section, section.key
+
+    def draw(self, view, y: float, width: float) -> float:
+        ui, canvas = self.board.ui, view.canvas
+        row = f"row:{self.key}"
+        x, right = 12, width - 10
+        top = y + 12
+        background = canvas.create_rectangle(0, y, width, y + 1, fill=ui.CARD, outline="", tags=(row,))
+        for kind, *values in self.section.blocks:
+            if kind == "title":
+                canvas.create_text(x, top, text=values[0], anchor="nw", fill=ui.INK, font=(SANS, 10, "bold"), tags=(row,))
+                top += 22
+            elif kind == "text":
+                item = canvas.create_text(x, top, text=values[0], anchor="nw", fill=ui.MUTED, font=(SANS, 9),
+                                          width=right - x, tags=(row,))
+                top = canvas.bbox(item)[3] + 6
+            elif kind == "entry":
+                link = values[0]
+                tags = (row, view.action(link.command))
+                box = canvas.create_rectangle(x - 4, top, right, top + 1, fill=ENTRY_BG, outline=ui.LINE, tags=tags)
+                accent = canvas.create_rectangle(x - 4, top, x - 1, top + 1, outline="", tags=tags,
+                                                 fill=values[1] if len(values) > 1 else ui.AMBER)
+                inner = top + 8
+                title = canvas.create_text(x + 8, inner, text=link.title, anchor="nw", fill=ui.INK,
+                                           font=(SANS, 10, "bold"), width=right - x - 16, tags=tags)
+                inner = canvas.bbox(title)[3] + 3
+                if link.lines:
+                    lines = canvas.create_text(x + 8, inner, text=link.lines, anchor="nw", fill=SECONDARY,
+                                               font=(SANS, 9), width=right - x - 16, tags=tags)
+                    inner = canvas.bbox(lines)[3] + 5
+                action = canvas.create_text(x + 8, inner, text=link.action.upper() + "  ›", anchor="nw",
+                                            fill=ui.TEAL, font=(SANS, 8, "bold"), tags=tags)
+                bottom = canvas.bbox(action)[3] + 8
+                canvas.coords(box, x - 4, top, right, bottom)
+                canvas.coords(accent, x - 4, top, x - 1, bottom)
+                top = bottom + 6
+            elif kind == "button":
+                link = values[0]
+                item = canvas.create_text(x, top + 2, text=link.text.upper() + "  ›", anchor="nw", fill=ui.TEAL,
+                                          font=(SANS, 8, "bold"), tags=(row, view.action(link.command)))
+                top = canvas.bbox(item)[3] + 8
+            elif kind == "toggle":
+                label, variable, command = values
+
+                def flip(variable=variable, command=command):
+                    variable.set(not variable.get())
+                    command()
+                mark = "■" if variable.get() else "□"
+                item = canvas.create_text(x, top, text=f"{mark}  {label}", anchor="nw", fill=ui.INK, font=(SANS, 9),
+                                          tags=(row, view.action(flip)))
+                top = canvas.bbox(item)[3] + 6
+            elif kind == "pager":
+                left = x
+                for link in values[0]:
+                    tags = (row,) + ((view.action(link.command),) if link.command else ())
+                    item = canvas.create_text(left, top, text=link.text.upper(), anchor="nw",
+                                              fill=ui.TEAL if link.command else ui.LINE, font=(SANS, 8, "bold"), tags=tags)
+                    left = canvas.bbox(item)[2] + 16
+                top += 22
+        height = top - y + 6
+        canvas.coords(background, 0, y, width, y + height)
+        canvas.tag_lower(background, row)
+        return height
+
+
+class EmptyRow:
+    key = "empty"
+
+    def __init__(self, board, text: str):
+        self.board, self.text = board, text
+
+    def draw(self, view, y: float, width: float) -> float:
+        item = view.canvas.create_text(12, y + 16, text=self.text, anchor="nw", fill=self.board.ui.MUTED,
+                                       font=(SANS, 10), width=width - 24, tags=("row:empty",))
+        return view.canvas.bbox(item)[3] - y + 16
 
 
 class AlertBoard:
@@ -171,6 +367,15 @@ class AlertBoard:
         self.level_filter: str | None = None
         self.show_closed = False
         self.show_watching = False
+        self.evidence_leads = []
+        self.show_reviewed_evidence = tk.BooleanVar(app.root, value=False)
+        self.evidence_page = 0
+        self.evidence_status = "Waiting for satellite comparisons"
+        self.evidence_signature = None
+        self.history_signature = None
+        self.history_lead_count = 0
+        self.show_demo_alerts = tk.BooleanVar(
+            app.root, value=app.tools.settings.get("show_demo_alerts", True) is True)
         self.sort_mode = tk.StringVar(app.root, value="Severity")
         self.cards: dict[str, dict] = {}
         self.wrap = 230
@@ -179,6 +384,8 @@ class AlertBoard:
         self.name_font = tkfont.Font(root=app.root, family=SANS, size=11, weight="bold")
         self.timer_font = tkfont.Font(root=app.root, family=MONO, size=9, weight="bold")
         self.tag_font = tkfont.Font(root=app.root, family=SANS, size=7, weight="bold")
+        self.flag_font = tkfont.Font(root=app.root, family=SANS, size=8, weight="bold")
+        self.order: list[str] = []  # Card keys in the order the list shows them
         self.halos: list[tuple[int, float, float]] = []
         self.pulse = False
         self.flashing: dict[str, str] = {}
@@ -204,12 +411,31 @@ class AlertBoard:
                                 width=30, height=30, fg_color="transparent", hover_color=ui.HOVER)
         restart.pack(side="right", padx=2)
         app.tools.style_button(restart, "Reset incidents and decisions at this replay time")
-        tk.Label(head, text="Incidents", bg=ui.CARD, fg=ui.INK, font=(SANS, 15, "bold")).pack(side="left")
-        tk.Label(head, text="REPLAY", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 7, "bold"), padx=5,
-                 highlightthickness=1, highlightbackground=ui.LINE).pack(side="left", padx=(8, 0), pady=(3, 0))
-        self.clock = tk.Label(head, text=self.stamp(self.replay.now), bg=ui.CARD, fg=ui.AMBER, font=(MONO, 9, "bold"))
-        self.clock.pack(side="left", padx=(6, 0), pady=(3, 0))
-        app.tools.attach_tooltip(self.clock, "Replay time: incidents follow the exercise replay (Play or the slider)")
+        tk.Label(head, text="INCIDENTS", bg=ui.CARD, fg=ui.INK, font=(SANS, 13, "bold"), anchor="w").pack(
+            side="left", fill="x", expand=True)
+        # The replay clock gets a row of its own, so a narrow panel can never clip the time.
+        clock_row = tk.Frame(panel, bg=ui.CARD)
+        clock_row.pack(fill="x", padx=16, pady=(6, 0))
+        chip = tk.Frame(clock_row, bg=STYLE["medium"][1], highlightthickness=1, highlightbackground="#5a4a24")
+        chip.pack(side="left")
+        tk.Label(chip, text="REPLAY", bg=STYLE["medium"][1], fg="#b89a55", font=(SANS, 7, "bold"),
+                 padx=0).pack(side="left", padx=(6, 4), pady=2)
+        self.clock = tk.Label(chip, text=self.stamp(self.replay.now), bg=STYLE["medium"][1], fg=ui.AMBER,
+                              font=(MONO, 11, "bold"))
+        self.clock.pack(side="left", padx=(0, 6), pady=2)
+        tk.Label(clock_row, text="exercise clock", bg=ui.CARD, fg=ui.MUTED,
+                 font=(SANS, 9), anchor="w").pack(side="left", padx=(8, 0), fill="x", expand=True)
+        app.tools.attach_tooltip(chip, "Replay time: incidents follow the exercise replay (Play or the slider)")
+
+        self.demo_switch = ctk.CTkCheckBox(
+            panel, text="Show fictional / simulated alerts", variable=self.show_demo_alerts,
+            command=self.toggle_demo_alerts, font=ctk.CTkFont(SANS, 12),
+            checkbox_width=16, checkbox_height=16, height=26)
+        self.demo_switch.pack(fill="x", padx=16, pady=(8, 0))
+        tk.Label(panel, text="Satellite / AIS review leads appear below.\n"
+                 "Live AIS alone does not establish a threat.",
+                 bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9), justify="left", anchor="w",
+                 wraplength=250).pack(fill="x", padx=(20, 16), pady=(4, 6))
 
         row = tk.Frame(panel, bg=ui.CARD)
         row.pack(fill="x", padx=(16, 12), pady=(2, 0))
@@ -258,100 +484,155 @@ class AlertBoard:
                                           anchor="w", justify="left", wraplength=self.wrap + 50)
         app.alert_counts_label.pack(fill="x")
 
-        self.list = ctk.CTkScrollableFrame(panel, fg_color=ui.CARD, corner_radius=0,
-            scrollbar_button_color=ui.LINE, scrollbar_button_hover_color=ui.HOVER)
-        self.list.pack(fill="both", expand=True, padx=(4, 4))
-        self.reports_frame = tk.Frame(self.list, bg=ui.CARD)
+        self.list = CanvasList(panel, ui.CARD, ui.LINE, ui.HOVER)
+        self.list.pack(fill="both", expand=True, padx=(4, 0))
+        self.list.on_hover = self.hover_row
+        self.list.on_resize = self.resized
+        self.history_frame = Section("history")
+        self.refresh_history({'vessels': [], 'summary': {}, 'worker': {}}, relayout=False)
+        self.evidence_frame = Section("evidence")
+        self.refresh_evidence({'leads': [], 'reviews_checked': 0, 'reviews_pending': 0}, relayout=False)
+        self.reports_frame = Section("reports")
         self.refresh_reports(relayout=False)
-        self.headers = {}
-        for group, text in GROUP_TITLES.items():
-            header = tk.Frame(self.list, bg=ui.CARD)
-            title = tk.Label(header, text=text, bg=ui.CARD, fg=ui.MUTED, font=(SANS, 8, "bold"))
-            title.pack(side="left", padx=(10, 0))
-            count = tk.Label(header, text="", bg=ui.CARD, fg=ui.MUTED, font=(MONO, 8))
-            count.pack(side="left", padx=(6, 0))
-            tk.Frame(header, bg=ui.LINE, height=1).pack(side="bottom", fill="x", before=title)
-            if group in ("closed", "watching"):
-                toggle = self.toggle_closed if group == "closed" else self.toggle_watching
-                for widget in (header, title, count):
-                    widget.configure(cursor="hand2")
-                    widget.bind("<Button-1>", lambda _event, command=toggle: command())
-            self.headers[group] = (header, count)
-        self.empty = tk.Label(self.list, text="", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 10),
-                              justify="left", wraplength=self.wrap)
+        self.empty = Field(text="")
         for item in self.items:
             self._card(item)
+
+    def refresh_history(self, packet, relayout=True):
+        import json
+        from argus.fleet_history import source_health
+        # Cached data can stay unchanged while its source becomes stale.
+        signature = json.dumps(packet, sort_keys=True)+source_health(packet.get('summary', {}))
+        if signature == self.history_signature:
+            return
+        self.history_signature = signature
+        self.history_lead_count = packet.get('summary', {}).get('review_required', 0)
+        section = self.history_frame
+        section.clear()
+        summary = packet.get('summary', {})
+        section.add('title', f"FLEET HISTORY REVIEW · {self.history_lead_count}")
+        text = (f"{summary.get('checked_vessels', 0)} / {summary.get('total_vessels', 0)} recorded vessels checked\n"
+                f"{summary.get('never_checked', 0)} never checked · {summary.get('new_evidence_pending', 0)} awaiting new evidence checks\n"
+                + source_health(summary)+'\n'
+                + packet.get('worker', {}).get('message', 'History inventory is loading.'))
+        if not packet.get('inventory_complete'):
+            text += '\nInventory is still loading; missing entries are not clean results.'
+        section.add('text', text)
+        for row in packet.get('vessels', []):
+            result = row.get('result') or {}
+            findings = [f for f in result.get('findings', []) if f.get('review_required')]
+            title = f"{result.get('name') or row['mmsi']} · {row['mmsi']}"
+            lines = (f"Motion history requires review\nChecked {short_utc(row.get('checked_utc'))} · derived assumption\n"
+                     + '\n'.join(f['reason'] for f in findings[-2:]))
+            section.add('entry', Link(f"{title}\n{lines}\nOpen history evidence",
+                                      lambda mmsi=row['mmsi']: self.app.satellite.open_fleet(mmsi),
+                                      title=title, lines=lines, action="Open history evidence"), STYLE["medium"][0])
+        section.add('button', Link('Open all vessel histories', lambda: self.app.satellite.open_fleet(), kind='button'))
+        if relayout:
+            self.relayout()
+
+    def refresh_evidence(self, result, relayout=True):
+        """Real-image comparisons stay visible when the fictional queue is hidden."""
+        import json
+        signature = json.dumps(result, sort_keys=True)
+        if signature == self.evidence_signature:
+            return
+        self.evidence_signature = signature
+        self.evidence_leads = result.get('leads', [])
+        self.evidence_status = (f"{result.get('reviews_checked', 0)} images checked · "
+                                f"{result.get('reviews_pending', 0)} awaiting history check\n"
+                                f"{result.get('image_contacts', 0)} image contacts · "
+                                f"{result.get('images_without_ais', 0)} images without contemporaneous AIS\n"
+                                f"{result.get('partial_analysis_images', 0)} images with incomplete detail review")
+        self.evidence_page = min(self.evidence_page, max(0, (len(self.evidence_leads)-1)//50))
+        self.paint_evidence()
+        if relayout:
+            self.relayout()
+
+    def paint_evidence(self):
+        from argus.satellite_disposition import OUTCOMES, CLOSED_OUTCOMES
+        section = self.evidence_frame
+        section.clear()
+        section.add('title', f"SATELLITE / AIS REVIEW · {len(self.evidence_leads)} leads")
+        section.add('text', self.evidence_status)
+
+        def refilter():
+            self.evidence_page = 0
+            self.paint_evidence()
+            self.relayout(top=True)
+        section.add('toggle', 'Show reviewed outcomes', self.show_reviewed_evidence, refilter)
+        visible = [r for r in self.evidence_leads if self.show_reviewed_evidence.get() or r.get('review_status') not in CLOSED_OUTCOMES]
+        self.evidence_page = min(self.evidence_page, max(0, (len(visible)-1)//50))
+        section.add('text', f'{len(visible)} shown · analyst outcomes retain the original evidence')
+        start = self.evidence_page*50
+        for lead in visible[start:start+50]:
+            state = OUTCOMES.get(lead.get('review_status'), 'Unreviewed')
+            if lead.get('review_status') == 'unreviewed':
+                state = 'Unreviewed'
+            if lead.get('evidence_changed'):
+                state = 'Evidence changed · review again'
+            title = f"{lead['name']}" + (f" · {lead['mmsi']}" if lead.get('mmsi') else '')
+            lines = (f"{lead['title']}\nImage {lead['acquired_utc']}\n"
+                     f"{lead['source_label']} pixels · assumption · {state}\n{lead['reason']}")
+            closed = lead.get('review_status') in CLOSED_OUTCOMES
+            section.add('entry', Link(f"{title}\n{lines}\nOpen image evidence", lambda row=lead: self.open_evidence(row),
+                                      title=title, lines=lines, action="Open image evidence"),
+                        self.ui.MUTED if closed else STYLE["high"][0])
+            if lead.get('evidence_key'):
+                def review(row=lead):
+                    from desktop_evidence_review import EvidenceReview
+                    EvidenceReview(self, row)
+                section.add('button', Link('Record analyst outcome', review, kind='button'))
+        if len(visible) > 50:
+            def turn(delta):
+                self.evidence_page += delta
+                self.paint_evidence()
+                self.relayout(top=True)
+            section.add('pager', [Link(text, (lambda d=delta: turn(d)) if enabled else None, kind='pager')
+                                  for text, delta, enabled in [('Previous', -1, start > 0),
+                                                               ('Next', 1, start+50 < len(visible))]])
+
+    def open_evidence(self, lead):
+        satellite = self.app.satellite
+        self.app.open_window('satellite')
+        satellite.pending_contact = (lead['scene_id'], lead.get('contact_id'))
 
     def refresh_reports(self, relayout=True):
         """Analyst reports stay separate from the simulated Brain severity groups."""
         from desktop_reports import review_reports
-        ui = self.ui
+        section = self.reports_frame
+        section.clear()
         self.report_cards = []
-        for child in self.reports_frame.winfo_children():
-            child.destroy()
         groups = self.app.vessel_reports.grouped()
         if groups:
-            tk.Label(self.reports_frame, text=f"REPORTED VESSELS · {len(groups)}", bg=ui.CARD,
-                     fg=ui.INK, font=(SANS, 10, "bold")).pack(anchor="w", padx=10, pady=(12, 6))
+            section.add('title', f"REPORTED VESSELS · {len(groups)}")
             for entries in groups:
                 report = entries[-1]["report"]
                 vessel = report["vessel"]
-                text = (f"{vessel['name']} · {vessel['id']}\n{report['category']}\n"
-                        f"{entries[-1]['sender']} · {vessel['label']} · {len(entries)} report(s)\nReview concern")
-                card = tk.Button(self.reports_frame, text=text, anchor="w", justify="left",
-                    wraplength=max(150, self.wrap), padx=10, pady=8, cursor="hand2",
-                    bg=ui.CARD, fg=ui.INK, activebackground=ui.HOVER, activeforeground=ui.INK,
-                    relief="flat", font=(SANS, 10), highlightthickness=1, highlightbackground=ui.LINE,
-                    command=lambda found=entries: review_reports(self.app, found))
-                card.pack(fill="x", padx=8, pady=(0, 6))
-                self.report_cards.append(card)
+                title = f"{vessel['name']} · {vessel['id']}"
+                lines = f"{report['category']}\n{entries[-1]['sender']} · {vessel['label']} · {len(entries)} report(s)"
+                link = Link(f"{title}\n{lines}\nReview concern", lambda found=entries: review_reports(self.app, found),
+                            title=title, lines=lines, action="Review concern")
+                section.add('entry', link, self.ui.TEAL)
+                self.report_cards.append(link)
         if relayout:
             self.relayout(top=True)
 
     def _card(self, item):
         """One card: a level stripe, then name and timer, one line of why, asset and status, flags."""
         ui = self.ui
-        frame = tk.Frame(self.list, bg=ui.CARD, cursor="hand2")
-        rule = tk.Frame(frame, bg=ui.LINE, height=1)
-        rule.keep_colour = True
-        rule.pack(side="bottom", fill="x")
-        stripe = tk.Frame(frame, bg=ui.CARD, width=4)
-        stripe.keep_colour = True
-        stripe.pack(side="left", fill="y", padx=(6, 0), pady=8)
-        body = tk.Frame(frame, bg=ui.CARD)
-        body.pack(side="left", fill="both", expand=True, padx=(10, 10), pady=(8, 9))
-        top = tk.Frame(body, bg=ui.CARD)
-        top.pack(fill="x")
-        name = tk.Label(top, text=item["name"], bg=ui.CARD, fg=ui.INK, font=self.name_font, anchor="w")
-        name.pack(side="left")
-        tag = tk.Label(top, text=source(item)["tag"], bg=ui.CARD, fg=ui.MUTED, font=(SANS, 7, "bold"))
-        tag.pack(side="right")
-        self.app.tools.attach_tooltip(tag, source(item)["text"])
-        eta = tk.Label(top, bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9))
-        eta.pack(side="right", padx=(0, 8))
-        reason = tk.Label(body, text="", bg=ui.CARD, fg=SECONDARY, font=self.reason_font, anchor="w")
-        reason.pack(fill="x", pady=(2, 0))
-        bottom = tk.Frame(body, bg=ui.CARD)
-        bottom.pack(fill="x", pady=(3, 0))
-        status = tk.Label(bottom, bg=ui.CARD, fg=ui.MUTED, font=self.meta_font, anchor="w")
-        status.pack(side="left")
-        age = tk.Label(bottom, bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9))
-        age.pack(side="right")
-        respond = tk.Label(body, text="", bg=ui.CARD, fg=ui.MUTED, font=self.meta_font, anchor="w")
-        flags = tk.Frame(body, bg=ui.CARD)
-        flag_labels = []
-        for _ in range(3):
-            label = tk.Label(flags, bg=ui.CARD, font=(SANS, 8, "bold"), padx=5, pady=1)
-            label.keep_colour = True
-            flag_labels.append(label)
-        card = {"item": item, "frame": frame, "stripe": stripe, "name": name, "age": age, "eta": eta,
-                "reason": reason, "status": status, "flags": flags, "flag_labels": flag_labels,
-                "respond": respond, "bottom": bottom, "texts": {}, "background": ui.CARD}
-        for widget in (frame, stripe, body, top, name, tag, age, reason, bottom, eta, status, respond, flags,
-                       *flag_labels):
-            widget.bind("<Button-1>", lambda _event, key=item["id"]: self.open(key, centre=True))
-            widget.bind("<Enter>", lambda _event, key=item["id"]: self.hover(key, True), add="+")
-            widget.bind("<Leave>", lambda _event, key=item["id"]: self.hover(key, False), add="+")
+        flag_labels = [Field(font=self.flag_font) for _ in range(3)]
+        card = {"item": item, "frame": Field(bg=ui.CARD), "stripe": Field(bg=ui.LINE),
+                "name": Field(text=item["name"], fg=ui.INK, font=self.name_font),
+                "tag": Field(text=source(item)["tag"], fg=ui.MUTED, font=self.tag_font),
+                "eta": Field(fg=ui.MUTED, font=(SANS, 9)), "reason": Field(fg=SECONDARY, font=self.reason_font),
+                "status": Field(fg=ui.MUTED, font=self.meta_font), "age": Field(fg=ui.MUTED, font=self.meta_font),
+                "respond": Field(fg=ui.MUTED, font=self.meta_font), "flags": Field(), "flag_labels": flag_labels,
+                "texts": {}, "background": ui.CARD}
+        card["respond"].shown = False
+        card["flags"].shown = False
+        for label in flag_labels:
+            label.shown = False
         self.cards[item["id"]] = card
         self.paint(item["id"])
 
@@ -435,6 +716,8 @@ class AlertBoard:
     def group(self, identifier: str) -> str:
         """critical/high/medium for an open incident, else quiet, watching, closed or hidden (not raised yet)."""
         item = self.by_id[identifier]
+        if not self.show_demo_alerts.get():
+            return "hidden"
         if not self.replay.present(item):
             return "hidden"
         incident = self.tracker.open_incident(item)
@@ -450,7 +733,7 @@ class AlertBoard:
         return "T+" + self.ui.clock(t)[:5] if t >= 0 else "T−" + self.ui.clock(-t)[:5]
 
     def counts(self) -> dict[str, int]:
-        states = [self.status(item["id"]) for item in self.items if self.replay.present(item)]
+        states = [self.status(item["id"]) for item in self.items if self.group(item["id"]) != "hidden"]
         return {state: states.count(state) for state in (*STATUSES, "Watching")}
 
     def decide(self, identifier: str, status: str, text: str, reason: str | None = None,
@@ -528,7 +811,6 @@ class AlertBoard:
             background = card["background"]
         if card["background"] != background:
             card["frame"].configure(bg=background)
-            recolour(card["frame"], background)
             card["background"] = background
         card["stripe"].configure(bg=ui.LINE if closed else STYLE[level][0])
         card["name"].configure(fg=ui.MUTED if closed else ui.INK)
@@ -552,7 +834,7 @@ class AlertBoard:
             text, warn = line
             card["respond"].configure(text=clip(text, self.meta_font, width),
                                       fg=STYLE["critical"][0] if warn else IN_TIME)
-            card["respond"].pack(fill="x", pady=(3, 0), after=card["bottom"])
+            card["respond"].pack()
         else:
             card["respond"].pack_forget()
         flags = badges(item, incident if not closed else None)
@@ -570,6 +852,7 @@ class AlertBoard:
             card["flags"].pack_forget()
         card["texts"].pop("eta", None)
         self.update_live(identifier)
+        self.list.redraw(identifier)
 
     def timer_text(self, item: dict) -> tuple[str, bool]:
         """The card's timer and whether it is a live countdown."""
@@ -600,18 +883,12 @@ class AlertBoard:
                         - self.tag_font.measure(source(item)["tag"]))
                 card["name"].configure(text=clip(item["name"], self.name_font, max(60, room)))
 
-    def hover(self, identifier: str, inside: bool) -> None:
-        frame = self.cards[identifier]["frame"]
-        if not inside:
-            x, y = frame.winfo_pointerxy()
-            if (frame.winfo_rootx() <= x < frame.winfo_rootx() + frame.winfo_width()
-                    and frame.winfo_rooty() <= y < frame.winfo_rooty() + frame.winfo_height()):
-                return
-        previous = self.hovered
-        self.hovered = identifier if inside else (None if previous == identifier else previous)
-        for key in {previous, self.hovered} - {None}:
-            if key in self.cards:
-                self.paint(key)
+    def hover_row(self, key: str | None) -> None:
+        """The pointer moved onto another row of the list (None: off the list)."""
+        previous, self.hovered = self.hovered, key if key in self.cards else None
+        for identifier in {previous, self.hovered} - {None}:
+            if identifier in self.cards:
+                self.paint(identifier)
 
     def matches_filter(self, identifier: str) -> bool:
         group = self.group(identifier)
@@ -632,23 +909,26 @@ class AlertBoard:
 
     def relayout(self, top: bool = False) -> None:
         ui = self.ui
-        for widget in self.list.winfo_children():
-            widget.pack_forget()
-        if self.app.vessel_reports.entries:
-            self.reports_frame.pack(fill="x", pady=(0, 12))
+        rows = []
+        for section in (self.history_frame, self.evidence_frame, self.reports_frame):
+            section.shown = section is not self.reports_frame or bool(self.app.vessel_reports.entries)
+            if section.shown and section.blocks:
+                rows.append(SectionRow(self, section))
         groups = {item["id"]: self.group(item["id"]) for item in self.items}
         first = True
+        self.order = []
+        toggles = {"closed": self.toggle_closed, "watching": self.toggle_watching}
 
         def header(key, count):
             nonlocal first
-            frame, label = self.headers[key]
-            label.configure(text=str(count))
-            frame.pack(fill="x", pady=(4 if first else 14, 0))
+            rows.append(HeaderRow(self, f"header:{key}", GROUP_TITLES[key], str(count), 4 if first else 14,
+                                  toggles.get(key)))
             first = False
 
         def card(item):
             nonlocal first
-            self.cards[item["id"]]["frame"].pack(fill="x")
+            rows.append(CardRow(self, item["id"]))
+            self.order.append(item["id"])
             first = False
 
         def members(group):
@@ -675,10 +955,12 @@ class AlertBoard:
             for item in found:
                 card(item)
             shown = len(found)
-        if not shown and self.level_filter != "low" and not self.app.vessel_reports.entries:
-            self.empty.configure(text="No open incidents at this level." if self.level_filter else "No open incidents.",
-                                 wraplength=self.wrap)
-            self.empty.pack(fill="x", padx=10, pady=16)
+        if not shown and self.level_filter != "low" and not self.app.vessel_reports.entries and not self.evidence_leads and not self.history_lead_count:
+            self.empty.configure(text=("Fictional / simulated alerts hidden.\n"
+                                      "No satellite / AIS review leads loaded yet.")
+                                 if not self.show_demo_alerts.get() else
+                                 ("No open incidents at this level." if self.level_filter else "No open incidents."))
+            rows.append(EmptyRow(self, self.empty.cget("text")))
         watching = members("watching")
         if watching:
             expanded = self.show_watching or self.level_filter == "low"
@@ -709,21 +991,9 @@ class AlertBoard:
         else:
             self.clear_filter.pack_forget()
         self.update_counts()
-        canvas = getattr(self.list, "_parent_canvas", None)
-        if canvas is not None and top:
-            canvas.yview_moveto(0)
-        elif canvas is not None:
-            self.app.root.after_idle(self.clamp_scroll)
-
-    def clamp_scroll(self) -> None:
-        """Keep the view inside the queue after it shrinks, so it never shows empty space."""
-        canvas = getattr(self.list, "_parent_canvas", None)
-        if canvas is None or not canvas.winfo_exists():
-            return
-        content, view = self.list.winfo_reqheight(), canvas.winfo_height()
-        limit = max(0, content - view)
-        if canvas.canvasy(0) > limit:
-            canvas.yview_moveto(limit / max(content, 1))
+        self.list.set_rows(rows)  # Also keeps the view inside the list after it shrinks
+        if top:
+            self.list.top()
 
     def update_counts(self) -> None:
         counts = self.counts()
@@ -741,9 +1011,29 @@ class AlertBoard:
                  f"{counts['Escalated']} escalated · {counts['Rejected']} rejected\n"
                  "Brain: {} contacts scored in {:.0f} ms at this replay step".format(*self.replay.scored)
                  + (f" · {issues} vessel{'s' if issues != 1 else ''} with data issues" if issues else ""))
+        if not self.show_demo_alerts.get():
+            self.app.alert_counts_label.configure(text="Fictional / simulated alerts hidden")
+        from argus.satellite_disposition import CLOSED_OUTCOMES
+        unresolved = sum(r.get('review_status') not in CLOSED_OUTCOMES for r in self.evidence_leads)
+        self.app.alert_counts_label.configure(text=self.app.alert_counts_label.cget('text') +
+            f"\n{len(self.evidence_leads)} satellite / AIS leads · {unresolved} awaiting review")
+        if self.history_lead_count:
+            self.app.alert_counts_label.configure(text=self.app.alert_counts_label.cget('text') +
+                f"\n{self.history_lead_count} vessel histories require review")
         if self.app.vessel_reports.entries:
             self.app.alert_counts_label.configure(text=self.app.alert_counts_label.cget("text") +
                 f"\n{len(self.app.vessel_reports.grouped())} reported vessels · analyst review")
+
+    def toggle_demo_alerts(self) -> None:
+        """Hide the replay queue and markers, retaining decisions and analyst reports."""
+        self.app.tools.settings["show_demo_alerts"] = self.show_demo_alerts.get()
+        self.app.tools.schedule_save()
+        if not self.show_demo_alerts.get():
+            self.dialog.close()
+            self.selected = self.hovered = None
+            self.level_filter = None
+        self.relayout(top=True)
+        self.app._draw_map()
 
     def set_filter(self, level: str | None) -> None:
         self.level_filter = None if level == self.level_filter else level
@@ -766,24 +1056,18 @@ class AlertBoard:
         if pixels <= 0 or wrap == self.wrap:
             return
         self.wrap = wrap
-        for card in self.report_cards:
-            card.configure(wraplength=wrap)
+        for card in self.cards.values():
+            card["texts"].clear()  # Names and reasons are clipped to the new width
+        self.app.alert_counts_label.configure(wraplength=wrap + 50)
+        self.resized()
+
+    def resized(self, _width: int | None = None) -> None:
         for identifier in self.cards:
             self.paint(identifier)
-        self.empty.configure(wraplength=wrap)
-        self.app.alert_counts_label.configure(wraplength=wrap + 50)
+        self.relayout()
 
     def scroll_to(self, identifier: str) -> None:
-        card = self.cards.get(identifier)
-        canvas = getattr(self.list, "_parent_canvas", None)
-        if not card or canvas is None or not card["frame"].winfo_manager():
-            return
-        self.list.update_idletasks()
-        total = max(1, self.list.winfo_height())
-        top, height = card["frame"].winfo_y(), card["frame"].winfo_height()
-        first, last = canvas.yview()
-        if top < first * total or top + height > last * total:
-            canvas.yview_moveto(max(0.0, (top - 40) / total))
+        self.list.see(identifier)
 
     def flash(self, identifier: str, count: int = 6) -> None:
         """Briefly tint a card whose incident has just opened or risen."""
@@ -797,7 +1081,6 @@ class AlertBoard:
             return
         background = STYLE[card["item"]["assessment"]["level"]][1] if count % 2 else self.ui.CARD
         card["frame"].configure(bg=background)
-        recolour(card["frame"], background)
         card["background"] = background
         self.flashing[identifier] = self.app.root.after(300, lambda: self.flash(identifier, count - 1))
 
@@ -841,7 +1124,7 @@ class AlertBoard:
         left = 16 * scaling
         free = max(120, width - right - left)
         target_x, target_y = left + free / 2, height / 2 - 20 * scaling
-        maximum = ui.MAX_IMAGERY_ZOOM if app.map_mode.get() == ui.ONLINE_MAP else ui.MAX_MAP_ZOOM
+        maximum = ui.max_zoom_for(app.map_mode.get())
         if fit:
             points = list(item["track"]) + [(item["lat"], item["lon"])]
             nearest = nearest_point(item["lat"], item["lon"], line_path(item["line_id"], app.scenario))
@@ -970,7 +1253,7 @@ class AlertBoard:
         app, ui = self.app, self.ui
         self.halos = []
         layer = app.map_layers.get("Simulated alerts")
-        if layer is None or not layer.get():
+        if layer is None or not layer.get() or not self.show_demo_alerts.get():
             return
         width, height = app._map_size
         occupied: list[tuple[float, float, float, float]] = []
@@ -1039,7 +1322,7 @@ class AlertBoard:
         self.draw_assigned(occupied)
         if items:
             text = f"SIMULATED · {len(items)} fictional contact{'s' if len(items) != 1 else ''}"
-            label = app.map.create_text(20, 40, text=text, anchor="w", fill=ui.INK, font=(SANS, 9, "bold"),
+            label = app.map.create_text(20 + getattr(app, "chart_margin", 0), 40 + getattr(app, "chart_margin", 0), text=text, anchor="w", fill=ui.INK, font=(SANS, 9, "bold"),
                                         tags=("sim-badge",))
             left, top, right, bottom = app.map.bbox(label)
             box = app.map.create_rectangle(left - 7, top - 3, right + 7, bottom + 3, fill=ui.BG, outline=ui.LINE,
@@ -1247,9 +1530,11 @@ class ReviewDialog:
         self.form = tk.Frame(self.frame, bg=ui.CARD)
         self.middle = tk.Frame(self.frame, bg=ui.CARD)
         self.middle.pack(fill="both", expand=True, padx=(14, 8), pady=(4, 0))
-        self.body = ctk.CTkScrollableFrame(self.middle, fg_color=ui.CARD, corner_radius=0,
-            scrollbar_button_color=ui.LINE, scrollbar_button_hover_color=ui.HOVER)
+        # One canvas, not a frame of labels: on macOS moving widgets repaints the whole window (D85).
+        self.body = CanvasDocument(self.middle, ui.CARD, ui.LINE, ui.HOVER)
         self.body.pack(fill="both", expand=True)
+        self.body.on_resize = lambda _width: self.item is not None and self.visible and self.fill_body()
+        self.body.on_tip = lambda tip: app.map_status_label.configure(text=tip)
 
     def report_vessel(self):
         from desktop_reports import board_snapshot, open_report
@@ -1338,10 +1623,9 @@ class ReviewDialog:
         self.visible = True
         self.place()
         self.refresh()
-        canvas = getattr(self.body, "_parent_canvas", None)
-        if changed and canvas is not None:
+        if changed:
             # A new contact starts at the top, not at the previous contact's scroll position.
-            canvas.yview_moveto(0)
+            self.body.top()
 
     def refresh(self) -> None:
         item, board, ui = self.item, self.board, self.ui
@@ -1439,72 +1723,80 @@ class ReviewDialog:
         x = position(assessment["score"])
         canvas.create_polygon(x - 5, 5, x + 5, 5, x, 12, fill=ui.INK, outline="")
 
-    def heading(self, text: str, top: int = 16) -> None:
-        tk.Label(self.body, text=text, bg=self.ui.CARD, fg=self.ui.MUTED, font=(SANS, 8, "bold"),
-                 anchor="w").pack(fill="x", padx=(6, 0), pady=(top, 6))
+    def heading(self, text: str, top: int = 16, right: str | None = None) -> None:
+        body = self.body
+        body.y += top
+        title = body.text(6, text, self.ui.MUTED, (SANS, 8, "bold"))
+        if right:
+            body.text(body.page_width - 8, right, self.ui.MUTED, (MONO, 9), anchor="ne")
+        body.y = body.bottom(title) + 6
+
+    def paragraph(self, text: str, fill: str, font=(SANS, 10), top: float = 0, indent: float = 6) -> None:
+        body = self.body
+        body.y += top
+        item = body.text(indent, text, fill, font, width=body.page_width - indent - 10)
+        body.y = body.bottom(item)
 
     def fill_body(self) -> None:
-        ui, item, board = self.ui, self.item, self.board
-        for child in self.body.winfo_children():
-            child.destroy()
-        wrap = round((float(self.frame.cget("width")) - 110) * self.px)
+        ui, item, board, body = self.ui, self.item, self.board, self.body
+        body.clear()
         self.compact(self.mode == "escalate")
         if self.mode == "escalate":
             # Escalating is when an asset is chosen: the window shows who can reach the vessel instead.
-            self.fill_responders(wrap)
+            self.fill_responders()
+            body.finish()
             return
-        self.fill_why(explain(item), wrap)
+        self.fill_why(explain(item))
         self.heading("RECOMMENDED ACTION")
-        tk.Label(self.body, text=item["recommendation"], bg=ui.CARD, fg=ui.INK, font=(SANS, 10), anchor="w",
-                 justify="left", wraplength=wrap + 40).pack(fill="x", padx=(6, 0))
+        self.paragraph(item["recommendation"], ui.INK)
         self.heading("LOG")
         entries = board.history.get(item["id"], [])
         if not entries:
-            tk.Label(self.body, text="No entries.", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 10),
-                     anchor="w").pack(fill="x", padx=(6, 0))
+            self.paragraph("No entries.", ui.MUTED)
         for stamp, text in entries[-8:]:
-            row = tk.Frame(self.body, bg=ui.CARD)
-            row.pack(fill="x", padx=(6, 0), pady=1)
-            tk.Label(row, text=board.stamp(stamp), bg=ui.CARD, fg=ui.MUTED, font=(MONO, 9)).pack(side="left", anchor="n")
-            tk.Label(row, text=text, bg=ui.CARD, fg=SECONDARY, font=(SANS, 10), anchor="w", justify="left",
-                     wraplength=wrap - 40).pack(side="left", fill="x", expand=True, padx=(10, 0))
+            body.y += 1
+            time = body.text(6, board.stamp(stamp), ui.MUTED, (MONO, 9))
+            left = body.canvas.bbox(time)[2] + 10
+            entry = body.text(left, text, SECONDARY, (SANS, 10), width=body.page_width - left - 10)
+            body.y = body.bottom(time, entry) + 1
         self.heading("DATA LABELS")
+        chip_width = self.chip_width()
         for tag, text in explain(item)["labels"]:
-            row = tk.Frame(self.body, bg=ui.CARD)
-            row.pack(fill="x", padx=(6, 0), pady=2)
-            self.chip(row, tag, width=13).pack(side="left", anchor="n")
-            tk.Label(row, text=text, bg=ui.CARD, fg=SECONDARY, font=(SANS, 9), anchor="w", justify="left",
-                     wraplength=wrap - 70).pack(side="left", fill="x", expand=True, padx=(8, 0))
+            body.y += 2
+            fill, background = CHIP.get(tag, (ui.MUTED, ui.CONTROL))
+            right = body.chip(6, body.y, tag, fill, background, (SANS, 7, "bold"), chip_width)
+            label = body.text(right + 8, text, SECONDARY, (SANS, 9), width=body.page_width - right - 18)
+            body.y = body.bottom(label) + 2
         source = ("Brain opens and updates the incident; only a human sets its status." if board.incident(item["id"])
                   else "Low: watched, not an incident; it opens one if it reaches Medium.")
-        tk.Label(self.body, text=source + " Decisions are logged locally and not transmitted.", bg=ui.CARD,
-                 fg=ui.MUTED, font=(SANS, 9), anchor="w", justify="left", wraplength=wrap + 40).pack(
-            fill="x", padx=(6, 0), pady=(12, 6))
+        self.paragraph(source + " Decisions are logged locally and not transmitted.", ui.MUTED, (SANS, 9), top=12)
+        body.finish()
 
-    def fill_responders(self, wrap: int) -> None:
+    def chip_width(self) -> float:
+        """Data-label chips share one width so their texts line up."""
+        font = tkfont.Font(root=self.board.app.root, family=SANS, size=7, weight="bold")
+        return max(font.measure(tag) for tag in CHIP) + 10
+
+    def fill_responders(self) -> None:
         """Who can reach it: the storm switch, the card line, then every asset with minutes or a reason."""
-        ui, item, board = self.ui, self.item, self.board
-        head = tk.Frame(self.body, bg=ui.CARD)
-        head.pack(fill="x", padx=(6, 0), pady=(4, 6))
-        tk.Label(head, text="WHO CAN REACH IT", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 8, "bold")).pack(side="left")
+        ui, item, board, body = self.ui, self.item, self.board, self.body
+        width = body.page_width
+        body.y += 4
+        title = body.text(6, "WHO CAN REACH IT", ui.MUTED, (SANS, 8, "bold"))
         storm = board.replay.storm
-        switch = ctk.CTkButton(
-            head, text=f"Storm {board.replay.fleet['wind']['storm_kn']} kn: {'ON' if storm else 'off'}",
-            command=board.toggle_storm, height=24, width=120, corner_radius=6,
-            font=ctk.CTkFont(SANS, 11, "bold" if storm else "normal"),
-            fg_color=STYLE["high"][1] if storm else ui.CARD, hover_color=ui.HOVER, border_width=1,
-            border_color=STYLE["high"][0] if storm else ui.LINE, text_color=STYLE["high"][0] if storm else ui.MUTED)
-        switch.pack(side="right", padx=(0, 6))
-        board.app.tools.style_button(switch, "Exercise wind: a storm grounds every drone (wind limit 25 kn)")
+        body.button(width - 8, body.y - 4, f"Storm {board.replay.fleet['wind']['storm_kn']} kn: {'ON' if storm else 'off'}",
+                    board.toggle_storm, STYLE["high"][0] if storm else ui.MUTED,
+                    STYLE["high"][1] if storm else ui.CARD, STYLE["high"][0] if storm else ui.LINE,
+                    (SANS, 10, "bold" if storm else "normal"),
+                    "Exercise wind: a storm grounds every drone (wind limit 25 kn)")
+        body.y = body.bottom(title) + 12
         result = board.response(item["id"])
         if result is None:
-            tk.Label(self.body, text="Worked out for open incidents at Medium or above.", bg=ui.CARD, fg=ui.MUTED,
-                     font=(SANS, 10), anchor="w").pack(fill="x", padx=(6, 0))
+            self.paragraph("Worked out for open incidents at Medium or above.", ui.MUTED)
             return
         status_open = board.status(item["id"]) not in ("Rejected", "Watching")
         text, warn = responders.summary_line(result)
-        tk.Label(self.body, text=text, bg=ui.CARD, fg=STYLE["critical"][0] if warn else IN_TIME,
-                 font=(SANS, 11, "bold"), anchor="w", justify="left", wraplength=wrap + 40).pack(fill="x", padx=(6, 0))
+        self.paragraph(text, STYLE["critical"][0] if warn else IN_TIME, (SANS, 11, "bold"))
         if result["deadline_s"] is None:
             when = "Not approaching a line: eyes-on times only"
         elif result["at_line"]:
@@ -1512,9 +1804,9 @@ class ReviewDialog:
         else:
             when = (f"Earliest line ETA {board.stamp(result['deadline_s'])} "
                     f"(in {responders.minutes(result['deadline_s'] - result['now'])} min)")
-        tk.Label(self.body, text=f"{when} · wind {result['wind_kn']:g} kn, exercise value", bg=ui.CARD,
-                 fg=ui.MUTED, font=(SANS, 9), anchor="w", justify="left", wraplength=wrap + 40).pack(
-            fill="x", padx=(6, 0), pady=(1, 4))
+        self.paragraph(f"{when} · wind {result['wind_kn']:g} kn, exercise value", ui.MUTED, (SANS, 9), top=1)
+        body.y += 4
+        id_width = self.id_font.measure("MPA1 ")
         for row in result["rows"]:
             unavailable = row["status"] == "unavailable"
             colour = UNAVAILABLE if unavailable else LATE if row["in_time"] is False else IN_TIME
@@ -1527,10 +1819,6 @@ class ReviewDialog:
                                 else f" · {responders.minutes(-row['margin_s'])} min late")
                 if not row["counts"]:
                     verdict += " · look only"
-            line = tk.Frame(self.body, bg=ui.CARD)
-            line.pack(fill="x", padx=(6, 0), pady=1)
-            tk.Label(line, text=row["id"], width=5, anchor="w", bg=ui.CARD, fg=colour,
-                     font=(MONO, 10, "bold")).pack(side="left", anchor="n")
             action = None
             if row["status"] == "assigned":
                 action = ("Recall", lambda asset=row["id"]: board.recall(item["id"], asset),
@@ -1540,39 +1828,36 @@ class ReviewDialog:
                 action = ("Send", lambda asset=row["id"]: board.send(item["id"], asset),
                           "Send this asset (simulated decision, logged, not transmitted). "
                           "It is then busy for every other incident")
-            button_width = 0
+            body.y += 2
+            top = body.y
+            right = width - 8
             if action:
-                text_, command, tip = action
-                button = ctk.CTkButton(line, text=text_, command=command, width=58, height=22, corner_radius=5,
-                                       font=ctk.CTkFont(SANS, 11, "bold"), fg_color=ui.CARD, hover_color=ui.HOVER,
-                                       border_width=1, border_color=colour, text_color=colour)
-                button.pack(side="right", padx=(6, 0))
-                board.app.tools.style_button(button, tip)
-                button_width = round(64 * self.px)
-            tk.Label(line, text=verdict, bg=ui.CARD, fg=ui.MUTED if unavailable else colour, font=self.row_font,
-                     anchor="e", justify="right").pack(side="right", anchor="n")
+                label, command, tip = action
+                right = body.button(right, top - 2, label, command, colour, ui.CARD, colour, (SANS, 10, "bold"), tip) - 8
+            shown = body.text(6, row["id"], colour, self.id_font, y=top)
+            verdict_item = body.text(right, verdict, ui.MUTED if unavailable else colour, self.row_font, anchor="ne",
+                                     y=top, justify="right")
             name = row["name"] if row["kind"] == "satellite" else f"{row['name']} · {row['base']}"
             # The asset name gives way to its minutes, verdict and button.
-            room = (wrap + 40 - self.id_font.measure("MPA1 ") - self.row_font.measure(verdict) - button_width
-                    - round(20 * self.px))
-            tk.Label(line, text=clip(name, self.name_font, max(40, room)), bg=ui.CARD,
-                     fg=ui.MUTED if unavailable else SECONDARY, font=self.name_font, anchor="w",
-                     justify="left").pack(side="left", fill="x", expand=True, padx=(4, 8))
+            room = body.canvas.bbox(verdict_item)[0] - 6 - id_width - 16
+            name_item = body.text(6 + id_width + 4, clip(name, self.name_font, max(40, room)),
+                                  ui.MUTED if unavailable else SECONDARY, self.name_font, y=top + 1)
+            body.y = body.bottom(shown, verdict_item, name_item) + 5 + (2 if action else 0)
             if action and action[0] == "Send":
                 others = board.replay.conflicts(item, row["id"])
                 if others:
                     names = ", ".join(other["name"] for other in others)
-                    tk.Label(self.body, text=f"⚠ Only {row['id']} reaches {names} in time: sending it here "
-                                             f"leaves {'them' if len(others) > 1 else 'it'} with no responder",
-                             bg=ui.CARD, fg=STYLE["medium"][0], font=(SANS, 9), anchor="w", justify="left",
-                             wraplength=wrap).pack(fill="x", padx=(round(52 * self.px), 0), pady=(0, 3))
-        note = tk.Frame(self.body, bg=ui.CARD)
-        note.pack(fill="x", padx=(6, 0), pady=(6, 0))
-        self.chip(note, "ASSUMPTION").pack(side="left", anchor="n")
-        tk.Label(note, text="Bases are public places, coordinates approximate. Speeds, readiness, ranges, drone "
-                            "sites and the patrol ship position are team assumptions. VHF and satellite only look.",
-                 bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9), anchor="w", justify="left", wraplength=wrap - 70).pack(
-            side="left", fill="x", expand=True, padx=(8, 0))
+                    self.paragraph(f"⚠ Only {row['id']} reaches {names} in time: sending it here "
+                                   f"leaves {'them' if len(others) > 1 else 'it'} with no responder",
+                                   STYLE["medium"][0], (SANS, 9), indent=6 + id_width + 4)
+                    body.y += 3
+        body.y += 6
+        fill, background = CHIP["ASSUMPTION"]
+        right = body.chip(6, body.y, "ASSUMPTION", fill, background, (SANS, 7, "bold"))
+        note = body.text(right + 8, "Bases are public places, coordinates approximate. Speeds, readiness, ranges, "
+                                    "drone sites and the patrol ship position are team assumptions. VHF and "
+                                    "satellite only look.", ui.MUTED, (SANS, 9), width=width - right - 18)
+        body.y = body.bottom(note) + 6
 
     def compact(self, on: bool) -> None:
         """While escalating, fold the level scale and facts so the asset list has room."""
@@ -1584,69 +1869,61 @@ class ReviewDialog:
             self.scale.pack(fill="x", padx=20, pady=(12, 0), after=above)
             self.facts_frame.pack(fill="x", padx=20, pady=(8, 0), after=self.scale)
 
-    def chip(self, parent, tag: str, width: int = 0) -> tk.Label:
-        """A small data-label tag such as SIMULATED, REAL or ASSUMPTION."""
-        fg, bg = CHIP.get(tag, (self.ui.MUTED, self.ui.CONTROL))
-        return tk.Label(parent, text=tag, bg=bg, fg=fg, font=(SANS, 7, "bold"), padx=5, pady=1, width=width)
-
-    def line(self, prefix: str, text: str, wrap: int, colour: str, prefix_colour: str | None = None,
-             font=(SANS, 10)) -> None:
+    def line(self, prefix: str, text: str, colour: str, prefix_colour: str | None = None, font=(SANS, 10)) -> None:
         """One indented row: a short mono prefix (points or a bullet) and wrapped text."""
-        row = tk.Frame(self.body, bg=self.ui.CARD)
-        row.pack(fill="x", pady=1)
-        tk.Label(row, text=prefix, width=3, anchor="e", bg=self.ui.CARD, fg=prefix_colour or colour,
-                 font=(MONO, 10, "bold")).pack(side="left", anchor="n")
-        tk.Label(row, text=text, bg=self.ui.CARD, fg=colour, font=font, anchor="w", justify="left",
-                 wraplength=wrap).pack(side="left", fill="x", expand=True, padx=(10, 0))
+        body = self.body
+        body.y += 1
+        items = []
+        if prefix:
+            items.append(body.text(30, prefix, prefix_colour or colour, (MONO, 10, "bold"), anchor="ne"))
+        items.append(body.text(40, text, colour, font, width=body.page_width - 50))
+        body.y = body.bottom(*items) + 1
 
-    def fill_why(self, why: dict, wrap: int) -> None:
+    def fill_why(self, why: dict) -> None:
         """Why this level: the five groups with points and factors, rules applied, the line, detectors."""
-        ui = self.ui
-        head = tk.Frame(self.body, bg=ui.CARD)
-        head.pack(fill="x", padx=(6, 0), pady=(4, 6))
-        tk.Label(head, text="WHY THIS LEVEL", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 8, "bold")).pack(side="left")
-        tk.Label(head, text=why["basis"], bg=ui.CARD, fg=ui.MUTED, font=(MONO, 9)).pack(side="right")
+        ui, body = self.ui, self.body
+        self.heading("WHY THIS LEVEL", top=4, right=why["basis"])
         for issue in why["data_issues"]:  # first, so the reviewer reads the level knowing the data was faulty
-            self.line("!", issue, wrap, STYLE["medium"][0])
+            self.line("!", issue, STYLE["medium"][0])
         for group in why["groups"]:
-            row = tk.Frame(self.body, bg=ui.CARD)
-            row.pack(fill="x", padx=(6, 0), pady=(6, 1))
+            body.y += 6
             active = group["points"] > 0
-            tk.Label(row, text=f"{group['key']}  {group['title']}", bg=ui.CARD, fg=ui.INK if active else ui.MUTED,
-                     font=(SANS, 10, "bold")).pack(side="left")
+            title = body.text(6, f"{group['key']}  {group['title']}", ui.INK if active else ui.MUTED, (SANS, 10, "bold"))
             score = f"{group['points']} of {group['cap']} max" if group["cap"] else f"{group['points']} pts"
-            tk.Label(row, text=score if group["factors"] else "nothing observed", bg=ui.CARD, fg=ui.MUTED,
-                     font=(MONO, 9) if group["factors"] else (SANS, 9)).pack(side="right")
+            body.text(body.page_width - 8, score if group["factors"] else "nothing observed", ui.MUTED,
+                      (MONO, 9) if group["factors"] else (SANS, 9), anchor="ne")
+            body.y = body.bottom(title) + 1
             for factor in group["factors"]:
                 points = factor["points"]
                 text = f"+{points}" if points > 0 else ("−" + str(-points) if points < 0 else "0")
-                self.line(text, factor["text"], wrap, ui.INK if points else ui.MUTED)
+                self.line(text, factor["text"], ui.INK if points else ui.MUTED)
         if why["rules"]:
             self.heading("RULES APPLIED")
             for note in why["rules"]:
-                self.line("›", note, wrap, SECONDARY, ui.MUTED, (SANS, 10, "italic"))
+                self.line("›", note, SECONDARY, ui.MUTED, (SANS, 10, "italic"))
         line = why["line"]
         self.heading("THREATENED LINE")
-        self.line("›", f"{line['name']}: {line['where']}", wrap, ui.INK, ui.MUTED)
+        self.line("›", f"{line['name']}: {line['where']}", ui.INK, ui.MUTED)
         for other in line["others"]:
             self.line("", f"Also named: {other['name']}, {other['where']}. Scored for the most urgent line only.",
-                      wrap, ui.MUTED)
+                      ui.MUTED)
         small = why["small_vessel"]
         if small:
             self.heading("SMALL VESSEL")
-            self.line("›", f"Small: {small['reason']}.", wrap, ui.INK, ui.MUTED)
-            self.line("", small["outcome"], wrap, STYLE["low"][0] if small["capped"] else STYLE["medium"][0])
+            self.line("›", f"Small: {small['reason']}.", ui.INK, ui.MUTED)
+            self.line("", small["outcome"], STYLE["low"][0] if small["capped"] else STYLE["medium"][0])
         self.heading("FINDINGS BY DETECTOR")
         for finding in why["findings"]:
-            row = tk.Frame(self.body, bg=ui.CARD)
-            row.pack(fill="x", padx=(6, 0), pady=(4, 1))
-            tk.Label(row, text=finding["title"], bg=ui.CARD, fg=ui.INK, font=(SANS, 10, "bold")).pack(side="left")
-            self.chip(row, finding["label"]).pack(side="left", padx=(8, 0))
+            body.y += 4
+            title = body.text(6, finding["title"], ui.INK, (SANS, 10, "bold"))
+            fill, background = CHIP.get(finding["label"], (ui.MUTED, ui.CONTROL))
+            body.chip(body.canvas.bbox(title)[2] + 8, body.y + 2, finding["label"], fill, background, (SANS, 7, "bold"))
+            body.y = body.bottom(title) + 1
             for reason in finding["reasons"][:DETECTOR_REASONS]:
-                self.line("•", reason, wrap, SECONDARY, ui.MUTED)
+                self.line("•", reason, SECONDARY, ui.MUTED)
             hidden = len(finding["reasons"]) - DETECTOR_REASONS
             if hidden > 0:
-                self.line("", f"+{hidden} more", wrap, ui.MUTED)
+                self.line("", f"+{hidden} more", ui.MUTED)
 
     def fill_actions(self) -> None:
         ui, item, board = self.ui, self.item, self.board
@@ -1686,9 +1963,7 @@ class ReviewDialog:
         self.fill_actions()
         self.fill_form()
         self.fill_body()
-        canvas = getattr(self.body, "_parent_canvas", None)
-        if canvas is not None:
-            canvas.yview_moveto(0)
+        self.body.top()
 
     def fill_form(self) -> None:
         ui = self.ui

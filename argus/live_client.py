@@ -134,9 +134,12 @@ def validate_envelope(payload: object) -> dict:
         nav_status = row.get('nav_status')
         if nav_status is not None and (type(nav_status) is not int or not 0 <= nav_status <= 14):
             raise ValueError('Invalid AIS navigation status.')
+        length = row.get('ais_length_m')
+        if length is not None and (not _number(length, 0, 1022) or length <= 0):
+            raise ValueError('Invalid AIS declared length.')
         if row.get("label") not in ("real", "simulated"):
             raise ValueError("The AIS provenance label is missing.")
-        clean_rows.append({
+        clean = {
             "mmsi": mmsi, "name": _text(row.get("name"), 128) or "Name unavailable",
             "type": _text(row.get("ship_type", row.get("type")), 80) or "Unavailable",
             "lat": row.get("lat"), "lon": row.get("lon"), "sog_kn": row.get("sog_kn"),
@@ -146,7 +149,10 @@ def validate_envelope(payload: object) -> dict:
             "destination_received_utc": destination_received,
             "nav_status": nav_status,
             "label": row["label"],
-        })
+        }
+        if 'ais_length_m' in row:
+            clean['ais_length_m'] = length
+        clean_rows.append(clean)
     clean_removals = [_mmsi(value) for value in removals]
     if seen.intersection(clean_removals) or len(set(clean_removals)) != len(clean_removals):
         raise ValueError("Conflicting vessel removals.")
@@ -184,9 +190,16 @@ class LiveState:
                 # New particulars can arrive without a new position; retain the
                 # last observed fix while updating the name and type.
                 vessels[row["mmsi"]] = {**previous, "name": row["name"], "type": row["type"],
+                    **({'ais_length_m': row['ais_length_m']} if 'ais_length_m' in row else {}),
                     "metadata_received_utc": row["metadata_received_utc"],
                     "destination": row["destination"],
                     "destination_received_utc": row["destination_received_utc"]}
+            if previous is not None and previous.get('metadata_received_utc') and (
+                    not row.get('metadata_received_utc') or
+                    utc_timestamp(previous['metadata_received_utc']) > utc_timestamp(row['metadata_received_utc'])):
+                for key in ('name', 'type', 'metadata_received_utc', 'ais_length_m'):
+                    if key in previous:
+                        vessels[row['mmsi']][key] = previous[key]
             if previous is not None and previous.get("destination_received_utc") and (
                     row["destination_received_utc"] is None or
                     utc_timestamp(previous["destination_received_utc"]) > utc_timestamp(row["destination_received_utc"])):

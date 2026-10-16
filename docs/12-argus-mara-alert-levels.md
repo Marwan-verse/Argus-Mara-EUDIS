@@ -121,6 +121,37 @@ window shows **In zone** or the distance to the zone. Haulbowline sits inside a 
 harbour, so the stop rule never fires there (Cobh is a port) and harbour traffic would
 make the loiter rule noisy without a list of expected vessels.
 
+## Heading vs declared destination (rule C3)
+
+`argus/detectors/route_check.py` checks whether a ship is going where its AIS says.
+The crew types the destination by hand (AIS Message 5). The detector reads it as a
+port: a UN/LOCODE from a short table (for example `GBHLY` Holyhead, `IEDUB` Dublin), or
+a port name in the bundled Irish port list and World Port Index. "FROM>TO" text keeps
+the last part. Blank, unknown or "FOR ORDERS"-style text is never guessed.
+
+Over the last 30 minutes of the track it then asks: is the ship under way (median 4 kn
+or more), has it covered at least 3 nm, and has it moved away from that port (course
+more than 90° off the bearing to the port, and at least 1 nm farther from it)? If so it
+sets C3, **+1 in the context group**. The check stays quiet:
+
+- within 10 nm of the port, where ships manoeuvre, wait for a pilot or anchor;
+- within 6 h of leaving the declared port, when the destination is often not yet updated;
+- when the straight line to the port crosses land, because the ship has to go round;
+- for slow, waiting or drifting ships.
+
+C3 alone never raises an alert (it is context, and proximity counts only with a
+behaviour or identity cue). It adds one point to a ship that is already behaving
+suspiciously near a line, and its finding reads "for review": an out-of-date
+destination is the most common innocent explanation. Every threshold is a team
+assumption.
+
+**SIM-55 SALTEE HERON** shows it on the replay. It declares Fishguard (`GBFIS`) and
+steams towards it, then from T+02:40 turns south-west, away from Fishguard and
+towards Greenlink. From about T+03:05 its watch card reads "not heading to its declared
+destination" (C3 +1, level None). At about T+03:30 it slows by the line and becomes
+High (B1 +4, P2 +3, A1 +2, C3 +1 = 10). It runs after the Dublin stories and in the
+south, so it does not change their responders or timings.
+
 ## The alert panel
 
 | Part | Behaviour |
@@ -189,6 +220,8 @@ alert fix; only the two contacts with an ETA count down.
 - "A damage method possible at this depth" defaults to yes; depth data is not yet wired in.
 - The stop and loiter detectors run only on fictional tracks; they are not yet wired to
   received live AIS. Small boats landing on a beach often carry no AIS at all.
+- The destination check needs a declared destination. The deployed Railway feed does not
+  send Message 5 destinations yet, so real ships get no C3 until it is redeployed.
 - No live AIS or radar detector feeds this board yet. Received live AIS on the map is
   separate and never scored.
 
@@ -198,11 +231,13 @@ alert fix; only the two contacts with an ETA count down.
 |---|---|
 | `argus/levels.py` | Rules: points, caps, gates, overrides and bands |
 | `argus/sites.py` | Coastal sites, anchorages, and the stop and site-loiter detectors |
+| `argus/detectors/route_check.py` | Declared AIS destination against the recent track (rule C3) |
 | `argus/alert_board.py` | The simulated board: scenarios, coastal-site contacts, minor alerts, tracks and the countdown update |
 | `desktop_alerts.py` | Docked panel, review window and map markers |
 | `desktop_gestures.py` | Two-finger scrolling on Tk 9 and pinch-to-zoom on macOS |
 | `tests/test_levels.py` | Rule cases, including every worked example above |
 | `tests/test_sites.py` | Stop and loiter detection, port and anchorage exclusions, and the new rule cues |
+| `tests/test_route_check.py` | Destination reading, heading-away cases, quiet cases and the SIM-55 story |
 | `tests/test_alert_board.py` | Labels, sorting, counts and the countdown raising a level |
 | `tests/test_desktop_alerts.py` | Panel, decisions, filters, map markers and hiding the panel |
 | `tests/test_desktop_gestures.py` | Trackpad scrolling of the queue and pinch zoom steps |

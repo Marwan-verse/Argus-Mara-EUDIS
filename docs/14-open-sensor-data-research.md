@@ -71,7 +71,6 @@ explained GPS errors indirectly and made the spoofing rule harder to explain.*
 **Idea:** every ADS-B v2 aircraft reports how good its GPS position is (`nic`, `nac_p`). When several
 civil aircraft in one area report degraded values at the same time, that measures GNSS interference
 directly. This is the method behind public GPS-jamming maps.
-
 **Change:**
 - a new layer gives "GNSS degraded in this area since HH:MM (k aircraft, real)";
 - `ais_spoofing` then notes that AIS jumps in that area may come from GNSS jamming or spoofing nearby;

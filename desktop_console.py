@@ -103,7 +103,7 @@ def build(app):
         ("views", "Saved map views", lambda: app.open_window('views')),
         ("cables", "Historical cable routes", lambda: app.open_window("cables")),
         ("ports", "Port directory", lambda: app.open_window("ports")),
-        ("radar", "SAR satellite plan", lambda: app.open_window("sar_plan")),
+        ("radar", "Satellite analysis / historical AIS", lambda: app.open_window("satellite")),
         ("weather", "Weather", lambda: app.open_window("weather")),
         ("layers", "Display layers", lambda: app.open_window("layers")),
     ):
@@ -138,7 +138,7 @@ def build(app):
     right.place(relx=1, x=-12, y=80, anchor="ne")
     for icon, title, action in (
         ("search", "Global search / Ctrl+K", app.tools.open_search),
-        ("radar", "SAR next step", lambda: app.open_window("sar_plan")),
+        ("radar", "Satellite analysis", lambda: app.open_window("satellite")),
         ("alerts", "Show / hide alerts", app.tools.toggle_alerts),
         ("pen", "Add map note", lambda: app._set_map_tool("pin")),
         ("measure", "Measure distance", lambda: app._set_map_tool("measure")),
@@ -150,6 +150,9 @@ def build(app):
 
     app.floating_panel = ctk.CTkFrame(map_host, fg_color=ui.CARD, corner_radius=8,
                                       border_width=1, border_color=ui.LINE)
+    # The map layout supplies its dimensions. A scrollable tab's small requested
+    # height must not shrink the whole dock and hide most satellite controls.
+    app.floating_panel.pack_propagate(False)
     panel_head = ctk.CTkFrame(app.floating_panel, fg_color="transparent")
     panel_head.pack(fill="x", padx=12, pady=(8, 2))
     app.panel_caption = ctk.CTkLabel(panel_head, text="Maritime", text_color=ui.INK,
@@ -227,8 +230,11 @@ def build(app):
     modes = ctk.CTkFrame(map_host, fg_color=ui.BG, corner_radius=8, border_width=1, border_color=ui.LINE)
     modes.place(x=16, rely=1, y=-54, anchor="sw")
     app.modes_bar = modes
-    for icon, text, action in (("layers", 'Map', lambda: app._change_map_mode("Offline coastline")),
-                              ("satellite", 'Satellite', lambda: app._change_map_mode(ui.ONLINE_MAP)),
+    pro = ui.UI_EDITION == "pro"
+    chart_mode = ui.desktop_basemap.TACTICAL_MAP if pro else "Offline coastline"
+    imagery_mode = ui.desktop_basemap.HD_IMAGERY if pro else ui.ONLINE_MAP
+    for icon, text, action in (("layers", 'Chart' if pro else 'Map', lambda: app._change_map_mode(chart_mode)),
+                              ("satellite", 'Satellite', lambda: app._change_map_mode(imagery_mode)),
                               ("ship", 'AIS', lambda: app.open_window("ais")),
                               ("replay", 'Exercise', app.show_exercise)):
         mode = ctk.CTkButton(modes, text=text, image=app.tools.icons.get(icon, ui.PURPLE),
@@ -238,7 +244,7 @@ def build(app):
         app.tools.style_button(mode, text + ' view')
     # Existing layer controls can still set this selector and weather indicator.
     app.map_selector = ctk.CTkOptionMenu(map_host, variable=app.map_mode,
-        values=["Offline coastline", ui.ONLINE_MAP], command=app._change_map_mode)
+        values=["Offline coastline", ui.ONLINE_MAP, *ui.desktop_basemap.SOURCES], command=app._change_map_mode)
     app.weather_label = ctk.CTkLabel(map_host, text="", text_color=ui.MUTED)
 
     app.replay_controls = ctk.CTkFrame(map_host, fg_color=ui.CARD, corner_radius=8,

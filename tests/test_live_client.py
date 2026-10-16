@@ -30,6 +30,22 @@ def update(sequence=2, **fields):
 
 
 class LiveClientTests(unittest.TestCase):
+    def test_declared_length_is_preserved_and_old_static_metadata_cannot_regress_it(self):
+        state = LiveState()
+        state.apply(snapshot(vessels=[vessel(ais_length_m=180, metadata_received_utc='2026-10-08T20:00:00Z')]))
+        state.apply(update(upserts=[vessel(ais_length_m=90, name='OLD NAME', received_utc='2026-10-08T20:02:00Z',
+                                          metadata_received_utc='2026-10-08T19:00:00Z')]))
+        self.assertEqual(state.vessels['123456789']['ais_length_m'], 180)
+        self.assertEqual(state.vessels['123456789']['name'], 'TEST CONTACT')
+        self.assertEqual(state.vessels['123456789']['received_utc'], '2026-10-08T20:02:00Z')
+        state.apply(update(3, upserts=[vessel(ais_length_m=None, lat=None, lon=None, received_utc=None,
+                                             metadata_received_utc='2026-10-08T20:03:00Z')]))
+        self.assertIsNone(state.vessels['123456789']['ais_length_m'])
+        self.assertNotIn('ais_length_m', validate_envelope(snapshot())['rows'][0])
+        for value in (-1, 0, 1023, True, float('nan')):
+            with self.assertRaises(ValueError):
+                validate_envelope(snapshot(vessels=[vessel(ais_length_m=value)]))
+
     def test_destination_updates_without_moving_fix_and_cannot_regress(self):
         state = LiveState()
         state.apply(snapshot())

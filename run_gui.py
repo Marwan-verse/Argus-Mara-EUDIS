@@ -40,6 +40,7 @@ from argus.countdown import step
 from argus.map_view import coordinates, find_ports, geographic_extent, route_name, search_text
 from argus.prediction import dark_countdown, last_gap, position_at, reappearance_check, v_max_kn
 from desktop_ais import DesktopAIS
+import desktop_basemap
 import desktop_prediction
 
 
@@ -65,6 +66,19 @@ ONLINE_MAP = "NASA Blue Marble · online"
 TILE_URL = "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/BlueMarble_NextGeneration/default/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpeg"
 TILE_USER_AGENT = "ArgusMaraDesktop/0.3 (local offline-first demo)"
 WEATHER_HOURS = ("Now", "+1 h", "+2 h", "+3 h", "+6 h", "+9 h", "+12 h")
+# "pro" is the detailed tactical chart and console; "classic" is the original look (python run_gui.py --old).
+UI_EDITION = "classic"
+
+
+def is_raster(mode: str) -> bool:
+    return mode == ONLINE_MAP or mode in desktop_basemap.SOURCES
+
+
+def max_zoom_for(mode: str) -> int:
+    if mode == ONLINE_MAP:
+        return MAX_IMAGERY_ZOOM
+    source = desktop_basemap.SOURCES.get(mode)
+    return source.max_zoom if source else MAX_MAP_ZOOM
 
 
 def tile_cache_root() -> Path:
@@ -236,7 +250,10 @@ class ArgusApp:
         self._last_second = -1
         self.map_center = (53.25, -11.25)
         self.map_zoom = 6
-        self.map_mode = tk.StringVar(value="Offline coastline")
+        self.map_mode = tk.StringVar(value=desktop_basemap.TACTICAL_MAP if UI_EDITION == "pro" else "Offline coastline")
+        self.chart_margin = desktop_basemap.MARGIN if UI_EDITION == "pro" else 0
+        self._cursor_geo = (None, None)
+        self._tile_fallback: dict[tuple[int, int, int], tk.PhotoImage] = {}
         self.map_layers = {name: tk.BooleanVar(value=True) for name in ("AIS track", "Dark prediction", "Radar contacts", "Cable", "Anchor reach", "Response assets", "World ports", "Historical cable routes", "Simulated alerts", "Rain and cloud", "Wind")}
         self.map_layers["World ports"].set(True)
         self.irish_ports_only = tk.BooleanVar(value=True)
@@ -285,6 +302,7 @@ class ArgusApp:
             "notes": "Map notes", "evidence": "Evidence review",
             "decision": "Decision review", "weather": "Live weather",
             "ais": "AIS ship tracker", "sar_plan": "SAR next step",
+            "satellite": "Satellite analysis",
             "views": "Saved map views",
         }
         self._decision_choice = tk.StringVar(value="")
@@ -295,6 +313,8 @@ class ArgusApp:
         self._initial_split_set = False
         self._configure_window()
         self.ais_tracker = DesktopAIS(self, cache_path=ROOT / "data/desktop/ais_latest.json")
+        from desktop_satellite import DesktopSatellite
+        self.satellite = DesktopSatellite(self, ROOT / 'data/satellite')
         self._build_modern()
         self.render()
         self.root.after(80, self._tick)
@@ -303,6 +323,12 @@ class ArgusApp:
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         from desktop_soc import DesktopSOC
         self.soc = DesktopSOC(self)
+
+    def start_coast_watch(self) -> None:
+        """SATELLITE-WATCH launchers: show Satellite analysis on all Ireland and start Coast Watch."""
+        self.open_window("satellite")
+        self.satellite.coast_view()
+        self.satellite.start_watch()
 
     def allowed(self, permission: str) -> bool:
         """Offline exercises use public demo files; SOC tools follow server grants."""
@@ -316,13 +342,15 @@ class ArgusApp:
         return False
 
     def _configure_window(self) -> None:
+        from desktop_gestures import speed_up_scrollbars
+        speed_up_scrollbars()  # Before any panel creates a scrollable list
         self.root.title("Argus Mara — maritime intelligence")
         ctk.set_appearance_mode("dark")
         ctk.ThemeManager.theme['CTkFont']['family'] = 'Segoe UI'
         ctk.ThemeManager.theme['CTkFont']['size'] = 13
         for name, values in {
-            'CTkButton': {'fg_color': [CONTROL, CONTROL], 'hover_color': [HOVER, HOVER], 'text_color': [INK, INK], 'corner_radius': 8},
-            'CTkEntry': {'fg_color': [CONTROL, CONTROL], 'border_color': [LINE, LINE], 'text_color': [INK, INK], 'corner_radius': 8},
+            'CTkButton': {'fg_color': [CONTROL, CONTROL], 'hover_color': [HOVER, HOVER], 'text_color': [INK, INK], 'corner_radius': 3 if UI_EDITION == "pro" else 8},
+            'CTkEntry': {'fg_color': [CONTROL, CONTROL], 'border_color': [LINE, LINE], 'text_color': [INK, INK], 'corner_radius': 3 if UI_EDITION == "pro" else 8},
             'CTkOptionMenu': {'fg_color': [CONTROL, CONTROL], 'button_color': [CONTROL, CONTROL], 'button_hover_color': [HOVER, HOVER], 'text_color': [INK, INK]},
             'DropdownMenu': {'fg_color': [CARD, CARD], 'hover_color': [HOVER, HOVER], 'text_color': [INK, INK]},
         }.items():
@@ -377,6 +405,9 @@ class ArgusApp:
         if hasattr(self, "ais_tracker"):
             from desktop_console import build
             build(self)
+            if UI_EDITION == "pro":
+                import desktop_pro
+                desktop_pro.decorate(self)
         else:
             self._build_dashboard()
 
@@ -411,6 +442,7 @@ class ArgusApp:
         if hasattr(self, "ais_tracker"):
             nav("△   AIS ship tracker", lambda: self.open_window("ais"))
             nav("◇   SAR next step", lambda: self.open_window("sar_plan"))
+            nav("◈   Satellite analysis", lambda: self.open_window("satellite"))
         nav("◷   Timeline", lambda: self.open_window("timeline"))
         nav("◇   Map layers", lambda: self.open_window("layers"))
         nav("⚓   Port directory", lambda: self.open_window("ports"))
@@ -489,7 +521,7 @@ class ArgusApp:
         map_bar = ctk.CTkFrame(left, fg_color="transparent")
         map_bar.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 9))
         self.map_selector = ctk.CTkOptionMenu(map_bar, variable=self.map_mode,
-                                              values=["Offline coastline", ONLINE_MAP],
+                                              values=["Offline coastline", ONLINE_MAP, *desktop_basemap.SOURCES],
                                               command=self._change_map_mode, width=180, height=31,
                                               fg_color="#1a2c3b", button_color="#203747",
                                               button_hover_color="#294254", text_color=INK,
@@ -746,7 +778,7 @@ class ArgusApp:
             self._bottom_visible = False
 
     def open_window(self, key: str, destination: str = "right") -> None:
-        permission = {'evidence': 'evidence.share', 'sar_plan': 'evidence.share',
+        permission = {'evidence': 'evidence.share', 'sar_plan': 'evidence.share', 'satellite': 'evidence.share',
                       'decision': 'response.review', 'responses': 'response.review'}.get(key, 'map.view')
         if not self.require_tool(permission):
             return
@@ -786,6 +818,8 @@ class ArgusApp:
             self.tools.build_views(frame)
         elif key == "ais":
             self.ais_tracker.build(frame)
+        elif key == 'satellite':
+            self.satellite.build(frame)
         elif key == "sar_plan":
             text = tk.Text(frame, wrap="word", padx=15, pady=12, font=("Segoe UI", 11),
                            bg=CARD, fg=INK, insertbackground=INK, relief="flat")
@@ -932,7 +966,7 @@ class ArgusApp:
                                 command=lambda: self._draw_map(force_static=True)).pack(anchor="w", pady=4)
             ttk.Label(frame, text="Choose a map background and the overlays to show.", style="Muted.TLabel").pack(anchor="w", pady=(0, 12))
             ttk.Label(frame, text="Basemap", style="Heading.TLabel").pack(anchor="w")
-            selector = ttk.Combobox(frame, textvariable=self.map_mode, values=("Offline coastline", ONLINE_MAP), state="readonly", width=31)
+            selector = ttk.Combobox(frame, textvariable=self.map_mode, values=("Offline coastline", ONLINE_MAP, *desktop_basemap.SOURCES), state="readonly", width=31)
             selector.pack(anchor="w", pady=(5, 12))
             selector.bind("<<ComboboxSelected>>", self._change_map_mode)
             for label, variable in self.map_layers.items():
@@ -1275,10 +1309,11 @@ class ArgusApp:
                     text += " · rain partly estimated from symbols"
         title = self.map.bbox("map_title")
         top = (title[3] if title else 26) + 6
-        label = self.map.create_text(14, top + 4, text=text, anchor="nw", fill=INK, font=("Segoe UI Semibold", 8))
+        left = getattr(self, "chart_margin", 0)
+        label = self.map.create_text(14 + left, top + 4, text=text, anchor="nw", fill=INK, font=("Segoe UI Semibold", 8))
         _x1, y1, x2, y2 = self.map.bbox(label)
         line = y2 - y1
-        background = self.map.create_rectangle(8, top, x2 + 8, y2 + 8, fill=CARD, outline=LINE)
+        background = self.map.create_rectangle(8 + left, top, x2 + 8, y2 + 8, fill=CARD, outline=LINE)
         self.map.tag_raise(label)
         rows = []
         if rain_on:
@@ -1291,7 +1326,7 @@ class ArgusApp:
         right, bottom = x2, y2
         for kind, swatches, unit in rows:
             row = bottom + line // 2 + 3
-            x = 14
+            x = 14 + left
             for index, (colour, caption) in enumerate(swatches):
                 if kind == "box":
                     self.map.create_rectangle(x, row - line // 3, x + line, row + line // 3, fill=colour, outline="")
@@ -1301,7 +1336,7 @@ class ArgusApp:
                                             anchor="w", fill=MUTED, font=("Segoe UI", 8))
                 x = self.map.bbox(item)[2] + (line if kind == "box" and index == 0 else line // 2)
             right, bottom = max(right, x), row + line // 2
-        self.map.coords(background, 8, top, right + 8, bottom + 6)
+        self.map.coords(background, 8 + left, top, right + 8, bottom + 6)
 
     def _refresh_weather_panel(self) -> None:
         widget = self._panel_widgets.get("weather")
@@ -1410,7 +1445,7 @@ class ArgusApp:
         if hasattr(self, "irish_ports_only") and self.selected_port not in self.irish_port_indices:
             self.irish_ports_only.set(False)
         self.map_layers["World ports"].set(True)
-        self.map_zoom = min(10, MAX_IMAGERY_ZOOM if self.map_mode.get() == ONLINE_MAP else MAX_MAP_ZOOM)
+        self.map_zoom = min(10, max_zoom_for(self.map_mode.get()))
         self._change_map_center((port[2], port[3]))
         self._refresh_port_directory()
 
@@ -1485,7 +1520,7 @@ class ArgusApp:
         center, lat_span, lon_span = geographic_extent(points)
         # The live canvas size: before the first draw _map_size is still (0, 0) and every fit would be the world.
         width, height = max(self._map_size[0], self.map.winfo_width()), max(self._map_size[1], self.map.winfo_height())
-        maximum = MAX_IMAGERY_ZOOM if self.map_mode.get() == ONLINE_MAP else MAX_MAP_ZOOM
+        maximum = max_zoom_for(self.map_mode.get())
         for zoom in range(maximum, MIN_MAP_ZOOM - 1, -1):
             _, top = geo_to_world(center[0] + lat_span / 2, center[1], zoom)
             _, bottom = geo_to_world(center[0] - lat_span / 2, center[1], zoom)
@@ -1852,6 +1887,8 @@ class ArgusApp:
             self.tools.close()
         if hasattr(self, "ais_tracker"):
             self.ais_tracker.close()
+        if hasattr(self, 'satellite'):
+            self.satellite.close()
         self._tile_executor.shutdown(wait=False, cancel_futures=True)
         self._weather_executor.shutdown(wait=False, cancel_futures=True)
         # Cancel callbacks before Tk deletes their registered commands. This
@@ -1913,7 +1950,10 @@ class ArgusApp:
         center_x, center_y = geo_to_world(*self.map_center, self.map_zoom)
         return center_x + screen_x - self._map_size[0] / 2, center_y + screen_y - self._map_size[1] / 2
 
-    def _tile_path(self, key: tuple[int, int, int]) -> Path:
+    def _tile_path(self, key: tuple[int, int, int], mode: str | None = None) -> Path:
+        source = desktop_basemap.SOURCES.get(mode or self.map_mode.get())
+        if source:
+            return desktop_basemap.tile_path(self._tile_cache, source, key)
         z, x, y = key
         return self._tile_cache / str(z) / str(x) / f"{y}.jpeg"
 
@@ -1961,8 +2001,12 @@ class ArgusApp:
                 tiles.append((z, tile_x % (2 ** z), tile_y, tile_x, tile_y))
         return tiles
 
-    def _tile_fetch_worker(self, key: tuple[int, int, int]) -> None:
-        path = self._tile_path(key)
+    def _tile_fetch_worker(self, key: tuple[int, int, int], mode: str = ONLINE_MAP) -> None:
+        source = desktop_basemap.SOURCES.get(mode)
+        if source:
+            self._chart_fetch_worker(key, mode, source)
+            return
+        path = self._tile_path(key, ONLINE_MAP)
         metadata = self._tile_metadata(key)
         z, x, y = key
         headers = {"User-Agent": TILE_USER_AGENT, "Accept": "image/jpeg"}
@@ -2008,31 +2052,49 @@ class ArgusApp:
         except Exception as error:
             self._tile_queue.put((key, False, str(error), None))
 
+    def _chart_fetch_worker(self, key: tuple[int, int, int], mode: str, source) -> None:
+        """Download, recolour and cache one tile of a detailed chart (kept until deleted)."""
+        try:
+            data = desktop_basemap.fetch_tile(source, *key)
+            path = self._tile_path(key, mode)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temp_path = path.with_suffix(".tmp")
+            temp_path.write_bytes(data)
+            temp_path.replace(path)
+            self._tile_queue.put((key, True, f"{source.name} · cached on this device", None, mode))
+        except Exception as error:
+            self._tile_queue.put((key, False, str(error), None, mode))
+
     def _update_visible_tiles(self) -> None:
-        if self.map_mode.get() != ONLINE_MAP or self._map_size[0] < 100:
+        mode = self.map_mode.get()
+        if not is_raster(mode) or self._map_size[0] < 100:
             return
+        chart = mode in desktop_basemap.SOURCES
         missing = False
         for z, x, y, _x_absolute, _y_absolute in self._visible_tiles():
             key = (z, x, y)
             path = self._tile_path(key)
-            metadata = self._tile_metadata(key)
+            metadata = {} if chart else self._tile_metadata(key)
             if path.exists() and key not in self._tile_images:
                 try:
                     with Image.open(path) as image:
                         self._tile_images[key] = ImageTk.PhotoImage(image.copy(), master=self.map)
                 except (OSError, ValueError, tk.TclError):
                     path.unlink(missing_ok=True)
-            fresh = path.exists() and metadata.get("expires_at", 0) > time.time()
+            fresh = path.exists() and (chart or metadata.get("expires_at", 0) > time.time())
             if not fresh and key not in self._tile_pending and self._tile_retry_after.get(key, 0) < time.time():
                 self._tile_pending.add(key)
-                self._tile_executor.submit(self._tile_fetch_worker, key)
+                self._tile_executor.submit(self._tile_fetch_worker, key, mode)
             if key not in self._tile_images:
                 missing = True
-        self._tile_status = "Loading NASA imagery…" if missing else "NASA imagery · local cache"
+        if chart:
+            self._tile_status = f"Loading {mode}…" if missing else f"{mode} · local cache"
+        else:
+            self._tile_status = "Loading NASA imagery…" if missing else "NASA imagery · local cache"
         self._draw_map()
 
     def _schedule_tile_refresh(self, delay_ms: int = 240) -> None:
-        if self.map_mode.get() != ONLINE_MAP:
+        if not is_raster(self.map_mode.get()):
             return
         if self._tile_refresh_after is not None:
             try:
@@ -2045,10 +2107,13 @@ class ArgusApp:
         changed = False
         while True:
             try:
-                key, succeeded, result, image_data = self._tile_queue.get_nowait()
+                item = self._tile_queue.get_nowait()
             except queue.Empty:
                 break
+            key, succeeded, result, image_data = item[:4]
             self._tile_pending.discard(key)
+            if (item[4] if len(item) > 4 else ONLINE_MAP) != self.map_mode.get():
+                continue  # A tile for a base map the operator has since switched away from
             if succeeded:
                 path = self._tile_path(key)
                 try:
@@ -2067,8 +2132,8 @@ class ArgusApp:
                 self._tile_status = "Imagery unavailable · showing local map and cached tiles"
         if changed:
             self._draw_map()
-        if self.map_mode.get() == ONLINE_MAP:
-            self.map_status_label.configure(text=self._tile_status or "Loading NASA imagery…")
+        if is_raster(self.map_mode.get()):
+            self.map_status_label.configure(text=self._tile_status or "Loading imagery…")
         self.root.after(150, self._poll_tiles)
 
     def _map_resized(self, _event=None) -> None:
@@ -2082,12 +2147,18 @@ class ArgusApp:
             self._schedule_port_directory()
 
     def _change_map_mode(self, _event=None) -> None:
-        if isinstance(_event, str) and _event in ("Offline coastline", ONLINE_MAP):
+        if isinstance(_event, str) and (_event == "Offline coastline" or is_raster(_event)):
             self.map_mode.set(_event)
-        if self.map_mode.get() == ONLINE_MAP:
-            self.map_zoom = min(self.map_zoom, MAX_IMAGERY_ZOOM)
-            self._tile_status = "Loading NASA imagery…"
-            self.map_attribution_label.configure(text="NASA Earthdata · Natural Earth · NGA · TeleGeography")
+        mode = self.map_mode.get()
+        if is_raster(mode):
+            # Every base map shares the z/x/y keys, so drop the images of the previous one.
+            self._tile_images.clear()
+            self._tile_fallback.clear()
+            self._tile_retry_after.clear()
+            self.map_zoom = min(self.map_zoom, max_zoom_for(mode))
+            source = desktop_basemap.SOURCES.get(mode)
+            self._tile_status = f"Loading {mode}…" if source else "Loading NASA imagery…"
+            self.map_attribution_label.configure(text=source.attribution if source else "NASA Earthdata · Natural Earth · NGA · TeleGeography")
             self.map_status_label.configure(text="Online imagery · visible tiles requested as you view")
             self._update_visible_tiles()
         else:
@@ -2150,6 +2221,8 @@ class ArgusApp:
             self._schedule_tile_refresh()
 
     def _map_motion(self, event) -> None:
+        if UI_EDITION == "pro":
+            desktop_basemap.update_readout(self, *world_to_geo(*self._world_at(event.x, event.y), self.map_zoom))
         if self.map_tool:
             lat, lon = world_to_geo(*self._world_at(event.x, event.y), self.map_zoom)
             self.map_status_label.configure(text=f"{self.map_tool.title()} · {coordinates(lat, lon)}")
@@ -2198,7 +2271,7 @@ class ArgusApp:
                 x = sum(p[1] for p in members) / len(members)
                 y = sum(p[2] for p in members) / len(members)
                 point = world_to_geo(*self._world_at(x, y), self.map_zoom)
-                self.map_zoom = min(self.map_zoom + 2, MAX_IMAGERY_ZOOM if self.map_mode.get() == ONLINE_MAP else MAX_MAP_ZOOM)
+                self.map_zoom = min(self.map_zoom + 2, max_zoom_for(self.map_mode.get()))
                 self._change_map_center(point)
                 self._refresh_port_directory()
                 return
@@ -2255,7 +2328,7 @@ class ArgusApp:
         self._zoom_at(direction, x, y)
 
     def _zoom_at(self, amount: int, screen_x: float, screen_y: float) -> None:
-        maximum = MAX_IMAGERY_ZOOM if self.map_mode.get() == ONLINE_MAP else MAX_MAP_ZOOM
+        maximum = max_zoom_for(self.map_mode.get())
         new_zoom = max(MIN_MAP_ZOOM, min(maximum, self.map_zoom + amount))
         if new_zoom == self.map_zoom:
             return
@@ -2312,7 +2385,7 @@ class ArgusApp:
                     x, y = geo_to_world(lat, lon, z)
                     coords.extend((x - center_x + width / 2 + shift, y - center_y + height / 2))
                 self.map.create_polygon(coords, fill="#090c0f", outline="#38424b", width=1)
-        if z >= 8 and self.map_mode.get() != ONLINE_MAP:
+        if z >= 8 and not is_raster(self.map_mode.get()):
             for ring, (lon_min, lat_min, lon_max, lat_max) in self.coastline_rings:
                 north_y = geo_to_world(lat_max, 0, z)[1] - center_y + height / 2
                 south_y = geo_to_world(lat_min, 0, z)[1] - center_y + height / 2
@@ -2438,28 +2511,39 @@ class ArgusApp:
         self.map.create_rectangle(0, 0, width, height, fill=SEA, outline="")
         map_labels: list[tuple[int, str, str, float, float]] = []
         grid_label_boxes: list[tuple[int, int, int, int]] = []
-        if self.map_mode.get() != ONLINE_MAP and not getattr(self, "console_layout", False):
+        mode = self.map_mode.get()
+        source = desktop_basemap.SOURCES.get(mode)
+        pro = UI_EDITION == "pro"
+        title_at = 12 + self.chart_margin
+        if not is_raster(mode) and not getattr(self, "console_layout", False):
             self._draw_graticule(width, height)
         self._draw_global_land(width, height)
-        if self.map_mode.get() == ONLINE_MAP:
+        if is_raster(mode):
             center_x, center_y = geo_to_world(*self.map_center, self.map_zoom)
             for z, x, y, x_absolute, y_absolute in self._visible_tiles():
                 image = self._tile_images.get((z, x, y))
+                if image is None and source:
+                    image = self._fallback_tile((z, x, y))
                 sx = x_absolute * TILE_SIZE - center_x + width / 2
                 sy = y_absolute * TILE_SIZE - center_y + height / 2
                 if image:
                     self.map.create_image(sx, sy, image=image, anchor="nw")
-            self.map.create_text(12, 12, text="NASA BLUE MARBLE · DISPLAY ONLY", anchor="nw",
-                                 fill="#1e3550", font=("Segoe UI Semibold", 9), tags="map_title")
-            self.map_status_label.configure(text=self._tile_status or "NASA imagery · cached on this device")
-            self.map_attribution_label.configure(text="NASA Earthdata · Natural Earth · NGA · TeleGeography")
+            self.map.create_text(title_at, title_at, text=source.title if source else "NASA BLUE MARBLE · DISPLAY ONLY", anchor="nw",
+                                 fill=desktop_basemap.RULER_INK if source else "#1e3550",
+                                 font=desktop_basemap.FONT_BOLD if pro else ("Segoe UI Semibold", 9), tags="map_title")
+            self.map_status_label.configure(text=self._tile_status or (f"{mode} · cached on this device" if source else "NASA imagery · cached on this device"))
+            self.map_attribution_label.configure(text=source.attribution if source else "NASA Earthdata · Natural Earth · NGA · TeleGeography")
         else:
-            self.map.create_text(12, 12, text="GLOBAL COASTLINE · DISPLAY ONLY", anchor="nw",
-                                 fill=MUTED, font=("Segoe UI Semibold", 9), tags="map_title")
+            self.map.create_text(title_at, title_at, text="GLOBAL COASTLINE · DISPLAY ONLY", anchor="nw",
+                                 fill=MUTED, font=desktop_basemap.FONT_BOLD if pro else ("Segoe UI Semibold", 9), tags="map_title")
             self.map_status_label.configure(text="Drag to pan · wheel, two-finger scroll or +/- to zoom" if not self.map_tool else self.map_status_label.cget("text"))
             self.map_attribution_label.configure(text="Natural Earth · Marine Atlas CC BY 4.0 · NGA · TeleGeography")
 
+        if pro:
+            desktop_basemap.draw_grid(self, width, height, geo_to_world, world_to_geo, TILE_SIZE)
         self._draw_weather_overlay(width, height)
+        if hasattr(self, 'satellite'):
+            self.satellite.draw()
         if self.map_layers["Historical cable routes"].get():
             self._draw_world_cables(width, height)
         if self.map_layers["World ports"].get():
@@ -2549,7 +2633,10 @@ class ArgusApp:
         self.map.create_text(10, height - 13,
                              text="Irish AIS observations · received positions only" if not exercise else "Reference ports and cables · exercise overlays fictional",
                              anchor="w", fill="#93a8b5", font=("Segoe UI", 8))
-        if width >= 350:
+        if pro and width >= 350:
+            desktop_basemap.draw_scale_bar(self.map, width, height, self.map_center[0], self.map_zoom, TILE_SIZE, CARD, LINE)
+            desktop_basemap.draw_north_arrow(self.map, width - 100, desktop_basemap.MARGIN + 72)
+        elif width >= 350:
             lat = self.map_center[0]
             km_per_pixel = math.cos(math.radians(lat)) * 40075.017 / (TILE_SIZE * 2 ** self.map_zoom)
             target = km_per_pixel * 80
@@ -2562,6 +2649,35 @@ class ArgusApp:
         if self._prediction_banner:
             desktop_prediction.draw_banner(self, self._prediction_banner)
         self._draw_map_ping()
+        if pro:
+            self.map.tag_raise("chart-margin")
+            desktop_basemap.draw_readout(self, width)
+            desktop_basemap.draw_frame(self.map, width, height)
+
+    def _fallback_tile(self, key: tuple[int, int, int]) -> tk.PhotoImage | None:
+        """While a detailed tile loads, show its cached parent tile enlarged instead of a hole."""
+        if key in self._tile_fallback:
+            return self._tile_fallback[key]
+        z, x, y = key
+        for levels in (1, 2, 3):
+            if z - levels < 0:
+                break
+            path = self._tile_path((z - levels, x >> levels, y >> levels))
+            if not path.exists():
+                continue
+            part = TILE_SIZE >> levels
+            left, top = (x % (1 << levels)) * part, (y % (1 << levels)) * part
+            try:
+                with Image.open(path) as parent:
+                    crop = parent.convert("RGB").crop((left, top, left + part, top + part))
+                image = ImageTk.PhotoImage(crop.resize((TILE_SIZE, TILE_SIZE), Image.Resampling.BILINEAR), master=self.map)
+            except (OSError, ValueError, tk.TclError):
+                continue
+            if len(self._tile_fallback) > 400:
+                self._tile_fallback.clear()
+            self._tile_fallback[key] = image
+            return image
+        return None
 
     def _dark_state(self) -> dict | None:
         """Predicted position and worst-case cable countdown while the exercise vessel is dark."""
@@ -2789,10 +2905,17 @@ def main() -> int:
     parser.add_argument('--soc', default=os.environ.get('ARGUS_SOC_URL', ''), help='prefill the SOC HTTPS origin on the sign-in screen')
     parser.add_argument('--soc-login', action='store_true', help='open the SOC sign-in screen even if no address is configured')
     parser.add_argument('--soc-dev-http', action='store_true', help='allow HTTP only to localhost for development tests')
+    parser.add_argument('--old', action='store_true', help='open the original (classic) look instead of the tactical chart console')
+    parser.add_argument('--coast-watch', action='store_true',
+                        help='open offline on Satellite analysis and start Coast Watch (used by the SATELLITE-WATCH launchers)')
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument('--offline', action='store_true', help='open one offline window without login or Docker')
     modes.add_argument('--soc-client', action='store_true', help='sign-in only; do not offer local server startup')
     args = parser.parse_args()
+    if args.coast_watch:
+        args.offline = True  # Coast Watch runs in this computer's private workspace.
+        from argus.satellite_scan import FRESH_DEFAULT_H
+        os.environ.setdefault('ARGUS_SATELLITE_MAX_IMAGE_AGE_H', str(FRESH_DEFAULT_H))
     if args.offline and (args.soc_login or args.soc_client):
         parser.error('--offline cannot be combined with SOC sign-in flags')
     try:
@@ -2810,6 +2933,9 @@ def main() -> int:
         return 0
     ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("blue")
+    if not args.old:
+        import desktop_pro
+        desktop_pro.apply_palette()
     root = ctk.CTk()
     if not args.offline:
         from desktop_soc import login_screen
@@ -2825,7 +2951,10 @@ def main() -> int:
                      lambda: ArgusApp(root, scenario, alerts, coastline),
                      local_launcher=not args.soc_client, remember=not args.soc_client)
     else:
-        ArgusApp(root, scenario, alerts, coastline)
+        app = ArgusApp(root, scenario, alerts, coastline)
+        if args.coast_watch:
+            # After the satellite panel's own resume check (1.5 s) has run.
+            root.after(2500, app.start_coast_watch)
     root.mainloop()
     return 0
 

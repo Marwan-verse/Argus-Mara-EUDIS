@@ -1,0 +1,4 @@
+# Optional satellite workspace; the offline replay does not need these.
+-r requirements.txt
+rasterio==1.5.2
+numpy==2.5.4
