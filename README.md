@@ -29,6 +29,14 @@ image contacts without AIS, and large ships whose AIS position shows nothing on 
 image. Link a computer with `python scripts/configure_supabase.py`. See
 [the database guide](supabase/README.md) and D74.
 
+**Radar contacts (optional, D84):** Global Fishing Watch publishes Sentinel-1 radar
+vessel detections, and radar sees through cloud. Connect a free non-commercial token
+once with `python scripts/configure_gfw.py`, then press **Coast Watch → Fetch radar**
+(or run `python -m argus.gfw_sar fetch`). Each radar cell is compared with the team AIS
+at the radar time. *Radar contact without AIS* leads are violet on the map and listed in
+Incidents. Detections arrive about five days late. Powered by Global Fishing Watch. See
+[how it works and what was checked](docs/16-satellite-ai.md#radar-contacts-from-global-fishing-watch-d84).
+
 > *"Ireland can crew two ships. Argus Mara gives them a hundred eyes."*
 
 **What it is:** a rule-based early-warning demonstration for Ireland's undersea internet cables and gas and power lines. It works like this:
@@ -186,7 +194,8 @@ Details and links: [plan §4.5](docs/04-work-plan.md).
       fine — it is git-ignored and must never go to GitHub). *Owner:* **Mykhailo**
 - [ ] Get a Global Fishing Watch API token and pull its **radar detections for Irish waters**,
       especially the *AIS-unmatched* contacts for review. **The request/fetch CLI is ready; the account step is
-      pending.** The selected public-data path already supplies two historical contacts.
+      pending.** The live client that compares them with team AIS is `argus/gfw_sar.py` (D84).
+      The selected public-data path already supplies two historical contacts.
       API reports contain grid counts; per-contact downloads supply scene IDs and lengths.
       [Space instructions](space/README.md). *Owner:* **Nazariy**
 - [x] Offline radar/AIS matching, custody candidates and the vessel-length review check:

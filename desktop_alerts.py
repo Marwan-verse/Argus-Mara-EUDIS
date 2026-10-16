@@ -356,6 +356,9 @@ class AlertBoard:
                                 f"{result.get('image_contacts', 0)} image contacts · "
                                 f"{result.get('images_without_ais', 0)} images without contemporaneous AIS\n"
                                 f"{result.get('partial_analysis_images', 0)} images with incomplete detail review")
+        if result.get('radar_detections'):
+            self.evidence_status += (f"\n{result['radar_detections']} radar detections (Global Fishing Watch) · "
+                                     f"{result.get('radar_leads', 0)} without AIS")
         self.evidence_page = min(self.evidence_page, max(0, (len(self.evidence_leads)-1)//50))
         self.paint_evidence()
         if relayout:
@@ -387,9 +390,10 @@ class AlertBoard:
                 state = 'Unreviewed'
             if lead.get('evidence_changed'):
                 state = 'Evidence changed · review again'
+            source = lead.get('evidence_text') or f"Image {lead['acquired_utc']}\n{lead['source_label']} pixels · assumption"
             text = (f"{lead['name']}" + (f" · {lead['mmsi']}" if lead.get('mmsi') else '') +
-                    f"\n{lead['title']}\nImage {lead['acquired_utc']}\n"
-                    f"{lead['source_label']} pixels · assumption · {state}\n{lead['reason']}\nOpen image evidence")
+                    f"\n{lead['title']}\n{source} · {state}\n{lead['reason']}\n"
+                    + (lead.get('action_text') or 'Open image evidence'))
             tk.Button(self.evidence_frame, text=text, anchor='w', justify='left', wraplength=self.wrap,
                       bg=ui.CARD, fg=ui.INK, activebackground=ui.HOVER, activeforeground=ui.INK,
                       relief='flat', padx=10, pady=8, cursor='hand2',
@@ -415,6 +419,9 @@ class AlertBoard:
     def open_evidence(self, lead):
         satellite = self.app.satellite
         self.app.open_window('satellite')
+        if lead.get('radar'):
+            satellite.open_radar_lead(lead)
+            return
         satellite.pending_contact = (lead['scene_id'], lead.get('contact_id'))
 
     def refresh_reports(self, relayout=True):

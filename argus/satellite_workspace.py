@@ -213,14 +213,28 @@ class SatelliteWorkspace:
                                for v in comparison.get('vessel_checks', []))
             except (OSError, ValueError, TypeError, KeyError):
                 pending += 1
+        # Global Fishing Watch radar contacts without AIS (D84) share the same analyst outcomes.
+        try:
+            from argus import gfw_sar
+            radar, radar_summary = gfw_sar.radar_index(self.root), gfw_sar.summary(self.root)
+        except (OSError, ValueError, TypeError, KeyError):
+            radar, radar_summary = [], {}
+        rows.extend(self.dispositions.decorate(lead, key) for lead, key in radar)
         return {'leads': sorted(rows, key=lambda r: (r['acquired_utc'], r['id']), reverse=True),
                 'vessel_checks': vessels, 'reviews_checked': reviewed, 'reviews_pending': pending,
                 'image_contacts': image_contacts, 'images_without_ais': no_ais,
                 'partial_analysis_images': partial,
+                'radar_detections': radar_summary.get('detections', 0), 'radar_leads': len(radar),
+                'radar_newest_utc': radar_summary.get('newest_detection_utc'),
                 'complete_vessel_census': False}
 
     def save_disposition(self, payload, actor):
         lead_id = payload.get('lead_id') if isinstance(payload, dict) else None
+        if isinstance(lead_id, str) and lead_id.startswith('gfw:'):
+            from argus import gfw_sar
+            lead, key = gfw_sar.find_lead(self.root, lead_id)
+            event = self.dispositions.save(lead, key, payload, actor)
+            return {'saved': True, 'event': event, 'comparisons': self.comparison_index()}
         if not isinstance(lead_id, str) or not re.fullmatch(r'[0-9a-f]{24}:(ais|image):[A-Za-z0-9_.:-]{1,160}', lead_id):
             raise ValueError('Invalid satellite review lead')
         identifier = lead_id.split(':', 1)[0]

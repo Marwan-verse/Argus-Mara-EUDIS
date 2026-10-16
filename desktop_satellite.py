@@ -14,10 +14,12 @@ import time
 import tkinter as tk
 from urllib.parse import urlencode
 from tkinter import filedialog, ttk
+import webbrowser
 import customtkinter as ctk
 
 from PIL import Image, ImageTk
 
+from argus import gfw_sar
 from argus.satellite import atomic_json, bounds
 from argus.satellite_ai import choose_model, read_ledger, save_key
 from argus.satellite_workspace import DEFAULT_QUESTION, SatelliteWorkspace
@@ -25,6 +27,10 @@ from argus.satellite_scan import CoastalScan, read_state, grid
 from argus.space import timestamp
 
 BG, INK, MUTED, TEAL = '#141e28', '#e4ebf0', '#a8b6c2', '#47c7da'
+RADAR, RADAR_MUTED = '#c88cff', '#9d8bb5'  # Global Fishing Watch radar contacts (D84)
+RADAR_LABELS = {'no_team_ais': 'no team AIS', 'team_ais_match': 'AIS match', 'nearby_ais_review': 'AIS nearby · review',
+                'no_contemporaneous_ais': 'no team AIS history', 'time_unresolved': 'time unresolved',
+                'ais_unavailable': 'AIS lookup failed'}
 
 
 class DesktopSatellite:
@@ -64,6 +70,11 @@ class DesktopSatellite:
         self.show_image = tk.BooleanVar(value=True)
         self.show_ais = tk.BooleanVar(value=True)
         self.show_ai = tk.BooleanVar(value=True)
+        self.show_radar = tk.BooleanVar(value=True)
+        self.radar_points = []
+        self.radar_summary = {}
+        self.radar_signature = None
+        self.selected_radar = None
         self.poll_timer = app.root.after(150, self.poll)
 
     @property
@@ -156,10 +167,16 @@ class DesktopSatellite:
         status['comparisons'] = self.workspace.comparison_index()
         status['fleet'] = self.read_fleet(self.fleet_after, self.fleet_filter)
         status['fleet_leads'] = self.read_fleet('', True)
+        try:
+            status['radar'] = {**gfw_sar.map_index(self.workspace.root), 'configured': gfw_sar.configured()}
+        except (OSError, ValueError):
+            status['radar'] = {'points': [], 'summary': {}, 'configured': False}
         return status, self.workspace.contacts(), review
 
     def apply_watch(self, value):
         status, self.map_contacts, review = value
+        if 'radar' in status:
+            self.apply_radar(status['radar'])
         if 'comparisons' in status and hasattr(self.app, 'alert_board'):
             self.app.alert_board.refresh_evidence(status['comparisons'])
         if 'fleet_leads' in status and hasattr(self.app, 'alert_board'):
@@ -285,6 +302,23 @@ class DesktopSatellite:
         ttk.Button(controls, text='Start scan', command=lambda: self.scan_control('start')).pack(side='left')
         ttk.Button(controls, text='Stop', command=lambda: self.scan_control('stop')).pack(side='left', padx=4)
         ttk.Button(controls, text='All Ireland', command=self.coast_view).pack(side='left')
+        radar = ctk.CTkFrame(watch_tab, fg_color='#1b2b39', border_color='#294957', border_width=1)
+        radar.pack(fill='x', pady=(0, 10))
+        ctk.CTkLabel(radar, text='RADAR · SENTINEL-1 (GFW)', text_color=RADAR, anchor='w',
+                     font=('Segoe UI', 13, 'bold')).pack(fill='x', padx=10, pady=(8, 2))
+        self.radar_status = tk.StringVar(value=self.radar_text())
+        ctk.CTkLabel(radar, textvariable=self.radar_status, text_color=INK, anchor='w', justify='left',
+                     wraplength=340, font=('Segoe UI', 11)).pack(fill='x', padx=10, pady=4)
+        if not self.remote:
+            radar_controls = ttk.Frame(radar)
+            radar_controls.pack(fill='x', padx=8, pady=(2, 4))
+            ttk.Button(radar_controls, text='Connect GFW', command=self.connect_gfw).pack(side='left')
+            ttk.Button(radar_controls, text='Fetch radar · 14 days', command=self.fetch_radar).pack(side='left', padx=4)
+        ttk.Checkbutton(radar, text='Radar on map · filled = no AIS', variable=self.show_radar,
+                        command=self.redraw).pack(anchor='w', padx=8)
+        credit = ttk.Label(radar, text=gfw_sar.ATTRIBUTION, style='Muted.TLabel', cursor='hand2')
+        credit.pack(anchor='w', padx=10, pady=(0, 8))
+        credit.bind('<Button-1>', lambda _event: webbrowser.open(gfw_sar.ATTRIBUTION_URL))
         self.contacts_table = ttk.Treeview(watch_tab, columns=('time', 'match'), show='headings', height=8, selectmode='browse')
         self.contacts_table.heading('time', text='Image UTC · click a lead')
         self.contacts_table.heading('match', text='Possible AIS identity')
@@ -850,9 +884,191 @@ class DesktopSatellite:
         self.set_details('\n'.join(lines))
         return 'break'
 
+    def radar_text(self):
+        summary = self.radar_summary or {}
+        if not summary.get('detections'):
+            return ('Radar sees through cloud. Each Global Fishing\nWatch detection is compared with team AIS\n'
+                    'at the radar time. GFW publishes ~5 days late.\n'
+                    + ('Shared hosts show only their saved leads.' if self.remote else
+                       'GFW connected · press Fetch radar.' if summary.get('configured') else
+                       'Connect a free non-commercial GFW token.'))
+        statuses = summary.get('statuses', {})
+        newest = (summary.get('newest_detection_utc') or 'none')[:16].replace('T', ' ')
+        return (f"{summary['detections']:,} radar cells · {summary.get('leads', 0):,} without AIS (leads)\n"
+                f"{statuses.get('team_ais_match', 0):,} match team AIS · {statuses.get('nearby_ais_review', 0):,} AIS nearby\n"
+                f"{statuses.get('no_contemporaneous_ais', 0) + statuses.get('time_unresolved', 0):,} not compared (no AIS history or time)\n"
+                f"Newest radar {newest} UTC · GFW ~5 days late")
+
+    def apply_radar(self, packet):
+        self.radar_summary = {**packet.get('summary', {}), 'configured': packet.get('configured', False)}
+        points = packet.get('points', [])
+        signature = tuple((p['id'], p.get('status'), p.get('lead')) for p in points)
+        if signature != self.radar_signature:
+            self.radar_signature, self.radar_points = signature, points
+        if self.frame is not None and self.frame.winfo_exists():
+            self.radar_status.set(self.radar_text())
+
+    def connect_gfw(self):
+        if self.busy or self.remote:
+            return
+        from tkinter import simpledialog
+        token = simpledialog.askstring('Connect Global Fishing Watch',
+            'Paste your free, non-commercial Global Fishing Watch API token. One small radar request checks it, '
+            'then it is saved only in this computer’s credential store; never put it in chat.',
+            show='•', parent=self.app.root)
+        if not token:
+            return
+        token = token.strip()
+        def work():
+            if not gfw_sar.valid_token(token):
+                raise ValueError('That does not look like a Global Fishing Watch API token')
+            check = gfw_sar.check_token(token)
+            gfw_sar.save_token(token)
+            return check
+        def done(check):
+            self.watch_at = 0
+            self.message(f"Global Fishing Watch connected · {', '.join(check['datasets']) or gfw_sar.DATASET} · "
+                         'press Fetch radar')
+        self.task(work, done)
+
+    def fetch_radar(self):
+        if self.remote:
+            return
+        if self.busy:
+            self.message('Wait for the current satellite task, then fetch radar again')
+            return
+        def work():
+            start, end = gfw_sar.window(days=14)
+            return gfw_sar.fetch(self.workspace.root, start, end)[0]
+        def done(result):
+            counts = result['counts']
+            self.watch_at = 0
+            self.message(f"Radar {result['window']['start']} to {result['window']['end_exclusive']} (end excluded) · "
+                         f"{counts['detection_rows']} cells · {counts['leads']} without AIS · newest "
+                         f"{result['newest_detection_utc'] or 'none'}\n{gfw_sar.ATTRIBUTION}")
+        self.task(work, done)
+        self.message('Fetching Global Fishing Watch radar detections, then comparing them with AIS at each radar time…')
+
+    def open_radar_lead(self, lead):
+        self.app.open_window('satellite')
+        if self.remote:
+            # Shared hosts send the lead itself; its detection file stays on the host.
+            self.show_radar_details({'id': lead['detection_id'], 'lat': lead['lat'], 'lon': lead['lon'],
+                                     'time_utc': lead['acquired_utc'], 'detections': 1, 'gfw_matched': False,
+                                     'status': 'no_team_ais', 'reason': lead['reason']})
+            return
+        self.show_radar_point({'id': lead['detection_id']})
+
+    def show_radar_point(self, point):
+        try:
+            self.show_radar_details(gfw_sar.detection(self.workspace.root, point['id']))
+        except ValueError as error:
+            self.message(str(error))
+        return 'break'
+
+    def show_radar_details(self, d):
+        self.app.open_window('satellite')
+        self.tabs.select(self.contact_tab)
+        self.selected_contact = self.selected_candidate = None
+        self.selected_radar = d['id']
+        self.latest_button.configure(state='disabled')
+        self.candidate_table.delete(*self.candidate_table.get_children())
+        blank = Image.new('RGB', (330, 80), BG)
+        self.contact_photo = ctk.CTkImage(light_image=blank, dark_image=blank, size=(330, 80))
+        self.thumbnail.configure(image=self.contact_photo, text='Radar detection · GFW publishes positions, not pixels')
+        when = d.get('time_utc') or d.get('hour_utc') or 'unknown time'
+        lead = gfw_sar.is_lead(d)
+        self.contact_title.configure(text=f"RADAR CONTACT · {'NO AIS · ' if lead else ''}REAL · UNREVIEWED\n"
+                                          f"Sentinel-1 via Global Fishing Watch · {when}")
+        vessel = d.get('gfw_vessel') or {}
+        team = d.get('team_ais') or {}
+        self.candidate_info.set(
+            ('Lead: no AIS in GFW’s match or the team history within 1 km.' if lead else
+             f"Team AIS: {RADAR_LABELS.get(d.get('status'), str(d.get('status')).replace('_', ' '))}.")
+            + (f"\nGFW AIS match: {vessel.get('name') or '?'} · {vessel.get('mmsi') or 'no MMSI'}" if d.get('gfw_matched') else
+               '\nGFW found no AIS match for this radar contact.'))
+        sources = {'gfw_detection_timestamp': 'GFW detection time', 'sentinel1_scene_midpoint': 'Sentinel-1 scene midpoint'}
+        lines = [('RADAR CONTACT WITHOUT AIS · lead for review' if lead else 'RADAR DETECTION')
+                 + ' · real, published by Global Fishing Watch · unreviewed',
+                 f"Team AIS at radar time ({team.get('source', 'not checked')}): "
+                 + RADAR_LABELS.get(d.get('status'), str(d.get('status')).replace('_', ' '))
+                 + (f" · {team['nearby_fixes']} fixes within 10 min around" if team.get('nearby_fixes') is not None else '')]
+        if d.get('gfw_matched'):
+            lines.append(f"GFW AIS match: {vessel.get('name') or '?'} · MMSI {vessel.get('mmsi') or '?'} · flag {vessel.get('flag') or '?'}"
+                         + ('' if d.get('same_identity_as_gfw') is None else
+                            ' · team AIS agrees' if d['same_identity_as_gfw'] else ' · team AIS names a different ship'))
+        else:
+            lines.append('GFW AIS match: none')
+        if d.get('time_utc'):
+            lines.append(f"Radar time {d['time_utc']} · {sources.get(d.get('time_source'), 'time from the report')}"
+                         + (f" ± {d['time_uncertainty_s']:.0f} s" if d.get('time_uncertainty_s') else ''))
+        else:
+            lines.append(f"Hourly bin {d.get('hour_utc')} · no Sentinel-1 scene time, so AIS was not compared")
+        lines.append(f"Cell {d['lat']:.3f}, {d['lon']:.3f} ± {d.get('cell_deg', gfw_sar.CELL_DEG)/2:.3f}° (about 1.1 × 0.7 km) · "
+                     f"{d.get('detections', 1)} radar target(s)")
+        if team.get('note') or team.get('error'):
+            lines.append(team.get('note') or team.get('error'))
+        if d.get('candidates'):
+            lines += ['', 'AIS WITHIN 1 KM OF THE CELL · provisional, identity unconfirmed']
+        for candidate in d.get('candidates', []):
+            evidence = candidate.get('position_evidence') or {}
+            lines.append(f"{candidate['name']} · {candidate['mmsi']} · {candidate['distance_m']:.0f} m from the cell"
+                         f"{' · matched' if candidate.get('assigned') else ''} · fix Δ {candidate.get('nearest_fix_offset_s')} s · "
+                         f"{str(evidence.get('position_method', 'position')).replace('_', ' ')}")
+        if d.get('reason'):
+            lines += ['', d['reason']]
+        if d.get('scene_ids'):
+            lines += ['', 'Sentinel-1 scene: ' + ', '.join(d['scene_ids'])]
+        lines += ['', gfw_sar.CAVEAT, '', f"{gfw_sar.ATTRIBUTION} · {gfw_sar.ATTRIBUTION_URL}"]
+        self.set_details('\n'.join(lines))
+        self.fit_visible([(d['lat']-.03, d['lon']-.05), (d['lat']+.03, d['lon']+.05)])
+        self.redraw()
+        return 'break'
+
+    @staticmethod
+    def radar_label(point):
+        when = (point.get('time_utc') or point.get('hour_utc') or '')[5:16].replace('T', ' ')
+        if point.get('lead'):
+            return 'Radar · no AIS · ' + when
+        if point.get('gfw_matched') and point.get('status') == 'no_team_ais':
+            return f"Radar · GFW AIS {point.get('gfw_name') or ''} · not in team AIS · {when}"
+        return f"Radar · {RADAR_LABELS.get(point.get('status'), 'unchecked')} · {when}"
+
+    def draw_radar(self):
+        if not self.show_radar.get() or not self.radar_points:
+            return
+        canvas, (width, height) = self.app.map, self.app._map_size
+        shown = 0
+        for point in self.radar_points:
+            x, y = self.app._project(point['lat'], point['lon'])
+            if not -10 <= x <= width+10 or not -10 <= y <= height+10:
+                continue
+            shown += 1
+            tag, lead = 'radar-contact-'+point['id'], point.get('lead')
+            if self.app.map_zoom >= 11:
+                half = point.get('cell_deg', gfw_sar.CELL_DEG)/2
+                x0, y0 = self.app._project(point['lat']+half, point['lon']-half)
+                x1, y1 = self.app._project(point['lat']-half, point['lon']+half)
+                canvas.create_rectangle(x0, y0, x1, y1, outline=RADAR if lead else RADAR_MUTED, dash=(2, 3), tags=tag)
+            if point['id'] == self.selected_radar:
+                canvas.create_oval(x-13, y-13, x+13, y+13, outline=INK, width=2, tags=tag)
+            if lead:
+                canvas.create_oval(x-8, y-8, x+8, y+8, fill='#3d1f4f', outline=RADAR, width=2, tags=tag)
+                canvas.create_oval(x-2, y-2, x+2, y+2, fill=RADAR, outline=RADAR, tags=tag)
+            else:
+                canvas.create_oval(x-5, y-5, x+5, y+5, outline=RADAR_MUTED, width=2, dash=(2, 2), tags=tag)
+            if self.app.map_zoom >= 9 or (lead and self.app.map_zoom >= 7):
+                canvas.create_text(x+11, y-8, anchor='nw', fill=RADAR if lead else RADAR_MUTED,
+                                   text=self.radar_label(point), font=('Segoe UI', 9), tags=tag)
+            canvas.tag_bind(tag, '<Button-1>', lambda event, p=point: self.show_radar_point(p))
+        label = getattr(self.app, 'map_attribution_label', None)
+        if shown and label is not None and gfw_sar.ATTRIBUTION not in str(label.cget('text')):
+            label.configure(text=f"{label.cget('text')} · Radar: {gfw_sar.ATTRIBUTION}")
+
     def draw(self):
         if not self.app.allowed('evidence.share'):
             return
+        self.draw_radar()
         if self.current is None:
             self.draw_coastal_contacts()
             return
