@@ -66,7 +66,8 @@ def make_vessel(index: int, cables: list[dict], minutes: int, interval_s: int, s
     track, t = [], 0
     for minute in range(0, minutes * 60 // interval_s):
         sog = cruise * 0.7 if slow_from is not None and minute * interval_s >= slow_from * 60 else cruise
-        track.append({"t": t, "lat": lat, "lon": lon, "sog_kn": round(sog, 1), "cog_deg": round(course, 1)})
+        # % 360: a course just under 360 rounds to 360.0, which AIS reserves for "course not available".
+        track.append({"t": t, "lat": lat, "lon": lon, "sog_kn": round(sog, 1), "cog_deg": round(course, 1) % 360})
         lat, lon = step(lat, lon, course, sog * interval_s / 3600)
         t += interval_s
     return {"mmsi": 900_000_000 + index, "name": f"SIM {index}", "ship_type": rng.choice([70, 80, 60, 30, 37]),

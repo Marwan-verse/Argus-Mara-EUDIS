@@ -297,7 +297,10 @@ class AssembleTests(unittest.TestCase):
         codes = [factor["code"] for factor in result["assessment"]["factors"]]
         self.assertIn("I2", codes)
         self.assertEqual(result["observations"]["spoof_signs"], True)
-        self.assertEqual([finding["detector"] for finding in result["findings"]], ["ais_spoofing"])
+        detectors = [finding["detector"] for finding in result["findings"]]
+        # The last fix lies inside the real Marine Notice 49/2026 work area: a reason only, not a notified vessel.
+        self.assertEqual([name for name in detectors if name != "marine_notice"], ["ais_spoofing"])
+        self.assertFalse(result["declared_work"]["named"])
 
     def test_small_vessel_with_spoofing_is_not_capped(self):
         obs = {"slow_over_corridor_min": 15, "in_corridor": True, "asset_class": "telecom"}

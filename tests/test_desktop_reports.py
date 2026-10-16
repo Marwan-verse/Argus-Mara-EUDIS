@@ -1,4 +1,6 @@
 """Native report submission, incident display and SOC delivery failure behavior."""
+from pathlib import Path
+import tempfile
 import time
 import threading
 import tkinter as tk
@@ -8,10 +10,12 @@ import unittest
 import customtkinter as ctk
 
 from argus.collab_client import ClientError
+from argus.report_ai import AI_LABEL, check_all, draft_report, strip_label, template_draft
 from argus.vessel_reports import make_report
 from desktop_reports import open_report, board_snapshot
 from run_gui import ArgusApp, load_demo
 from tests.test_collab_desktop import FakeClient
+from tests.test_report_ai import KEY, FakeTensorX
 from tests.test_vessel_reports import VESSEL
 
 
@@ -27,6 +31,10 @@ class DesktopReportTests(unittest.TestCase):
         with patch.dict("os.environ", {"ARGUS_AIS_AUTOCONNECT": "0", "ARGUS_UI_PREFERENCES": ""}):
             self.app = ArgusApp(self.root, *load_demo())
         self.app.ais_tracker.cache_path = None
+        # Never a paid call from a test, even on a computer with a TensorX key in its keychain.
+        no_key = patch("argus.report_ai.get_key", return_value="")
+        no_key.start()
+        self.addCleanup(no_key.stop)
 
     def tearDown(self):
         self.app.close()
@@ -67,6 +75,96 @@ class DesktopReportTests(unittest.TestCase):
         board.open("SIM-40", reveal=False)
         board.dialog.report_button.invoke()
         self.assertEqual(self.app.report_dialog.vessel, board_snapshot(board.by_id["SIM-40"]))
+
+    def settle(self, dialog):
+        for _ in range(200):
+            self.root.update()
+            if not dialog.busy:
+                return
+            time.sleep(.01)
+        self.fail("the report tool did not finish")
+
+    def notes(self, dialog):
+        return dialog.notes.get("1.0", "end")
+
+    def test_review_window_report_drafts_from_brain_evidence_and_checks_it(self):
+        board = self.app.alert_board
+        board.open("SIM-41", reveal=False)
+        board.dialog.report_button.invoke()
+        dialog = self.app.report_dialog
+        self.assertEqual(dialog.pack["kind"], "board")
+        self.assertEqual(dialog.pack["item_id"], "SIM-41")
+        self.assertEqual(dialog.pack["level"]["level"], board.by_id["SIM-41"]["assessment"]["level"])
+        dialog.reason.insert("1.0", "My own first note.")
+        dialog.draft_button.invoke()
+        self.assertTrue(dialog.busy)
+        self.settle(dialog)
+        text = dialog.reason.get("1.0", "end")
+        self.assertIn("SEA LARK", text)
+        self.assertIn("Template draft from system data · reviewed by analyst", text)
+        self.assertEqual(dialog.category.get(), dialog.pack["category"])
+        self.assertIn("no AI used", self.notes(dialog))
+        self.assertEqual(dialog.generation["method"], "template")
+        dialog.check_button.invoke()
+        self.settle(dialog)
+        self.assertIn("Report is consistent with system data", self.notes(dialog))
+        dialog.reason.insert("1.0", "Brain level Critical. ")
+        dialog.check_button.invoke()
+        self.settle(dialog)
+        self.assertIn("Level differs from Brain", self.notes(dialog))
+        dialog.reason.edit_undo()
+        dialog.reason.edit_undo()
+        self.assertIn("My own first note.", dialog.reason.get("1.0", "end"))
+        dialog.reason.delete("1.0", "end")
+        dialog.reason.insert("1.0", text.strip())
+        dialog.submit()
+        self.root.update()
+        self.assertEqual(self.app.vessel_reports.entries[0]["report"]["reason"], text.strip())
+        self.assertEqual(set(self.app.vessel_reports.entries[0]["report"]), {"id", "vessel", "category", "reason",
+                                                                             "created_utc"})
+
+    def test_with_a_key_the_window_shows_the_ai_draft_and_both_check_layers(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        board = self.app.alert_board
+        board.open("SIM-41", reveal=False)
+        board.dialog.report_button.invoke()
+        dialog = self.app.report_dialog
+        template = template_draft(dialog.pack)
+        draft = FakeTensorX({"draft": strip_label(template["text"]), "category": dialog.pack["category"],
+                             "evidence": template["evidence"]})
+        check = FakeTensorX({"findings": []})
+        root = Path(folder.name)
+        with patch("argus.report_ai.get_key", return_value=KEY), \
+                patch("desktop_reports.draft_report", lambda pack: draft_report(pack, root=root, transport=draft)), \
+                patch("desktop_reports.check_all",
+                      lambda pack, text, category: check_all(pack, text, category, root=root, transport=check)):
+            dialog.draft_button.invoke()
+            self.settle(dialog)
+            self.assertTrue(dialog.reason.get("1.0", "end").strip().endswith(AI_LABEL))
+            self.assertIn("AI-assisted draft by qwen/qwen3.8-flash-next", self.notes(dialog))
+            self.assertEqual(dialog.generation["method"], "ai")
+            dialog.check_button.invoke()
+            self.settle(dialog)
+        notes = self.notes(dialog)
+        self.assertIn("CODE CHECK (exact, no AI)\nReport is consistent with system data.", notes)
+        self.assertIn("AI CHECK (meaning, qwen/qwen3.8-flash-next)", notes)
+        self.assertIn("No meaning problems found.", notes)
+        self.assertEqual((len(draft.chats), len(check.chats)), (1, 1))
+        dialog.close()
+
+    def test_report_without_brain_item_drafts_with_placeholders_offline(self):
+        dialog = open_report(self.app, VESSEL)
+        self.assertEqual(dialog.pack["kind"], "minimal")
+        dialog.draft_button.invoke()
+        self.settle(dialog)
+        self.assertIn("No Brain assessment", dialog.reason.get("1.0", "end"))
+        dialog.check_button.invoke()
+        self.settle(dialog)
+        self.assertIn("Placeholder left in the text", self.notes(dialog))
+        dialog.pdf_button.invoke()
+        self.assertIn("coming in the next step", self.notes(dialog))
+        dialog.close()
 
     def test_soc_success_and_peer_receive_create_incidents_without_echo(self):
         client = self.connect()
