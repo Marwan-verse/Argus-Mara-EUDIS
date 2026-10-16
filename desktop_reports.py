@@ -1,5 +1,7 @@
 """Vessel report form and analyst incident review for the native console."""
+from datetime import datetime, timezone
 import threading
+from tkinter import filedialog
 
 import customtkinter as ctk
 
@@ -7,6 +9,7 @@ from argus import responders
 from argus.collab_crypto import validate_payload
 from argus import report_ai
 from argus.report_ai import build_pack, check_all, draft_report
+from argus.report_pdf import save_pdf, text_hash
 from argus.vessel_reports import CATEGORIES, make_report
 from desktop_soc_view import BG, CARD, MUTED, button, label
 
@@ -83,6 +86,7 @@ class ReportDialog:
         self.busy = False
         self.report = None
         self.generation = None
+        self.last_check = None
         self.scope = (app.soc_client, (app.soc_client.room or {}).get("room_id")) if app.soc_client else (None, None)
         self.pack = evidence_pack(app, self.vessel, item)
         self.window = ctk.CTkToplevel(app.root)
@@ -218,7 +222,7 @@ class ReportDialog:
     def check(self):
         text, category = self.reason.get("1.0", "end"), self.category.get()
         self.run("Checking the report against the system data…", lambda: check_all(self.pack, text, category),
-                 self.checked)
+                 lambda result: self.checked(result, text))
 
     @staticmethod
     def finding_lines(findings):
@@ -230,7 +234,9 @@ class ReportDialog:
                          f"   Fix: {finding['fix']}{evidence}")
         return lines
 
-    def checked(self, result):
+    def checked(self, result, text):
+        # The PDF reports this check only while the text is unchanged.
+        self.last_check = {"text_hash": text_hash(text), "result": result}
         code, ai = result["code"], result["ai"]
         lines = ["CODE CHECK (exact, no AI)"]
         if code["consistent"]:
@@ -250,7 +256,23 @@ class ReportDialog:
         self.show_notes("\n".join(lines))
 
     def save_pdf(self):
-        self.show_notes("Save PDF is coming in the next step: the export with the evidence appendix is not built yet.")
+        if self.busy or self.pending:
+            return
+        text, category = self.reason.get("1.0", "end").strip(), self.category.get()
+        if not text:
+            self.problem.configure(text="Write or draft the report before saving a PDF.", text_color=WARN)
+            return
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
+        path = filedialog.asksaveasfilename(parent=self.window, title="Save report as PDF", defaultextension=".pdf",
+                                            filetypes=[("PDF", "*.pdf")],
+                                            initialfile=f"argus-report-{self.vessel['id']}-{stamp}Z.pdf")
+        if not path:
+            return
+        check, generation = self.last_check, self.generation
+        self.run("Saving the PDF…", lambda: save_pdf(path, self.pack, text, category, check=check,
+                                                     generation=generation),
+                 lambda saved: self.show_notes(f"PDF saved: {saved}\nIt holds your text, the check status and an "
+                                               "evidence appendix built by code. Nothing was sent."))
 
     def submit(self):
         if self.pending or self.busy:
