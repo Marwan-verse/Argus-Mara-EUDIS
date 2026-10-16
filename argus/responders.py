@@ -14,7 +14,7 @@ earliest time the vessel can reach the line (``deadline_s``).
   next satellite look are listed but never count: a hail is not an intercept
   and a satellite only looks.
 * The next satellite look comes from ESA's published Sentinel-1 acquisition
-  plan (``argus.s1_plan``, D89): the first planned swath that covers where the
+  plan (``argus.s1_plan``, D90): the first planned swath that covers where the
   vessel is predicted to be when the satellite passes (at most ``HORIZON_S``
   ahead; a later pass uses that position). Replay seconds count from the
   scenario's ``t0_utc``, which ``load_fleet`` hands to the plan.

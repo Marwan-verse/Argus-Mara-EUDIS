@@ -833,7 +833,7 @@ class ArgusApp:
             text.configure(yscrollcommand=scrollbar.set)
             scrollbar.pack(side="right", fill="y")
             text.pack(fill="both", expand=True)
-            from argus import s1_plan  # the next real Sentinel-1 looks first (D89); offline, never downloads
+            from argus import s1_plan  # the next real Sentinel-1 looks first (D90); offline, never downloads
             text.insert("1.0", s1_plan.window_text() + "\n\n" + (ROOT / "docs/08-sar-next-step.md").read_text(encoding="utf-8"))
             text.configure(state="disabled")
         elif key == "ports":
