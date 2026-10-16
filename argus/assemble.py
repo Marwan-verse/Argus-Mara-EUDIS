@@ -3,8 +3,9 @@
 Each detector is ``detect(vessel, context) -> list[finding]``. A finding names
 its detector, vessel, time and reasons, and its ``obs`` dict holds the
 ``argus.levels`` observation keys it fills. This module runs the registered
-detectors, merges their observations, applies the small-vessel relevance rule
-and scores the result with ``argus.levels.assess``.
+detectors, merges their observations, applies the Marine Notice rule (a vessel
+named in a notice and inside its work area is ``authorised``) and the
+small-vessel relevance rule, and scores the result with ``argus.levels.assess``.
 
 Two rules for detector authors:
 
@@ -35,7 +36,7 @@ from pathlib import Path
 from argus.alert_board import exercise_item
 from argus.brain import detect_vessel
 from argus.contracts import validate_scenario
-from argus.detectors import ais_spoofing, cable_risk, route_check
+from argus.detectors import ais_spoofing, cable_risk, marine_notice, route_check
 from argus.levels import CRITICAL_ASSETS, LEVEL_NAMES, RANK, RULES_VERSION, assess
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -243,6 +244,7 @@ DETECTORS = [
     ais_spoofing.detect,
     cable_risk.detect,
     route_check.detect,
+    marine_notice.detect,
 ]
 
 
@@ -384,6 +386,41 @@ def apply_relevance(assessment: dict, rel: dict) -> dict:
 _logged_failures: set[tuple[str, str]] = set()
 
 
+def _work_exception(obs: dict) -> str | None:
+    """Evidence that a vessel named in a Marine Notice still needs attention.
+
+    A notice names a call sign that anyone can type into AIS, and it never
+    excuses a reported fault, an ignored instruction or a vessel we cannot see.
+    """
+    if obs.get("fault_confirmed"):
+        return "a line fault is reported at this position and time"
+    if obs.get("ignored_instruction"):
+        return "the vessel did not comply with a recorded instruction near the line"
+    if obs.get("spoof_signs"):
+        return "position jumps or a duplicate identity: the notified call sign may be copied"
+    if (obs.get("identity_changes") or 0) >= 1:
+        return "the name, flag or MMSI changed, so the notified identity is in doubt"
+    if (obs.get("length_mismatch_pct") or 0) > 25:
+        return f"radar length differs {obs['length_mismatch_pct']:.0f}% from the AIS length"
+    if obs.get("no_ais") or (obs.get("ais_gap_min") or 0) >= 10:
+        return "AIS went silent near the line: a notice cannot vouch for a vessel we cannot see"
+    if obs.get("dark_radar_contact"):
+        return "a satellite-radar contact without matching AIS is on the track"
+    return None
+
+
+def declared_work(findings: list[dict], observations: dict) -> dict:
+    """The Marine Notice rule: a vessel named in a notice and inside its work area gets ``authorised``
+    (``argus.levels`` caps it at Low) unless ``_work_exception`` finds evidence against it."""
+    named = [f for f in findings if f["detector"] == "marine_notice" and (f.get("obs") or {}).get("notice_named")]
+    if not named:
+        return {"named": False, "applied": False, "notice": None, "label": None, "exception": None}
+    related = named[0]["related"]
+    exception = _work_exception(observations)
+    return {"named": True, "applied": exception is None, "notice": related["notice"],
+            "label": related.get("notice_label"), "exception": exception}
+
+
 def _run_guarded(detector, vessel: dict, context: dict, errors: list[dict]) -> list[dict]:
     """The detector's findings; on an exception none, with ``{detector, error}`` added to ``errors``.
 
@@ -405,16 +442,20 @@ def _run_guarded(detector, vessel: dict, context: dict, errors: list[dict]) -> l
 
 def assess_vessel(vessel: dict, context: dict, detectors: list | None = None) -> dict:
     """Clean the vessel, run the detectors guarded and return its findings, threatened cable, observations,
-    relevance and level, plus ``data_quality`` (what cleaning removed) and ``detector_errors``."""
+    relevance, Marine Notice outcome (``declared_work``) and level, plus ``data_quality`` (what cleaning
+    removed) and ``detector_errors``."""
     vessel, quality = clean_vessel(vessel)
     findings: list[dict] = []
     errors: list[dict] = []
     for detector in DETECTORS if detectors is None else detectors:
         findings.extend(_run_guarded(detector, vessel, context, errors))
     observations = merge_observations(findings)
+    work = declared_work(findings, observations)
+    if work["applied"]:
+        observations["authorised"] = True
     rel = relevance(vessel, observations)
     return {"findings": findings, "cable_id": threatened_cable(findings)[0], "observations": observations,
-            "relevance": rel, "assessment": apply_relevance(assess(observations), rel),
+            "relevance": rel, "declared_work": work, "assessment": apply_relevance(assess(observations), rel),
             "data_quality": quality, "detector_errors": errors}
 
 

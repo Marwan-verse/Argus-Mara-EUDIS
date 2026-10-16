@@ -30,6 +30,12 @@ A fifth declares Fishguard as its AIS destination, then turns away from it
 towards Greenlink and slows by the line (SIM-55, after the Dublin stories), so
 ``route_check`` adds rule C3.
 
+Two more show the Marine Notice rule (``argus.detectors.marine_notice``). A
+survey vessel runs slow lines along EWIC and is named in a fictional exercise
+notice, so Brain caps it at Low (SIM-56). A ship circles inside the work area of
+the real Marine Notice 49/2026 off Rush, which names other vessels, so nothing
+is explained and its level stands (SIM-57).
+
 ``update`` is a pure function of the board time, so a replay can move the
 board forwards or backwards; ``rescore_exercise`` re-scores the exercise
 vessel at a replay time.
@@ -53,7 +59,7 @@ from argus.levels import assess
 SHIP_TYPES = {
     "Trawler": 30, "Fishing vessel": 30, "Sailing yacht": 36, "Pleasure craft": 37, "Motor yacht": 37,
     "Pilot boat": 50, "Tug": 52, "Passenger ferry": 60, "General cargo": 70, "Container ship": 70,
-    "Bulk carrier": 70, "Ro-ro cargo": 70, "Tanker": 80,
+    "Bulk carrier": 70, "Ro-ro cargo": 70, "Tanker": 80, "Survey vessel": 33,
 }
 
 # Extra simulated items: (alert_board._item row, AIS class, findings about other lines as (line ID, obs)).
@@ -237,6 +243,33 @@ def _wrong_way_story() -> list[dict]:
                                                    (35, 5.0, _yaw(210), None)])
 
 
+def _survey_story() -> list[dict]:
+    """Survey lines along EWIC at 3.5 kn towing side-scan sonar: east, step 0.2 nm south, west, and so on."""
+    start = (_on_line("ewic", -5.80), -5.80)
+    run, step_leg = (30, 3.5, 96, None), (3, 3.5, 186, None)
+    back = (30, 3.5, 276, None)
+    return _timed_track(60 * 60, start, [run, step_leg, back, step_leg, run, step_leg, back, step_leg, run])
+
+
+def _notice_area_story() -> list[dict]:
+    """Arrives off Rush and circles at 1 kn for 80 min inside the real Marine Notice 49/2026 work area."""
+    spot = (53.536, -6.03)
+    return _timed_track(100 * 60, step(*spot, 270, 2.0), [
+        (12, 10.0, 90, None), (80, 1.0, lambda minute: minute * 5, None)])
+
+
+# A fictional exercise notice in the format of a real Marine Notice, naming the SIM-56 survey vessel.
+EXERCISE_NOTICES = [{
+    "number": "EX 1/2026", "title": "EWIC exercise cable survey (fictional)", "url": None, "issued": None,
+    "amended": None, "asset": "EWIC", "asset_kind": "power",
+    "work": "Geophysical survey with towed side-scan sonar (fictional, for the exercise)",
+    "valid_from": None, "valid_to": None, "end_note": "For the exercise replay only",
+    "vessels": [{"name": "GANNET SOUNDER", "call_sign": "EXSIM56", "role": "survey vessel", "valid_from": None}],
+    "areas": [{"kind": "route", "points": [[round(_on_line("ewic", lon), 5), lon] for lon in (-5.95, -5.60, -5.40)],
+               "buffer_nm": 1.0}],
+    "area_note": "Exercise work area: 1 nm either side of the illustrative EWIC route", "label": "fictional"}]
+
+
 # Stories on the replay clock: (alert_board._item row, AIS class, track builder). The row's position,
 # course and speed are replaced by the track at each replay time; observations come only from detectors.
 STORY_ITEMS = [
@@ -260,6 +293,14 @@ STORY_ITEMS = [
       "Declares Fishguard but turned away from it towards Greenlink and slowed by the line",
       "Ask the master on VHF 16 to confirm the destination and intentions; watch the Greenlink corridor.",
       {}), "A", _wrong_way_story),
+    (("SIM-56", "GANNET SOUNDER", "Survey vessel", 72, "ewic", 0, 0, 0, 0, 0, "line",
+      "Survey lines along EWIC at 3.5 kn, named in the exercise Marine Notice",
+      "Declared work: confirm on VHF 16 that the ship is the notified survey vessel; no other action.",
+      {}), "A", _survey_story),
+    (("SIM-57", "ROCKABILL TERN", "General cargo", 110, "ewic", 0, 0, 0, 0, 0, "line",
+      "Circling off Rush inside the Marine Notice 49/2026 work area, but not a notified vessel",
+      "Not explained by the notice: hail on VHF 16 and ask why the ship is holding over EWIC.",
+      {}), "A", _notice_area_story),
     (("SIM-49", "KESTREL MOOR", "General cargo", 150, "north-dublin", 0, 0, 0, 0, 0, "line",
       "Steady transit; its AIS feed has missing positions, repeated times and 'not available' values",
       "Normal transit; Brain ignored the faulty fixes and lists them in the review. Check the AIS receiver.",
@@ -267,6 +308,8 @@ STORY_ITEMS = [
 ]
 # Fictional AIS destinations the stories declare (Message 5 text); route_check compares them with the track.
 STORY_DESTINATIONS = {"SIM-55": "GBFIS"}
+# Fictional AIS call signs (Message 5) that the Marine Notice check reads.
+STORY_CALL_SIGNS = {"SIM-56": "EXSIM56", "SIM-57": "EXSIM57"}
 STORY_TRAIL_S = 3 * 3600  # the map trail shows the window the detectors read
 
 # Board-only detectors whose reasons are already the item's title; other detectors' reasons become notes.
@@ -277,7 +320,7 @@ DETECTOR_NOTE_REASONS = 4
 def _vessel(item: dict, ais_class: str) -> dict:
     return {"mmsi": item["id"], "name": item["name"], "ship_type": SHIP_TYPES.get(item["vessel_type"]),
             "ais_class": ais_class, "ais_length_m": item.get("length_m") or None,
-            "destination": item.get("destination"),
+            "destination": item.get("destination"), "call_sign": item.get("call_sign"),
             "nav_status": None, "track": [], "label": item["label"]}
 
 
@@ -309,11 +352,15 @@ def _with_notes(assessment: dict, notes: list[str]) -> dict:
 
 def _finding_summary(finding: dict) -> dict:
     """What the review window shows of a finding: detector, data label, line and reasons."""
-    obs = finding.get("obs") or {}
-    return {"detector": finding["detector"], "label": finding.get("label"), "t": finding.get("t"),
-            "cable_id": (finding.get("related") or {}).get("cable_id"), "reasons": list(finding["reasons"]),
-            "eta_min": obs.get("eta_min"), "distance_nm": obs.get("distance_nm"),
-            "in_corridor": obs.get("in_corridor")}
+    obs, related = finding.get("obs") or {}, finding.get("related") or {}
+    summary = {"detector": finding["detector"], "label": finding.get("label"), "t": finding.get("t"),
+               "cable_id": related.get("cable_id"), "reasons": list(finding["reasons"]),
+               "eta_min": obs.get("eta_min"), "distance_nm": obs.get("distance_nm"),
+               "in_corridor": obs.get("in_corridor")}
+    if related.get("notice"):
+        summary["notice"] = {key: related.get(f"notice_{key}") for key in ("title", "url", "label")}
+        summary["notice"].update(number=related["notice"], match=related.get("match"))
+    return summary
 
 
 def reassess(item: dict) -> None:
@@ -327,7 +374,8 @@ def reassess(item: dict) -> None:
 def _rescore(item: dict, result: dict) -> None:
     notes = _detector_notes(result["findings"])
     item.update(observations=result["observations"], assessment=_with_notes(result["assessment"], notes),
-                relevance=result["relevance"], cable_id=result["cable_id"], detector_notes=notes,
+                relevance=result["relevance"], declared_work=result.get("declared_work"),
+                cable_id=result["cable_id"], detector_notes=notes,
                 detectors=[f["detector"] for f in result["findings"]],
                 findings=[_finding_summary(f) for f in result["findings"]],
                 data_quality=result.get("data_quality"), detector_errors=result.get("detector_errors", []))
@@ -351,7 +399,8 @@ def story_vessel(item: dict, now: float | None = None) -> dict:
 def rescore_story(item: dict, now: float) -> None:
     """Score a story on its track up to replay time ``now`` with the registered detectors; move it on the map."""
     track = item["story"]["track"]
-    _rescore(item, assess_vessel(story_vessel(item, now), {"now": int(now), "cables": STORY_LINES}))
+    _rescore(item, assess_vessel(story_vessel(item, now), {"now": int(now), "cables": STORY_LINES,
+                                                           "notices": EXERCISE_NOTICES}))
     seen = [fix for fix in track if fix["t"] <= now]
     if seen:
         last = seen[-1]
@@ -374,7 +423,7 @@ def rescore_story(item: dict, now: float) -> None:
 
 
 def build_board(scenario: dict | None = None, alerts: list | None = None) -> list[dict]:
-    """Same items as ``alert_board.build_board`` plus fourteen extras, scored through ``argus.assemble``.
+    """Same items as ``alert_board.build_board`` plus seventeen extras, scored through ``argus.assemble``.
 
     Story items are scored at the end of their track here; a replay scores them at its own time.
     """
@@ -398,7 +447,7 @@ def build_board(scenario: dict | None = None, alerts: list | None = None) -> lis
         received = make_track()
         track = clean_vessel({"track": received})[0]["track"]  # what the map and card show
         items.append({**_item(*row), "ais_class": ais_class, "source": "track",
-                      "destination": STORY_DESTINATIONS.get(row[0]),
+                      "destination": STORY_DESTINATIONS.get(row[0]), "call_sign": STORY_CALL_SIGNS.get(row[0]),
                       "story": {"track": track, "received": received, "start_s": track[0]["t"], "title": row[11]}})
     context = context_from_scenario(scenario) if scenario else {}
     for item in items:

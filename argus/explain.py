@@ -2,8 +2,8 @@
 
 Everything here is read from a scored board item (``argus.brain_board``): the
 ``argus.levels`` factors by group, the rules that capped or raised the level,
-the detectors' findings, the small-vessel rule, the threatened line and any AIS
-data Brain ignored or detector that failed on the vessel. Each
+the detectors' findings, the small-vessel rule, the Marine Notice rule, the
+threatened line and any AIS data Brain ignored or detector that failed on the vessel. Each
 part carries a data label (simulated, exercise, real, illustrative, assumption)
 so a reviewer can see what is invented, what is public data and what is our
 own assumption. No tkinter here.
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from argus.alert_board import LINES
 from argus.assemble import describe_data_quality
+from argus.detectors import marine_notice
 from argus.levels import BEHAVIOUR_CAP, CONTEXT_CAP, IDENTITY_CAP
 
 GROUPS = (("B", "behaviour", "Behaviour", BEHAVIOUR_CAP), ("I", "identity", "Identity and data", IDENTITY_CAP),
@@ -24,6 +25,7 @@ DETECTORS = {
     "ais_spoofing": "AIS spoofing check",
     "cable_risk": "Cable risk from the track",
     "route_check": "Heading vs declared destination",
+    "marine_notice": "Marine Notice check",
 }
 DATA_LABELS = {"simulated": "SIMULATED", "fictional": "EXERCISE", "real": "REAL"}
 # Notes the small-vessel rule adds (argus.assemble.apply_relevance); shown in their own part.
@@ -70,6 +72,8 @@ def findings(item: dict) -> list[dict]:
     """One entry per detector: its readable name, data label and reasons (repeated reasons merged)."""
     merged: dict[str, dict] = {}
     for finding in item.get("findings", ()):
+        if finding["detector"] == marine_notice.DETECTOR:  # shown in its own part, see declared_work
+            continue
         entry = merged.setdefault(finding["detector"], {
             "detector": finding["detector"], "title": DETECTORS.get(finding["detector"], finding["detector"]),
             "label": DATA_LABELS.get(finding.get("label"), str(finding.get("label") or "").upper()), "reasons": []})
@@ -89,6 +93,35 @@ def small_vessel(item: dict) -> dict | None:
     else:
         outcome = "Capped at Low: its anchor and gear are unlikely to damage the line."
     return {"capped": not relevance.get("exception"), "reason": relevance["reason"], "outcome": outcome}
+
+
+def declared_work(item: dict) -> dict:
+    """The Marine Notice rule's outcome and the notices the vessel touches (``argus.detectors.marine_notice``)."""
+    work = item.get("declared_work") or {}
+    checked = marine_notice.source()["count"]
+    notices = []
+    for finding in item.get("findings", ()):
+        notice = finding.get("notice")
+        if finding["detector"] != marine_notice.DETECTOR or not notice:
+            continue
+        kind = "Exercise notice" if notice.get("label") == "fictional" else "Marine Notice"
+        notices.append({"name": f"{kind} {notice['number']}", "title": notice.get("title"), "url": notice.get("url"),
+                        "label": DATA_LABELS.get(notice.get("label"), "REAL"), "match": notice.get("match"),
+                        "reasons": list(finding["reasons"][1:])})
+    if work.get("named"):
+        kind = "Exercise notice" if work.get("label") == "fictional" else "Marine Notice"
+        if work.get("applied"):
+            status, outcome = "explained", (f"Explained by {kind} {work['notice']}: capped at Low. A human still "
+                                            "confirms on VHF 16 that this is the notified vessel doing that work.")
+        else:
+            status, outcome = "not_applied", (f"Named in {kind} {work['notice']}, but the cap is not applied: "
+                                              f"{work['exception']}.")
+    elif notices:
+        status, outcome = "unnamed", ("Not explained: the notices here name other vessels, or do not cover this "
+                                      "position or date.")
+    else:
+        status, outcome = "none", f"No Marine Notice names this vessel or covers its position ({checked} real notices checked)."
+    return {"status": status, "outcome": outcome, "notices": notices, "checked": checked}
 
 
 def threatened_line(item: dict) -> dict:
@@ -140,6 +173,18 @@ def labels(item: dict) -> list[tuple[str, str]]:
     if small_vessel(item):
         found.append(("ASSUMPTION", "Small-vessel limits (class B under 30 m, small types under 50 m) are our "
                                     "assumption, not regulation"))
+    notice_labels = {(finding.get("notice") or {}).get("label") for finding in item.get("findings", ())
+                     if finding["detector"] == marine_notice.DETECTOR}
+    if "real" in notice_labels:
+        about = marine_notice.source()
+        found.append(("REAL", f"Marine Notices: {about['count']} notices from the {about['source']}, retrieved "
+                              f"{about['retrieved']}"))
+    if "fictional" in notice_labels:
+        found.append(("EXERCISE", "Exercise notice EX 1/2026 is fictional, written in the format of a real "
+                                  "Marine Notice"))
+    if notice_labels:
+        found.append(("ASSUMPTION", "Notice work areas: the stated width plus 0.25 nm, or 1 nm either side where "
+                                    "none is stated; a notice counts from 1 day before to 7 days after its dates"))
     if any("Natural Earth" in reason for finding in item.get("findings", ()) for reason in finding["reasons"]):
         found.append(("REAL", "Coastline for the on-land check: Natural Earth 1:50m public data"))
     found.append(("RULE OUTCOME", "The level is a rule outcome for human review, not a probability of hostile intent"))
@@ -157,5 +202,6 @@ def data_issues(item: dict) -> list[str]:
 def explain(item: dict) -> dict:
     """Everything the review window shows under "Why this level"."""
     return {"basis": item["assessment"]["basis"], "groups": groups(item), "rules": rules(item),
-            "findings": findings(item), "small_vessel": small_vessel(item), "line": threatened_line(item),
+            "findings": findings(item), "small_vessel": small_vessel(item), "declared_work": declared_work(item),
+            "line": threatened_line(item),
             "labels": labels(item), "source": source(item), "data_issues": data_issues(item)}

@@ -30,7 +30,9 @@ import customtkinter as ctk
 
 from argus import responders
 from argus.alert_board import inside, line_path, sort_key
-from argus.brain_board import build_board, update
+from argus.brain_board import EXERCISE_NOTICES, build_board, update
+from argus.countdown import step
+from argus.detectors import marine_notice
 from argus.explain import data_issues, explain, source
 from argus.incident_board import OPEN_RANK, Replay
 from argus.incidents import QUIET_CLOSE_S, REASONS, STATUSES
@@ -58,6 +60,8 @@ CHIP = {"SIMULATED": ("#c3ced6", "#2a3542"), "EXERCISE": ("#e1b164", "#34301f"),
         "ASSUMPTION": ("#d8b25c", "#34301f"), "ILLUSTRATIVE": ("#a8b6c2", "#1c2a36"),
         "RULE OUTCOME": ("#a8b6c2", "#1c2a36"), "SOURCE": ("#47c7da", "#173339")}
 DETECTOR_REASONS = 4
+NOTICE_COLOUR = "#b79cf2"  # Marine Notice work areas on the map and their chip
+CHIP["NOTICE"] = (NOTICE_COLOUR, "#2b2440")
 # Responder colours: arrives before the earliest line ETA, arrives after it, cannot go.
 IN_TIME, LATE, UNAVAILABLE = "#47c7da", "#ec8a3c", "#7d8b97"
 RESPONSE_SHAPE = {"aircraft": "square", "helicopter": "square", "ship": "circle", "drone": "diamond",
@@ -109,10 +113,25 @@ def badges(item: dict, incident: dict | None) -> list[tuple[str, str]]:
         found.append((f"Quiet {QUIET_CLOSE_S // 60} min · close?", "note"))
     if item["observations"].get("spoof_signs"):  # a lone GPS glitch is a finding but not a spoofing sign
         found.append(("AIS spoofing?", "warn"))
+    work = item.get("declared_work") or {}
+    if work.get("named"):
+        found.append((f"Notice {work['notice']} · capped Low" if work.get("applied")
+                      else f"Notice {work['notice']} · cap lifted", "note" if work.get("applied") else "warn"))
+    elif any((finding.get("notice") or {}).get("match") == "unnamed" for finding in item.get("findings", ())):
+        found.append(("In notice area · not named", "warn"))
     relevance = item.get("relevance") or {}
     if relevance.get("small"):
         found.append(("Small craft · cap lifted" if relevance.get("exception") else "Small craft · capped Low", "note"))
     return found
+
+
+def notice_areas(item: dict) -> list[tuple[dict, dict]]:
+    """(notice, area) for every Marine Notice the item's findings name, real or exercise."""
+    numbers = [(finding.get("notice") or {}).get("number") for finding in item.get("findings", ())
+               if finding.get("detector") == marine_notice.DETECTOR]
+    known = {notice["number"]: notice for notice in marine_notice.load_notices() + EXERCISE_NOTICES}
+    return [(known[number], area) for number in dict.fromkeys(numbers) if number in known
+            for area in known[number]["areas"]]
 
 
 def short_utc(value) -> str:
@@ -1275,6 +1294,7 @@ class AlertBoard:
             if len(path) > 1:
                 app.map.create_line(*app._points(path), fill=ui.BG, width=7, tags=("sim-selected",))
                 app.map.create_line(*app._points(path), fill=colour, width=3, dash=(9, 5), tags=("sim-selected",))
+            self.draw_notice_areas(selected, occupied)
             if len(selected["track"]) > 1:
                 app.map.create_line(*app._points(selected["track"]), fill=colour, width=2, tags=("sim-selected",))
         labels = []
@@ -1335,6 +1355,41 @@ class AlertBoard:
             box = app.map.create_rectangle(left - 7, top - 3, right + 7, bottom + 3, fill=ui.BG, outline=ui.LINE,
                                            tags=("sim-badge", "chart-fixed"))
             app.map.tag_lower(box, label)
+
+    def draw_notice_areas(self, item: dict, occupied) -> None:
+        """The work areas of the Marine Notices the selected contact touches, dashed in the notice colour."""
+        app, ui = self.app, self.ui
+        tags = ("sim-selected", "sim-notice")
+        vessel = app._project(item["lat"], item["lon"])
+        labelled = set()
+        for notice, area in notice_areas(item):
+            points = [tuple(point) for point in area["points"]]
+            if area["kind"] == "point" or len(points) == 1:
+                x, y = app._project(*points[0])
+                edge = app._project(*step(*points[0], 0, area["buffer_nm"]))
+                radius = max(6.0, abs(y - edge[1]))
+                app.map.create_oval(x - radius, y - radius, x + radius, y + radius, outline=NOTICE_COLOUR, width=2,
+                                    dash=(6, 4), tags=tags)
+                anchor = (x, y - radius)
+            elif area["kind"] == "polygon":
+                app.map.create_polygon(*app._points(points + points[:1]), fill="", outline=NOTICE_COLOUR, width=2,
+                                       dash=(6, 4), tags=tags)
+                anchor = app._project(*points[0])
+            else:
+                centre = app._project(*points[len(points) // 2])
+                edge = app._project(*step(*points[len(points) // 2], 0, area["buffer_nm"]))
+                band = max(4, min(60, int(2 * abs(centre[1] - edge[1]))))
+                app.map.create_line(*app._points(points), fill="#3a3152", width=band, capstyle="round",
+                                    joinstyle="round", tags=tags)
+                app.map.create_line(*app._points(points), fill=NOTICE_COLOUR, width=2, dash=(6, 4), tags=tags)
+                # Label the route where it is farthest from the vessel, clear of the vessel's own label.
+                anchor = max((app._project(*point) for point in points), key=lambda xy: math.dist(xy, vessel))
+            if notice["number"] in labelled:
+                continue
+            labelled.add(notice["number"])
+            kind = "exercise notice" if notice.get("label") == "fictional" else "Marine Notice · real"
+            self._label(anchor[0] + 6, anchor[1] - 10, f"{notice['number']} work area · {kind}", NOTICE_COLOUR, tags,
+                        "w", occupied, force=False)
 
     def draw_response(self, occupied) -> None:
         """For the selected incident: asset bases, the vessel's expected path and the best asset's dashed route."""
@@ -1923,6 +1978,7 @@ class ReviewDialog:
             self.heading("SMALL VESSEL")
             self.line("›", f"Small: {small['reason']}.", ui.INK, ui.MUTED)
             self.line("", small["outcome"], STYLE["low"][0] if small["capped"] else STYLE["medium"][0])
+        self.fill_declared_work(why["declared_work"])
         self.heading("FINDINGS BY DETECTOR")
         for finding in why["findings"]:
             body.y += 4
@@ -1935,6 +1991,23 @@ class ReviewDialog:
             hidden = len(finding["reasons"]) - DETECTOR_REASONS
             if hidden > 0:
                 self.line("", f"+{hidden} more", ui.MUTED)
+
+    def fill_declared_work(self, work: dict) -> None:
+        """Marine Notices: whether a notice explains the vessel, and what each notice it touches says."""
+        ui, body = self.ui, self.body
+        self.heading("DECLARED WORK · MARINE NOTICES", right=f"{work['checked']} real notices")
+        colour = {"explained": STYLE["low"][0], "not_applied": STYLE["medium"][0],
+                  "unnamed": STYLE["medium"][0]}.get(work["status"], ui.MUTED)
+        self.line("›", work["outcome"], colour, ui.MUTED)
+        for notice in work["notices"]:
+            body.y += 4
+            title = body.text(6, f"{notice['name']}: {notice['title']}", ui.INK, (SANS, 10, "bold"),
+                              width=body.page_width - 96)
+            fill, background = CHIP.get(notice["label"], (ui.MUTED, ui.CONTROL))
+            body.chip(body.page_width - 80, body.y + 2, notice["label"], fill, background, (SANS, 7, "bold"))
+            body.y = body.bottom(title) + 1
+            for reason in notice["reasons"]:
+                self.line("•", reason, SECONDARY, ui.MUTED)
 
     def fill_actions(self) -> None:
         ui, item, board = self.ui, self.item, self.board
