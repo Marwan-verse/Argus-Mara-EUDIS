@@ -35,7 +35,7 @@ from argus.explain import explain, source
 from argus.incident_board import OPEN_RANK, Replay
 from argus.incidents import QUIET_CLOSE_S, REASONS, STATUSES
 from argus.levels import LEVEL_NAMES, RANK
-from desktop_canvas_list import CanvasList, Field, Link
+from desktop_canvas_list import CanvasDocument, CanvasList, Field, Link
 
 LEVELS = ("critical", "high", "medium", "low")
 CODES = {"critical": "CRIT", "high": "HIGH", "medium": "MED", "low": "LOW", "none": "—"}
@@ -1528,9 +1528,11 @@ class ReviewDialog:
         self.form = tk.Frame(self.frame, bg=ui.CARD)
         self.middle = tk.Frame(self.frame, bg=ui.CARD)
         self.middle.pack(fill="both", expand=True, padx=(14, 8), pady=(4, 0))
-        self.body = ctk.CTkScrollableFrame(self.middle, fg_color=ui.CARD, corner_radius=0,
-            scrollbar_button_color=ui.LINE, scrollbar_button_hover_color=ui.HOVER)
+        # One canvas, not a frame of labels: on macOS moving widgets repaints the whole window (D85).
+        self.body = CanvasDocument(self.middle, ui.CARD, ui.LINE, ui.HOVER)
         self.body.pack(fill="both", expand=True)
+        self.body.on_resize = lambda _width: self.item is not None and self.visible and self.fill_body()
+        self.body.on_tip = lambda tip: app.map_status_label.configure(text=tip)
 
     def report_vessel(self):
         from desktop_reports import board_snapshot, open_report
@@ -1619,10 +1621,9 @@ class ReviewDialog:
         self.visible = True
         self.place()
         self.refresh()
-        canvas = getattr(self.body, "_parent_canvas", None)
-        if changed and canvas is not None:
+        if changed:
             # A new contact starts at the top, not at the previous contact's scroll position.
-            canvas.yview_moveto(0)
+            self.body.top()
 
     def refresh(self) -> None:
         item, board, ui = self.item, self.board, self.ui
@@ -1719,72 +1720,80 @@ class ReviewDialog:
         x = position(assessment["score"])
         canvas.create_polygon(x - 5, 5, x + 5, 5, x, 12, fill=ui.INK, outline="")
 
-    def heading(self, text: str, top: int = 16) -> None:
-        tk.Label(self.body, text=text, bg=self.ui.CARD, fg=self.ui.MUTED, font=(SANS, 8, "bold"),
-                 anchor="w").pack(fill="x", padx=(6, 0), pady=(top, 6))
+    def heading(self, text: str, top: int = 16, right: str | None = None) -> None:
+        body = self.body
+        body.y += top
+        title = body.text(6, text, self.ui.MUTED, (SANS, 8, "bold"))
+        if right:
+            body.text(body.page_width - 8, right, self.ui.MUTED, (MONO, 9), anchor="ne")
+        body.y = body.bottom(title) + 6
+
+    def paragraph(self, text: str, fill: str, font=(SANS, 10), top: float = 0, indent: float = 6) -> None:
+        body = self.body
+        body.y += top
+        item = body.text(indent, text, fill, font, width=body.page_width - indent - 10)
+        body.y = body.bottom(item)
 
     def fill_body(self) -> None:
-        ui, item, board = self.ui, self.item, self.board
-        for child in self.body.winfo_children():
-            child.destroy()
-        wrap = round((float(self.frame.cget("width")) - 110) * self.px)
+        ui, item, board, body = self.ui, self.item, self.board, self.body
+        body.clear()
         self.compact(self.mode == "escalate")
         if self.mode == "escalate":
             # Escalating is when an asset is chosen: the window shows who can reach the vessel instead.
-            self.fill_responders(wrap)
+            self.fill_responders()
+            body.finish()
             return
-        self.fill_why(explain(item), wrap)
+        self.fill_why(explain(item))
         self.heading("RECOMMENDED ACTION")
-        tk.Label(self.body, text=item["recommendation"], bg=ui.CARD, fg=ui.INK, font=(SANS, 10), anchor="w",
-                 justify="left", wraplength=wrap + 40).pack(fill="x", padx=(6, 0))
+        self.paragraph(item["recommendation"], ui.INK)
         self.heading("LOG")
         entries = board.history.get(item["id"], [])
         if not entries:
-            tk.Label(self.body, text="No entries.", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 10),
-                     anchor="w").pack(fill="x", padx=(6, 0))
+            self.paragraph("No entries.", ui.MUTED)
         for stamp, text in entries[-8:]:
-            row = tk.Frame(self.body, bg=ui.CARD)
-            row.pack(fill="x", padx=(6, 0), pady=1)
-            tk.Label(row, text=board.stamp(stamp), bg=ui.CARD, fg=ui.MUTED, font=(MONO, 9)).pack(side="left", anchor="n")
-            tk.Label(row, text=text, bg=ui.CARD, fg=SECONDARY, font=(SANS, 10), anchor="w", justify="left",
-                     wraplength=wrap - 40).pack(side="left", fill="x", expand=True, padx=(10, 0))
+            body.y += 1
+            time = body.text(6, board.stamp(stamp), ui.MUTED, (MONO, 9))
+            left = body.canvas.bbox(time)[2] + 10
+            entry = body.text(left, text, SECONDARY, (SANS, 10), width=body.page_width - left - 10)
+            body.y = body.bottom(time, entry) + 1
         self.heading("DATA LABELS")
+        chip_width = self.chip_width()
         for tag, text in explain(item)["labels"]:
-            row = tk.Frame(self.body, bg=ui.CARD)
-            row.pack(fill="x", padx=(6, 0), pady=2)
-            self.chip(row, tag, width=13).pack(side="left", anchor="n")
-            tk.Label(row, text=text, bg=ui.CARD, fg=SECONDARY, font=(SANS, 9), anchor="w", justify="left",
-                     wraplength=wrap - 70).pack(side="left", fill="x", expand=True, padx=(8, 0))
+            body.y += 2
+            fill, background = CHIP.get(tag, (ui.MUTED, ui.CONTROL))
+            right = body.chip(6, body.y, tag, fill, background, (SANS, 7, "bold"), chip_width)
+            label = body.text(right + 8, text, SECONDARY, (SANS, 9), width=body.page_width - right - 18)
+            body.y = body.bottom(label) + 2
         source = ("Brain opens and updates the incident; only a human sets its status." if board.incident(item["id"])
                   else "Low: watched, not an incident; it opens one if it reaches Medium.")
-        tk.Label(self.body, text=source + " Decisions are logged locally and not transmitted.", bg=ui.CARD,
-                 fg=ui.MUTED, font=(SANS, 9), anchor="w", justify="left", wraplength=wrap + 40).pack(
-            fill="x", padx=(6, 0), pady=(12, 6))
+        self.paragraph(source + " Decisions are logged locally and not transmitted.", ui.MUTED, (SANS, 9), top=12)
+        body.finish()
 
-    def fill_responders(self, wrap: int) -> None:
+    def chip_width(self) -> float:
+        """Data-label chips share one width so their texts line up."""
+        font = tkfont.Font(root=self.board.app.root, family=SANS, size=7, weight="bold")
+        return max(font.measure(tag) for tag in CHIP) + 10
+
+    def fill_responders(self) -> None:
         """Who can reach it: the storm switch, the card line, then every asset with minutes or a reason."""
-        ui, item, board = self.ui, self.item, self.board
-        head = tk.Frame(self.body, bg=ui.CARD)
-        head.pack(fill="x", padx=(6, 0), pady=(4, 6))
-        tk.Label(head, text="WHO CAN REACH IT", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 8, "bold")).pack(side="left")
+        ui, item, board, body = self.ui, self.item, self.board, self.body
+        width = body.page_width
+        body.y += 4
+        title = body.text(6, "WHO CAN REACH IT", ui.MUTED, (SANS, 8, "bold"))
         storm = board.replay.storm
-        switch = ctk.CTkButton(
-            head, text=f"Storm {board.replay.fleet['wind']['storm_kn']} kn: {'ON' if storm else 'off'}",
-            command=board.toggle_storm, height=24, width=120, corner_radius=6,
-            font=ctk.CTkFont(SANS, 11, "bold" if storm else "normal"),
-            fg_color=STYLE["high"][1] if storm else ui.CARD, hover_color=ui.HOVER, border_width=1,
-            border_color=STYLE["high"][0] if storm else ui.LINE, text_color=STYLE["high"][0] if storm else ui.MUTED)
-        switch.pack(side="right", padx=(0, 6))
-        board.app.tools.style_button(switch, "Exercise wind: a storm grounds every drone (wind limit 25 kn)")
+        body.button(width - 8, body.y - 4, f"Storm {board.replay.fleet['wind']['storm_kn']} kn: {'ON' if storm else 'off'}",
+                    board.toggle_storm, STYLE["high"][0] if storm else ui.MUTED,
+                    STYLE["high"][1] if storm else ui.CARD, STYLE["high"][0] if storm else ui.LINE,
+                    (SANS, 10, "bold" if storm else "normal"),
+                    "Exercise wind: a storm grounds every drone (wind limit 25 kn)")
+        body.y = body.bottom(title) + 12
         result = board.response(item["id"])
         if result is None:
-            tk.Label(self.body, text="Worked out for open incidents at Medium or above.", bg=ui.CARD, fg=ui.MUTED,
-                     font=(SANS, 10), anchor="w").pack(fill="x", padx=(6, 0))
+            self.paragraph("Worked out for open incidents at Medium or above.", ui.MUTED)
             return
         status_open = board.status(item["id"]) not in ("Rejected", "Watching")
         text, warn = responders.summary_line(result)
-        tk.Label(self.body, text=text, bg=ui.CARD, fg=STYLE["critical"][0] if warn else IN_TIME,
-                 font=(SANS, 11, "bold"), anchor="w", justify="left", wraplength=wrap + 40).pack(fill="x", padx=(6, 0))
+        self.paragraph(text, STYLE["critical"][0] if warn else IN_TIME, (SANS, 11, "bold"))
         if result["deadline_s"] is None:
             when = "Not approaching a line: eyes-on times only"
         elif result["at_line"]:
@@ -1792,9 +1801,9 @@ class ReviewDialog:
         else:
             when = (f"Earliest line ETA {board.stamp(result['deadline_s'])} "
                     f"(in {responders.minutes(result['deadline_s'] - result['now'])} min)")
-        tk.Label(self.body, text=f"{when} · wind {result['wind_kn']:g} kn, exercise value", bg=ui.CARD,
-                 fg=ui.MUTED, font=(SANS, 9), anchor="w", justify="left", wraplength=wrap + 40).pack(
-            fill="x", padx=(6, 0), pady=(1, 4))
+        self.paragraph(f"{when} · wind {result['wind_kn']:g} kn, exercise value", ui.MUTED, (SANS, 9), top=1)
+        body.y += 4
+        id_width = self.id_font.measure("MPA1 ")
         for row in result["rows"]:
             unavailable = row["status"] == "unavailable"
             colour = UNAVAILABLE if unavailable else LATE if row["in_time"] is False else IN_TIME
@@ -1807,10 +1816,6 @@ class ReviewDialog:
                                 else f" · {responders.minutes(-row['margin_s'])} min late")
                 if not row["counts"]:
                     verdict += " · look only"
-            line = tk.Frame(self.body, bg=ui.CARD)
-            line.pack(fill="x", padx=(6, 0), pady=1)
-            tk.Label(line, text=row["id"], width=5, anchor="w", bg=ui.CARD, fg=colour,
-                     font=(MONO, 10, "bold")).pack(side="left", anchor="n")
             action = None
             if row["status"] == "assigned":
                 action = ("Recall", lambda asset=row["id"]: board.recall(item["id"], asset),
@@ -1820,39 +1825,36 @@ class ReviewDialog:
                 action = ("Send", lambda asset=row["id"]: board.send(item["id"], asset),
                           "Send this asset (simulated decision, logged, not transmitted). "
                           "It is then busy for every other incident")
-            button_width = 0
+            body.y += 2
+            top = body.y
+            right = width - 8
             if action:
-                text_, command, tip = action
-                button = ctk.CTkButton(line, text=text_, command=command, width=58, height=22, corner_radius=5,
-                                       font=ctk.CTkFont(SANS, 11, "bold"), fg_color=ui.CARD, hover_color=ui.HOVER,
-                                       border_width=1, border_color=colour, text_color=colour)
-                button.pack(side="right", padx=(6, 0))
-                board.app.tools.style_button(button, tip)
-                button_width = round(64 * self.px)
-            tk.Label(line, text=verdict, bg=ui.CARD, fg=ui.MUTED if unavailable else colour, font=self.row_font,
-                     anchor="e", justify="right").pack(side="right", anchor="n")
+                label, command, tip = action
+                right = body.button(right, top - 2, label, command, colour, ui.CARD, colour, (SANS, 10, "bold"), tip) - 8
+            shown = body.text(6, row["id"], colour, self.id_font, y=top)
+            verdict_item = body.text(right, verdict, ui.MUTED if unavailable else colour, self.row_font, anchor="ne",
+                                     y=top, justify="right")
             name = row["name"] if row["kind"] == "satellite" else f"{row['name']} · {row['base']}"
             # The asset name gives way to its minutes, verdict and button.
-            room = (wrap + 40 - self.id_font.measure("MPA1 ") - self.row_font.measure(verdict) - button_width
-                    - round(20 * self.px))
-            tk.Label(line, text=clip(name, self.name_font, max(40, room)), bg=ui.CARD,
-                     fg=ui.MUTED if unavailable else SECONDARY, font=self.name_font, anchor="w",
-                     justify="left").pack(side="left", fill="x", expand=True, padx=(4, 8))
+            room = body.canvas.bbox(verdict_item)[0] - 6 - id_width - 16
+            name_item = body.text(6 + id_width + 4, clip(name, self.name_font, max(40, room)),
+                                  ui.MUTED if unavailable else SECONDARY, self.name_font, y=top + 1)
+            body.y = body.bottom(shown, verdict_item, name_item) + 5 + (2 if action else 0)
             if action and action[0] == "Send":
                 others = board.replay.conflicts(item, row["id"])
                 if others:
                     names = ", ".join(other["name"] for other in others)
-                    tk.Label(self.body, text=f"⚠ Only {row['id']} reaches {names} in time: sending it here "
-                                             f"leaves {'them' if len(others) > 1 else 'it'} with no responder",
-                             bg=ui.CARD, fg=STYLE["medium"][0], font=(SANS, 9), anchor="w", justify="left",
-                             wraplength=wrap).pack(fill="x", padx=(round(52 * self.px), 0), pady=(0, 3))
-        note = tk.Frame(self.body, bg=ui.CARD)
-        note.pack(fill="x", padx=(6, 0), pady=(6, 0))
-        self.chip(note, "ASSUMPTION").pack(side="left", anchor="n")
-        tk.Label(note, text="Bases are public places, coordinates approximate. Speeds, readiness, ranges, drone "
-                            "sites and the patrol ship position are team assumptions. VHF and satellite only look.",
-                 bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9), anchor="w", justify="left", wraplength=wrap - 70).pack(
-            side="left", fill="x", expand=True, padx=(8, 0))
+                    self.paragraph(f"⚠ Only {row['id']} reaches {names} in time: sending it here "
+                                   f"leaves {'them' if len(others) > 1 else 'it'} with no responder",
+                                   STYLE["medium"][0], (SANS, 9), indent=6 + id_width + 4)
+                    body.y += 3
+        body.y += 6
+        fill, background = CHIP["ASSUMPTION"]
+        right = body.chip(6, body.y, "ASSUMPTION", fill, background, (SANS, 7, "bold"))
+        note = body.text(right + 8, "Bases are public places, coordinates approximate. Speeds, readiness, ranges, "
+                                    "drone sites and the patrol ship position are team assumptions. VHF and "
+                                    "satellite only look.", ui.MUTED, (SANS, 9), width=width - right - 18)
+        body.y = body.bottom(note) + 6
 
     def compact(self, on: bool) -> None:
         """While escalating, fold the level scale and facts so the asset list has room."""
@@ -1864,67 +1866,59 @@ class ReviewDialog:
             self.scale.pack(fill="x", padx=20, pady=(12, 0), after=above)
             self.facts_frame.pack(fill="x", padx=20, pady=(8, 0), after=self.scale)
 
-    def chip(self, parent, tag: str, width: int = 0) -> tk.Label:
-        """A small data-label tag such as SIMULATED, REAL or ASSUMPTION."""
-        fg, bg = CHIP.get(tag, (self.ui.MUTED, self.ui.CONTROL))
-        return tk.Label(parent, text=tag, bg=bg, fg=fg, font=(SANS, 7, "bold"), padx=5, pady=1, width=width)
-
-    def line(self, prefix: str, text: str, wrap: int, colour: str, prefix_colour: str | None = None,
-             font=(SANS, 10)) -> None:
+    def line(self, prefix: str, text: str, colour: str, prefix_colour: str | None = None, font=(SANS, 10)) -> None:
         """One indented row: a short mono prefix (points or a bullet) and wrapped text."""
-        row = tk.Frame(self.body, bg=self.ui.CARD)
-        row.pack(fill="x", pady=1)
-        tk.Label(row, text=prefix, width=3, anchor="e", bg=self.ui.CARD, fg=prefix_colour or colour,
-                 font=(MONO, 10, "bold")).pack(side="left", anchor="n")
-        tk.Label(row, text=text, bg=self.ui.CARD, fg=colour, font=font, anchor="w", justify="left",
-                 wraplength=wrap).pack(side="left", fill="x", expand=True, padx=(10, 0))
+        body = self.body
+        body.y += 1
+        items = []
+        if prefix:
+            items.append(body.text(30, prefix, prefix_colour or colour, (MONO, 10, "bold"), anchor="ne"))
+        items.append(body.text(40, text, colour, font, width=body.page_width - 50))
+        body.y = body.bottom(*items) + 1
 
-    def fill_why(self, why: dict, wrap: int) -> None:
+    def fill_why(self, why: dict) -> None:
         """Why this level: the five groups with points and factors, rules applied, the line, detectors."""
-        ui = self.ui
-        head = tk.Frame(self.body, bg=ui.CARD)
-        head.pack(fill="x", padx=(6, 0), pady=(4, 6))
-        tk.Label(head, text="WHY THIS LEVEL", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 8, "bold")).pack(side="left")
-        tk.Label(head, text=why["basis"], bg=ui.CARD, fg=ui.MUTED, font=(MONO, 9)).pack(side="right")
+        ui, body = self.ui, self.body
+        self.heading("WHY THIS LEVEL", top=4, right=why["basis"])
         for group in why["groups"]:
-            row = tk.Frame(self.body, bg=ui.CARD)
-            row.pack(fill="x", padx=(6, 0), pady=(6, 1))
+            body.y += 6
             active = group["points"] > 0
-            tk.Label(row, text=f"{group['key']}  {group['title']}", bg=ui.CARD, fg=ui.INK if active else ui.MUTED,
-                     font=(SANS, 10, "bold")).pack(side="left")
+            title = body.text(6, f"{group['key']}  {group['title']}", ui.INK if active else ui.MUTED, (SANS, 10, "bold"))
             score = f"{group['points']} of {group['cap']} max" if group["cap"] else f"{group['points']} pts"
-            tk.Label(row, text=score if group["factors"] else "nothing observed", bg=ui.CARD, fg=ui.MUTED,
-                     font=(MONO, 9) if group["factors"] else (SANS, 9)).pack(side="right")
+            body.text(body.page_width - 8, score if group["factors"] else "nothing observed", ui.MUTED,
+                      (MONO, 9) if group["factors"] else (SANS, 9), anchor="ne")
+            body.y = body.bottom(title) + 1
             for factor in group["factors"]:
                 points = factor["points"]
                 text = f"+{points}" if points > 0 else ("−" + str(-points) if points < 0 else "0")
-                self.line(text, factor["text"], wrap, ui.INK if points else ui.MUTED)
+                self.line(text, factor["text"], ui.INK if points else ui.MUTED)
         if why["rules"]:
             self.heading("RULES APPLIED")
             for note in why["rules"]:
-                self.line("›", note, wrap, SECONDARY, ui.MUTED, (SANS, 10, "italic"))
+                self.line("›", note, SECONDARY, ui.MUTED, (SANS, 10, "italic"))
         line = why["line"]
         self.heading("THREATENED LINE")
-        self.line("›", f"{line['name']}: {line['where']}", wrap, ui.INK, ui.MUTED)
+        self.line("›", f"{line['name']}: {line['where']}", ui.INK, ui.MUTED)
         for other in line["others"]:
             self.line("", f"Also named: {other['name']}, {other['where']}. Scored for the most urgent line only.",
-                      wrap, ui.MUTED)
+                      ui.MUTED)
         small = why["small_vessel"]
         if small:
             self.heading("SMALL VESSEL")
-            self.line("›", f"Small: {small['reason']}.", wrap, ui.INK, ui.MUTED)
-            self.line("", small["outcome"], wrap, STYLE["low"][0] if small["capped"] else STYLE["medium"][0])
+            self.line("›", f"Small: {small['reason']}.", ui.INK, ui.MUTED)
+            self.line("", small["outcome"], STYLE["low"][0] if small["capped"] else STYLE["medium"][0])
         self.heading("FINDINGS BY DETECTOR")
         for finding in why["findings"]:
-            row = tk.Frame(self.body, bg=ui.CARD)
-            row.pack(fill="x", padx=(6, 0), pady=(4, 1))
-            tk.Label(row, text=finding["title"], bg=ui.CARD, fg=ui.INK, font=(SANS, 10, "bold")).pack(side="left")
-            self.chip(row, finding["label"]).pack(side="left", padx=(8, 0))
+            body.y += 4
+            title = body.text(6, finding["title"], ui.INK, (SANS, 10, "bold"))
+            fill, background = CHIP.get(finding["label"], (ui.MUTED, ui.CONTROL))
+            body.chip(body.canvas.bbox(title)[2] + 8, body.y + 2, finding["label"], fill, background, (SANS, 7, "bold"))
+            body.y = body.bottom(title) + 1
             for reason in finding["reasons"][:DETECTOR_REASONS]:
-                self.line("•", reason, wrap, SECONDARY, ui.MUTED)
+                self.line("•", reason, SECONDARY, ui.MUTED)
             hidden = len(finding["reasons"]) - DETECTOR_REASONS
             if hidden > 0:
-                self.line("", f"+{hidden} more", wrap, ui.MUTED)
+                self.line("", f"+{hidden} more", ui.MUTED)
 
     def fill_actions(self) -> None:
         ui, item, board = self.ui, self.item, self.board
@@ -1964,9 +1958,7 @@ class ReviewDialog:
         self.fill_actions()
         self.fill_form()
         self.fill_body()
-        canvas = getattr(self.body, "_parent_canvas", None)
-        if canvas is not None:
-            canvas.yview_moveto(0)
+        self.body.top()
 
     def fill_form(self) -> None:
         ui = self.ui
