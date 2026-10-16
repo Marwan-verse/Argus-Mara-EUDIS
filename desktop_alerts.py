@@ -423,7 +423,7 @@ class AlertBoard:
         self.clock = tk.Label(chip, text=self.stamp(self.replay.now), bg=STYLE["medium"][1], fg=ui.AMBER,
                               font=(MONO, 11, "bold"))
         self.clock.pack(side="left", padx=(0, 6), pady=2)
-        tk.Label(clock_row, text="exercise clock · follows Play and the slider", bg=ui.CARD, fg=ui.MUTED,
+        tk.Label(clock_row, text="exercise clock", bg=ui.CARD, fg=ui.MUTED,
                  font=(SANS, 9), anchor="w").pack(side="left", padx=(8, 0), fill="x", expand=True)
         app.tools.attach_tooltip(chip, "Replay time: incidents follow the exercise replay (Play or the slider)")
 
@@ -434,8 +434,8 @@ class AlertBoard:
         self.demo_switch.pack(fill="x", padx=16, pady=(8, 0))
         tk.Label(panel, text="Satellite / AIS review leads appear below.\n"
                  "Live AIS alone does not establish a threat.",
-                 bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9), justify="left",
-                 wraplength=250).pack(fill="x", padx=16, pady=(4, 6))
+                 bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9), justify="left", anchor="w",
+                 wraplength=250).pack(fill="x", padx=(20, 16), pady=(4, 6))
 
         row = tk.Frame(panel, bg=ui.CARD)
         row.pack(fill="x", padx=(16, 12), pady=(2, 0))
