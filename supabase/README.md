@@ -3,6 +3,20 @@
 An optional shared database for AIS history and satellite-versus-AIS comparison
 (decision D74). The offline exercise does not use it.
 
+## One team database again (16 October 2026 evening, D106)
+
+**The team database is argus-mara in the Argus Mara organisation, project `lcpgnzvkntqdhejrsgpa`**
+(`https://lcpgnzvkntqdhejrsgpa.supabase.co`), and the Python client's default points there again.
+The client now follows the project recorded in the workspace's `data/satellite/database.link`,
+so a key is always used with the project it was checked against. `ARGUS_SUPABASE_URL` still
+overrides both.
+
+- The captain invites each teammate to the Argus Mara organisation and gives everyone their
+  own secret key. Teammates then link with `SATELLITE-WATCH-*` or `python scripts/configure_supabase.py`.
+- The six 16 October migrations listed below are applied to the team project as well.
+- The `zibmytppznydhlggzlaq` project described below (D95) is kept read-only until its 8–15 October
+  capture import has been copied into the team project.
+
 ## Current deployment â€” 16 October 2026 (D95)
 
 The active project is **argus-mara** in **marwan-verse's projects**, region

@@ -27,7 +27,7 @@ def main():
     if not supabase_ais.valid_key(key):
         parser.exit(1, 'That is not a Supabase secret key (sb_secret_...) or service_role key; nothing changed.\n')
     try:
-        state = supabase_ais.http_rpc(supabase_ais.base_url() + '/rest/v1/rpc/argus_ais_status', {}, key)
+        state = supabase_ais.http_rpc(supabase_ais.base_url(follow_link=False) + '/rest/v1/rpc/argus_ais_status', {}, key)
     except ValueError as error:
         parser.exit(1, str(error) + '\nNothing changed.\n')
     print('Database answered:', json.dumps({k: state.get(k) for k in ('positions', 'vessels_last_hour', 'last_ok_utc', 'database_mb')}))
