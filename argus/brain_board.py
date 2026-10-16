@@ -20,6 +20,9 @@ hand except the track: an anchor-drag approach to EWIC without an AIS gap
 (SIM-50), a ship holding beside the North Dublin cable cluster and then
 anchoring (SIM-51), and two innocent ones, a ship at anchor in Dublin Bay
 outside every corridor (SIM-52) and a fast ferry crossing the lines (SIM-53).
+A fifth declares Fishguard as its AIS destination, then turns away from it
+towards Greenlink and slows by the line (SIM-55, after the Dublin stories), so
+``route_check`` adds rule C3.
 
 ``update`` is a pure function of the board time, so a replay can move the
 board forwards or backwards; ``rescore_exercise`` re-scores the exercise
@@ -200,6 +203,14 @@ def _ferry_story() -> list[dict]:
     return _timed_track(95 * 60, (53.33, -6.00), [(70, 19.0, 60, None)])
 
 
+def _wrong_way_story() -> list[dict]:
+    """Declares Fishguard and steams towards it across St George's Channel, then turns south-west away from it
+    towards Greenlink and slows by the line. It starts after the scripted Dublin stories (T+02:20) and ends
+    with them at T+04:00, far from their responders."""
+    return _timed_track(140 * 60, (52.15, -5.95), [(20, 12.0, 95, None), (45, 11.0, 230, None),
+                                                   (35, 5.0, _yaw(210), None)])
+
+
 # Stories on the replay clock: (alert_board._item row, AIS class, track builder). The row's position,
 # course and speed are replaced by the track at each replay time; observations come only from detectors.
 STORY_ITEMS = [
@@ -219,7 +230,13 @@ STORY_ITEMS = [
       "Fast ferry crossing the cable corridors at a steady speed",
       "Normal transit; no action.",
       {}), "A", _ferry_story),
+    (("SIM-55", "SALTEE HERON", "General cargo", 120, "greenlink", 0, 0, 0, 0, 0, "line",
+      "Declares Fishguard but turned away from it towards Greenlink and slowed by the line",
+      "Ask the master on VHF 16 to confirm the destination and intentions; watch the Greenlink corridor.",
+      {}), "A", _wrong_way_story),
 ]
+# Fictional AIS destinations the stories declare (Message 5 text); route_check compares them with the track.
+STORY_DESTINATIONS = {"SIM-55": "GBFIS"}
 STORY_TRAIL_S = 3 * 3600  # the map trail shows the window the detectors read
 
 # Board-only detectors whose reasons are already the item's title; other detectors' reasons become notes.
@@ -229,7 +246,8 @@ DETECTOR_NOTE_REASONS = 4
 
 def _vessel(item: dict, ais_class: str) -> dict:
     return {"mmsi": item["id"], "name": item["name"], "ship_type": SHIP_TYPES.get(item["vessel_type"]),
-            "ais_class": ais_class, "ais_length_m": item.get("length_m") or None, "destination": None,
+            "ais_class": ais_class, "ais_length_m": item.get("length_m") or None,
+            "destination": item.get("destination"),
             "nav_status": None, "track": [], "label": item["label"]}
 
 
@@ -308,11 +326,13 @@ def rescore_story(item: dict, now: float) -> None:
         where = f"{distance:.1f} nm from {item['line_name']}" if distance is not None else "far from every line"
         doing = ("At anchor" if seen and last.get("nav_status") == "at anchor"
                  else f"Under way at {last['sog_kn']:.0f} kn" if seen else "Not seen yet")
-        item["title"] = f"{doing}, {where}: no behaviour cue"
+        cue = ("not heading to its declared destination" if item["observations"].get("route_inconsistent")
+               else "no behaviour cue")
+        item["title"] = f"{doing}, {where}: {cue}"
 
 
 def build_board(scenario: dict | None = None, alerts: list | None = None) -> list[dict]:
-    """Same items as ``alert_board.build_board`` plus twelve extras, scored through ``argus.assemble``.
+    """Same items as ``alert_board.build_board`` plus fourteen extras, scored through ``argus.assemble``.
 
     Story items are scored at the end of their track here; a replay scores them at its own time.
     """
@@ -335,6 +355,7 @@ def build_board(scenario: dict | None = None, alerts: list | None = None) -> lis
     for row, ais_class, make_track in STORY_ITEMS:
         track = make_track()
         items.append({**_item(*row), "ais_class": ais_class, "source": "track",
+                      "destination": STORY_DESTINATIONS.get(row[0]),
                       "story": {"track": track, "start_s": track[0]["t"], "title": row[11]}})
     context = context_from_scenario(scenario) if scenario else {}
     for item in items:

@@ -28,7 +28,7 @@ from pathlib import Path
 from argus.alert_board import exercise_item
 from argus.brain import detect_vessel
 from argus.contracts import validate_scenario
-from argus.detectors import ais_spoofing, cable_risk
+from argus.detectors import ais_spoofing, cable_risk, route_check
 from argus.levels import CRITICAL_ASSETS, LEVEL_NAMES, RANK, RULES_VERSION, assess
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -79,6 +79,7 @@ DETECTORS = [
     legacy_cable_v1,
     ais_spoofing.detect,
     cable_risk.detect,
+    route_check.detect,
 ]
 
 
