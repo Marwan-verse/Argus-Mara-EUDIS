@@ -85,7 +85,8 @@ def _board_pack(vessel: dict, item: dict, context: dict) -> dict:
     assessment = item["assessment"]
     tag = DATA_TAGS.get(item.get("label"), str(item.get("label") or "").upper())
     facts = _Facts()
-    kind = "Exercise contact" if item.get("exercise") else "Simulated contact"
+    real = item.get("label") == "real"  # D106: a live AIS alert
+    kind = "Real ship from live AIS" if real else "Exercise contact" if item.get("exercise") else "Simulated contact"
     ids = item["id"] if vessel["id"] == item["id"] else f"{item['id']}, MMSI {vessel['id']}"
     details = [item["vessel_type"]] + ([f"{item['length_m']:.0f} m"] if item.get("length_m") else [])
     facts.add("identity", tag, f"{kind} {item['name']} ({ids}), {', '.join(details)}")
@@ -98,7 +99,8 @@ def _board_pack(vessel: dict, item: dict, context: dict) -> dict:
     if item.get("destination"):
         facts.add("destination", tag, f"Declared AIS destination {item['destination']}")
     if context.get("raised_min") is not None:
-        facts.add("raised", tag, f"Contact raised {context['raised_min']} min before the replay time")
+        facts.add("raised", tag, f"Alert raised {context['raised_min']} min before this report" if real
+                  else f"Contact raised {context['raised_min']} min before the replay time")
     facts.add("summary", tag, f"Board summary: {item['title']}")
     incident = context.get("incident")
     level = assessment["level"]

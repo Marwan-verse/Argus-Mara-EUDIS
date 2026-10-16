@@ -328,6 +328,118 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertIn('Escalated  · CHANGED AFTER SIGNING', window.text.get('1.0', 'end'))
         window.window.destroy()
 
+    def real_check(self, *tracks):
+        """A live AIS check as the feed hands it to the board (D106), from synthetic tracks, without network."""
+        from argus.live_alerts import LiveTracks
+        from desktop_real_alerts import check
+        from test_live_alerts import NOW, STATIC, FakeDatabase, packet
+        live = LiveTracks(rpc=FakeDatabase(packet(*tracks, static=STATIC)))
+        with patch('argus.supabase_ais.linked', return_value=True), \
+                patch('argus.watchlist_data.load', return_value=None):
+            return check(live, 'workspace', now=NOW)
+
+    def map_texts(self, tag):
+        return [self.app.map.itemcget(item, 'text') for item in self.app.map.find_withtag(tag)
+                if self.app.map.type(item) == 'text']
+
+    def centre_on(self, item):
+        app = self.app
+        app.fit_ireland()
+        app._change_map_center((item['lat'], item['lon']))
+        app._zoom_by(3)
+        app.motion.finish_zoom()  # Mid-glide the chart is one moving picture; markers return when it lands
+        self.root.update()
+
+    def test_real_alerts_from_live_ais_rank_first_open_for_review_and_are_signed(self):
+        """D106: a real alert joins its level's band ahead of the simulated contacts, on the map as NAME · REAL."""
+        from desktop_alerts import HeaderRow, LeadRow
+        from test_live_alerts import LOITERER, TRANSIT
+        board, dialog, alert = self.board, self.board.dialog, 'REAL-250000001'
+        self.assertFalse(board.real_frame.shown)  # Tests never start the feed: no live AIS block
+        board.refresh_real(self.real_check(LOITERER, TRANSIT))
+        self.centre_on(board.real.items[alert])
+
+        def queue():
+            return [row.key if isinstance(row, HeaderRow) else
+                    ('real' if isinstance(row, LeadRow) and row.lead.alert_id else 'other') for row in board.list.rows]
+        rows = queue()
+        high = rows.index('header:high')
+        self.assertEqual(rows[high + 1], 'real')  # ahead of the simulated incidents
+        lead = board.list.rows[high + 1].lead
+        self.assertEqual((lead.title, lead.tag), ('TEST LOITERER · 250000001', 'AIS · REAL'))
+        self.assertTrue(lead.detail.startswith('New · High'), lead.detail)
+        self.assertIn('LIVE AIS ALERTS · 1', board.real_frame.texts())
+        self.assertIn('header:sources', rows)
+        self.assertIn(f'real-alert:{alert}', self.map_tags('real-alert:'))
+        self.assertIn('TEST LOITERER · REAL', self.map_texts('real-alert'))
+        self.assertTrue(self.map_texts('real-badge')[0].startswith('REAL · 1 live AIS alert'))
+
+        lead.invoke()  # A click on the lead opens the review window
+        self.root.update()
+        self.assertEqual(board.selected, alert)
+        self.assertEqual(dialog.tag.cget('text'), 'REAL · LIVE AIS')
+        self.assertIn('MMSI 250000001', dialog.meta.cget('text'))
+        self.assertIn('REAL', dialog.body.texts())
+        self.assertNotIn('Open replay', self.actions())
+        self.assertIn('Acknowledge', self.actions())
+        self.assertEqual(board.status(alert), 'Reviewed')
+        opened = board.decision_log.records()[-1]
+        self.assertEqual((opened['action'], opened['real'], opened['simulated'], opened['mmsi'], opened['alert']),
+                         ('Reviewed', True, False, '250000001', alert))
+        self.assertNotIn('replay', opened)  # real times only
+
+        dialog.open_form('escalate')
+        self.assertTrue(any(text.startswith('Not worked out for real alerts') for text in dialog.body.texts()))
+        dialog.choice.set('Duty officer')
+        dialog.confirm()
+        self.assertEqual((board.status(alert), board.decision_log.records()[-1]['to']), ('Escalated', 'Duty officer'))
+        self.assertTrue(board.real_frame.blocks and any(
+            block[0] == 'entry' and block[1].detail.startswith('Escalated · Duty officer') for block in board.real_frame.blocks))
+
+        board.show_demo_alerts.set(False)  # Hiding the simulated alerts keeps the real one and its review
+        board.toggle_demo_alerts()
+        self.assertTrue(dialog.visible)
+        self.assertIn('real', queue())
+        self.assertIn(f'real-alert:{alert}', self.map_tags('real-alert:'))
+        board.show_demo_alerts.set(True)
+        board.toggle_demo_alerts()
+
+        dialog.open_form('reject')
+        dialog.choice.set('Authorised operation')
+        dialog.confirm()
+        self.assertEqual(board.real.band(alert), 'closed')
+        self.assertNotIn(f'real-alert:{alert}', self.map_tags('real-alert:'))
+        board.open_log()
+        self.root.update()
+        window = board.log_window
+        self.assertEqual(window.chip.cget('text'), 'REAL')
+        self.assertIn('REAL · Rejected', window.text.get('1.0', 'end'))
+        window.verify()
+        self.assertIn('3 decisions verified', window.result.cget('text'))
+        window.window.destroy()
+
+    def test_a_real_alert_on_the_map_opens_its_review_and_a_failed_check_keeps_it(self):
+        from test_live_alerts import LOITERER
+        board, alert = self.board, 'REAL-250000001'
+        board.refresh_real(self.real_check(LOITERER))
+        self.centre_on(board.real.items[alert])
+        marker = next(item for item in self.app.map.find_withtag(f'real-alert:{alert}')
+                      if self.app.map.type(item) in ('polygon', 'oval'))
+        x1, y1, x2, y2 = self.app.map.bbox(marker)
+        event = SimpleNamespace(x=(x1 + x2) / 2, y=(y1 + y2) / 2)
+        self.app._map_motion(event)
+        self.assertTrue(self.app.map_status_label.cget('text').startswith('Real · live AIS · TEST LOITERER'))
+        self.app._inspect_map_item(event)
+        self.root.update()
+        self.assertEqual((board.selected, board.dialog.visible), (alert, True))
+        board.refresh_real({'state': 'error', 'error': 'Cannot reach the Supabase database'})
+        self.root.update()
+        self.assertTrue(board.dialog.visible)
+        self.assertIn(alert, board.real.items)
+        self.assertTrue(any('Last check failed: Cannot reach the Supabase database' in text
+                            for text in board.real_frame.texts()))
+        self.assertTrue(self.map_texts('real-badge')[0].endswith('last check failed'))
+
     def test_exercise_incident_shares_review_status_and_map_click_opens_it(self):
         app, board, tools = self.app, self.board, self.app.tools
         exercise = next(item for item in board.items if item.get('exercise'))
