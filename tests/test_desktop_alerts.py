@@ -64,7 +64,7 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertIn('26 new', app.alert_counts_label.cget('text'))
         self.assertEqual(board.summary.cget('text'), '26 open · 0 escalated')
         self.assertEqual(self.flags('SIM-45'), ['AIS spoofing?'])
-        self.assertEqual(len(self.map_tags('sim-alert:')), len(board.items) - 1)  # SIM-53 starts at T+95
+        self.assertEqual(len(self.map_tags('sim-alert:')), len(board.items) - 2)  # SIM-53 starts at T+95, SIM-55 at T+140
         badge = next(item for item in app.map.find_withtag('sim-badge') if app.map.type(item) == 'text')
         self.assertIn('SIMULATED', app.map.itemcget(badge, 'text'))
         board.set_filter('critical')
@@ -78,10 +78,10 @@ class DesktopAlertBoardTests(unittest.TestCase):
         self.assertEqual(self.flags('SIM-40'), ['Small craft · capped Low'])
         board.set_filter(None)
         board.toggle_watching()
-        self.assertEqual(len(self.packed_cards()), len(board.items) - 1)  # SIM-53 is not raised until T+95
+        self.assertEqual(len(self.packed_cards()), len(board.items) - 2)  # SIM-53 and SIM-55 are not raised until T+95 and T+140
         board.sort_mode.set('Time to asset')
         board.relayout(top=True)
-        self.assertEqual(len(self.packed_cards()), len(board.items) - 1)
+        self.assertEqual(len(self.packed_cards()), len(board.items) - 2)
 
     def test_hide_demo_alerts_clears_queue_counts_and_markers_but_keeps_reports(self):
         import json
