@@ -151,13 +151,15 @@ class MapMotionTests(unittest.TestCase):
         x, y = 200, 160
         zoom = app.map_zoom
         under = world_to_geo(*app._world_at(x, y), app.map_zoom)
-        app._zoom_at(1, x, y)
-        self.root.update()
-        app._zoom_at(1, x, y)
-        self.root.update()
-        self.assertTrue(app.motion.animating)
-        self.assertEqual(len(app.motion.timings), 1, 'a joining step must not copy the chart again')
-        app._zoom_at(-1, x, y)
+        # Joining wheel events must be tested during a glide, independent of
+        # how long the machine takes to service the Tk event queue.
+        started = time.perf_counter()
+        with patch('desktop_motion.time.perf_counter', return_value=started):
+            app._zoom_at(1, x, y)
+            app._zoom_at(1, x, y)
+            self.assertTrue(app.motion.animating)
+            self.assertEqual(len(app.motion.timings), 1, 'a joining step must not copy the chart again')
+            app._zoom_at(-1, x, y)
         self.wait()
         self.assertEqual(app.map_zoom, zoom + 1)
         after = world_to_geo(*app._world_at(x, y), app.map_zoom)

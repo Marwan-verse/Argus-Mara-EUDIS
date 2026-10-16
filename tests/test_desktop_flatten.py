@@ -63,7 +63,11 @@ class FlattenTests(unittest.TestCase):
         lit = sum(close(colour, (255, 255, 255), 60) for colour in dashes)
         self.assertTrue(40 < lit < 180, f'dashed line drawn solid or missing: {lit} of 220 lit')
         x1, y1, x2, y2 = canvas.bbox(text)
-        inked = sum(1 for x in range(x1, x2) for y in range(y1, y2) if sum(picture.getpixel((x, y))) > 300)
+        # Font bounds depend on Windows DPI and may extend beyond this deliberately
+        # small canvas. Verify the visible text without sampling outside the image.
+        inked = sum(1 for x in range(max(0, x1), min(picture.width, x2))
+                    for y in range(max(0, y1), min(picture.height, y2))
+                    if sum(picture.getpixel((x, y))) > 300)
         self.assertGreater(inked, 20, 'text was not drawn')
         # With an offset, canvas point (x, y) lands at (x, y) + offset: room for a ring around the view.
         shifted = Flattener(canvas, source).render('chart', Image.new('RGB', (260, 200), BACKGROUND), (20, 10))
