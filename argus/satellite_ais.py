@@ -149,9 +149,11 @@ def historical_ais(root, acquired_utc, area):
                     continue
                 mmsi = str(mmsi_value(row['mmsi'])).zfill(9)
                 vessel = vessels.setdefault(mmsi, {'mmsi': mmsi, 'track': [], 'static': [], 'label': label})
+                if vessel['label'] != label:
+                    vessel['mixed_provenance'] = True
                 kind = row.get('msg_type')
                 if kind in STATIC_TYPES and received_s <= when:
-                    vessel['static'].append((received_s, metadata(row)))
+                    vessel['static'].append((received_s, metadata(row), row.get('stream_id') or 'imported'))
                 elif kind in POSITION_TYPES or (not kind and row.get('ts')):
                     raw_time = row.get('ts') or row.get('time_utc') or received
                     ts = row_time(raw_time)
@@ -169,7 +171,7 @@ def historical_ais(root, acquired_utc, area):
                     point['stream_id'] = row.get('stream_id') or 'imported'
                     vessel['track'].append(point)
                     if received_s <= when:
-                        vessel['static'].append((received_s, metadata(row)))
+                        vessel['static'].append((received_s, metadata(row), point['stream_id']))
                     earliest, latest = min(earliest or t, t), max(latest or t, t)
                     fixes += 1
             except (ValueError, KeyError, TypeError, OverflowError):
@@ -177,14 +179,22 @@ def historical_ais(root, acquired_utc, area):
         final = path.stat()
         if (initial.st_size, initial.st_mtime_ns) != (final.st_size, final.st_mtime_ns):
             raise ArchiveChanged('AIS recording changed during this free historical join; open the review again')
-    eligible = []
+    eligible, excluded = [], []
     for vessel in vessels.values():
+        if vessel.get('mixed_provenance'):
+            excluded.append({'mmsi': vessel['mmsi'], 'reason': 'mixed_provenance'})
+            continue
         unique = {}
+        conflict = False
         for point in vessel['track']:
-            prior = unique.get(point['ts'])
+            key = (point['stream_id'], point['ts'])
+            prior = unique.get(key)
             if prior is not None and (prior['lat'], prior['lon']) != (point['lat'], point['lon']):
-                raise ValueError('Conflicting archived AIS positions for one MMSI/time; review the archive')
-            unique[point['ts']] = point
+                conflict = True
+            unique[key] = point
+        if conflict:
+            excluded.append({'mmsi': vessel['mmsi'], 'reason': 'conflicting_positions_at_same_time'})
+            continue
         vessel['track'] = sorted(unique.values(), key=lambda p: timestamp(p['ts']))
         epochs = {}
         for point in vessel['track']:
@@ -192,12 +202,16 @@ def historical_ais(root, acquired_utc, area):
         alternatives = [(track, position_at(track, when)) for track in epochs.values()]
         alternatives = [(track, pos) for track, pos in alternatives if pos is not None]
         if len(alternatives) != 1:
+            if len(alternatives) > 1:
+                excluded.append({'mmsi': vessel['mmsi'], 'reason': 'ambiguous_stream_epochs'})
             continue  # Never interpolate across stream resets or choose conflicting sources.
         vessel['track'], position = alternatives[0]
         if position is None or not w-.005 <= position['lon'] <= e+.005 or not s-.003 <= position['lat'] <= n+.003:
             continue
         values = {}
-        for received, fields in sorted(vessel.pop('static'), key=lambda p: p[0]):
+        for received, fields, stream_id in sorted(vessel.pop('static'), key=lambda p: p[0]):
+            if stream_id != vessel['track'][0]['stream_id']:
+                continue
             for key, value in fields.items():
                 values[key] = {'value': value, 'received_utc': datetime.fromtimestamp(received, timezone.utc).isoformat()}
         vessel.update({'position': position, 'position_evidence': position_method(vessel['track'], when, None),
@@ -209,10 +223,13 @@ def historical_ais(root, acquired_utc, area):
              'max_plausible_segment_speed_kn': 80,
              'kinematic_consistency': 'exceeds_assumed_limit' if speeds and max(speeds) > 80 else 'within_assumed_limit' if speeds else 'unavailable',
              'caveat': '80 kn is a team screening assumption. Scene acquisition UTC is not per-pixel timing; reception timestamps and straight-line motion introduce uncertainty.'})
+        from argus.tracking import temporal_support
+        vessel['position_evidence']['temporal_support'] = temporal_support(vessel['track'], when, position)
         eligible.append(vessel)
     return {'vessels': eligible, 'archive_sha256': digest.hexdigest(), 'acquired_utc': acquired_utc,
             'coverage': {'status': 'partial' if eligible else 'unavailable', 'eligible_vessels': len(eligible),
                          'nearby_fixes': fixes, 'files_scanned': len(paths),
+                         'excluded_vessels': excluded,
                          'first_fix_utc': datetime.fromtimestamp(earliest, timezone.utc).isoformat() if earliest else None,
                          'last_fix_utc': datetime.fromtimestamp(latest, timezone.utc).isoformat() if latest else None,
                          'complete_regional_census': False,
@@ -220,35 +237,45 @@ def historical_ais(root, acquired_utc, area):
 
 
 def associate(contacts, ais, radius_km=.3):
+    from argus.tracking import within_temporal_support
+    from argus.optical_localization import position_eligible
     vessels = ais['vessels']
     penalty = len(contacts)+1
     costs = [[distance_km(contact, vessel['position'])/radius_km
-              if distance_km(contact, vessel['position']) <= radius_km and vessel['position_evidence'].get('kinematic_consistency') != 'exceeds_assumed_limit' else penalty*3
+              if position_eligible(contact) and not contact.get('overlap_ambiguous') and distance_km(contact, vessel['position']) <= radius_km and vessel['position_evidence'].get('kinematic_consistency') != 'exceeds_assumed_limit' else penalty*3
               for vessel in vessels] + [penalty]*len(contacts) for contact in contacts]
     result = []
     for contact, col in zip(contacts, assignment(costs)):
         item = {**contact, 'association': 'no_contemporaneous_ais' if not vessels else 'unmatched_review_lead',
                 'matched_mmsi': None, 'identity_confirmed': False, 'review_status': 'unreviewed', 'candidates': []}
+        if not position_eligible(contact):
+            item['association'] = 'visual_location_unverified'
         when = timestamp(ais.get('acquired_utc') or contact.get('ts')) if ais.get('acquired_utc') or contact.get('ts') else None
         for vessel in vessels:
             distance = distance_km(contact, vessel['position'])
-            if distance > 1:
-                continue
-            nearest = min(vessel['track'], key=lambda p: abs(timestamp(p['ts'])-when)) if when is not None else None
-            offset = abs(timestamp(nearest['ts'])-when) if nearest else None
             evidence = vessel['position_evidence']
+            temporal = within_temporal_support(contact, evidence, margin_m=radius_km*1000)
+            if distance > 1 and temporal is not True:
+                continue
+            track = vessel.get('track') or []
+            nearest = min(track, key=lambda p: abs(timestamp(p['ts'])-when)) if when is not None and track else None
+            offset = abs(timestamp(nearest['ts'])-when) if nearest else None
             motion_ok = evidence.get('kinematic_consistency') != 'exceeds_assumed_limit'
             item['candidates'].append({'mmsi': vessel['mmsi'], 'name': vessel['name'],
                     'distance_m': round(distance*1000, 1), 'within_gate': distance <= radius_km, 'motion_consistent': motion_ok,
+                    'within_temporal_support': temporal,
                     'nearest_fix_offset_s': round(offset, 1) if offset is not None else None,
                     'position': vessel['position'], 'position_evidence': evidence,
                     'broadcast_fields': vessel['broadcast_fields'],
-                    'assessment': 'motion_inconsistent_review_required' if not motion_ok else
+                    'assessment': 'visual_location_unverified' if not position_eligible(contact) else
+                                  'motion_inconsistent_review_required' if not motion_ok else
                                   'spatially_consistent_time_assumed' if distance <= radius_km and evidence.get('observation_time_assumed') else
-                                  'spatially_consistent' if distance <= radius_km else 'outside_300m_gate',
+                                  'spatially_consistent' if distance <= radius_km else
+                                  'reachable_time_uncertain' if temporal else 'outside_300m_gate',
                     'identity_confirmed': False})
+        item['ambiguous'] = sum((c['within_gate'] or c['within_temporal_support'] is True)
+                                and c['motion_consistent'] for c in item['candidates']) > 1
         item['candidates'] = sorted(item['candidates'], key=lambda c: c['distance_m'])[:5]
-        item['ambiguous'] = sum(c['within_gate'] and c['motion_consistent'] for c in item['candidates']) > 1
         if col < len(vessels) and costs[len(result)][col] <= 1:
             item.update({'association': 'provisional_spatiotemporal_match', 'matched_mmsi': vessels[col]['mmsi'],
                          'distance_km': round(distance_km(contact, vessels[col]['position']), 4),

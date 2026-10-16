@@ -42,6 +42,12 @@ class Icons:
             oval((3, 3, 21, 21))
             oval((7, 7, 17, 17))
             line([(12, 12), (20, 4)])
+        elif name == 'magnet':  # a horseshoe magnet with solid pole tips
+            line([(7, 7), (7, 12)])
+            line([(17, 7), (17, 12)])
+            draw.arc(tuple(int(v * scale) for v in (7, 7, 17, 17)), 0, 180, fill=color, width=2 * scale)
+            for left in (5, 15):
+                draw.rectangle(tuple(int(v * scale) for v in (left, 2, left + 4, 7)), fill=color)
         elif name == 'weather':
             line([(5, 19), (3, 17), (3, 13), (6, 10), (9, 10), (11, 6), (16, 6), (19, 10), (19, 12), (22, 14), (22, 17), (20, 19), (5, 19)])
         elif name == 'layers':
@@ -88,6 +94,9 @@ class Icons:
             line([(9, 10), (4, 15), (9, 20), (14, 15)])
             line([(4, 5), (8, 9)])
             line([(15, 18), (20, 23)])
+        elif name == 'seal':
+            line([(12, 2), (20, 5), (20, 11), (17, 17), (12, 21), (7, 17), (4, 11), (4, 5), (12, 2)])
+            line([(8, 11), (11, 14), (16, 8)])
         elif name == 'brand':
             line([(2, 12), (6, 7), (12, 5), (18, 7), (22, 12), (18, 17), (12, 19), (6, 17), (2, 12)])
             oval((8, 8, 16, 16))

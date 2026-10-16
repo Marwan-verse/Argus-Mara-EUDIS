@@ -46,7 +46,7 @@ operator's computer.
 | | Spoofing signs: impossible jump, or two positions for one identity | 2 |
 | | Satellite-radar contact without matching AIS | 1 |
 | | Radar length differs more than 25% from the AIS length | 1 |
-| | Name, flag or MMSI changed in the last 12 months | 1 |
+| | Name, flag or MMSI changed in the last 12 months, or former names recorded by a sanctions or shadow-fleet list (the lists give no dates) | 1 |
 | | Static AIS data incomplete: destination or IMO missing | 1 |
 | **P · Proximity**, counts only when B + I is 2 or more | Inside the 1 nm corridor or a site's zone, or 30 min or less from an anchor-reachable section | 4 |
 | | Reaches the line within 2 h | 3 |
@@ -152,6 +152,62 @@ destination" (C3 +1, level None). At about T+03:30 it slows by the line and beco
 High (B1 +4, P2 +3, A1 +2, C3 +1 = 10). It runs after the Dublin stories and in the
 south, so it does not change their responders or timings.
 
+## Sanctions and shadow-fleet lists (rules C1, C2 and I5)
+
+`argus/detectors/watchlist.py` checks a received vessel against the newest kept copy of
+the OpenSanctions maritime list (`argus/watchlist_data.py`). That one keyless file merges
+the EU, UK, US, Canadian, Swiss and UN sanctions lists, the shadow-fleet list of Ukraine's
+military intelligence (GUR) and port-state-control detentions and bans: about 20,800
+vessels, 7,300 of them with an MMSI. It is free for non-commercial use with credit
+(CC BY-NC 4.0), and every finding names it. Decision D87.
+
+| Tier | Meaning | Points |
+|---|---|---|
+| Confirmed | On any sanctions list | C1 +2 |
+| Suspected | In GUR's shadow fleet but not sanctioned (122 ships on 15 Oct 2026). GUR often names a ship months before the EU or UK. | C1 +2 |
+| Noted | A port-state detention or ban, GUR's other marine vessels, or RUSI's North Korea reports | None: information for the vessel card |
+
+For a confirmed or suspected ship:
+
+- **C2 +1** when its MMSI's country code (the ITU MID table in `argus/itu_mids.json`) is
+  not a flag any list gives, GUR records five or more flags for it, GUR lists its current
+  flag as "unknown or false", or the MMSI looks made up (four zeros after the country
+  code, like the 610000036 the tanker Blue used under a false Benin flag).
+- **I5 +1** for the former names the lists record. They carry no dates, so the indicator
+  reads "former names recorded by the lists; dates not given" instead of "in 12 months".
+
+Matching uses the MMSI or the IMO number, **never the name**. GUR alone lists two
+different YANTAR, and the Russian intelligence ship Yantar (MMSI 273546520) is on no list.
+Rows are grouped by IMO, so a ship the EU lists without an MMSI is still found by the
+MMSI that GUR or a port inspection recorded. A name only picks between records that share
+one MMSI. When the AIS name is not among the listed names (GUR writes SKAUT where AIS says
+SCOUT), the finding says so and asks for an IMO check before acting, but keeps the points.
+
+Without points, as information only: AIS-SART, man-overboard and EPIRB-AIS numbers (MMSI
+starting 970, 972 or 974) read "possible distress beacon, check"; an MMSI whose country
+code ITU never allocated, a number that several listed ships share and a ship taken off the
+lists each get a note. Only vessels labelled real or reconstructed are compared with the
+lists, so the simulated board is unchanged. List cues are context: a listed tanker passing
+calmly stays Low (B0 I1 P0 A0 C3 = 4).
+
+Commands (the copies live in the git-ignored `data/watchlist/`):
+
+```
+python -m argus.watchlist_data update      # at most one check per UTC day; keeps a dated copy
+python -m argus.watchlist_data backfill    # optional: about one older version a week, for "since" dates
+python -m argus.watchlist_data scan-live   # every contact in the team's live AIS feed
+python -m argus.watchlist_data check 613414602
+```
+
+Without a network the newest copy is used; without any copy the detector stays silent. A
+history of list versions gives "on the list since ..." (the first kept version that holds
+the ship, "or earlier" when that is the oldest copy) and "was on the list until ...". When
+GUR named a ship before it was sanctioned, the finding says so.
+
+On 16 Oct 2026 the team's live feed (2,037 contacts since 8 Oct) held 13 sanctioned and 6
+suspected ships according to OpenSanctions, several of them west of Ireland near 12° W.
+From list cues alone each is Low or None.
+
 ## The alert panel
 
 | Part | Behaviour |
@@ -169,9 +225,10 @@ south, so it does not change their responders or timings.
 | Map | Markers are coloured by level; Critical ones pulse. High and Critical names carry a **SIM** label, the selected vessel shows its track and its line (marked "illustrative route"), and a **SIMULATED** badge sits in the corner. **Sim alerts** in the legend or Map layers hides them. |
 | Exercise | The fictional exercise alert is on the same list with the same rules. **Open replay** starts the existing countdown replay with its response options. |
 | Restart | The ↻ button restarts the simulation: countdowns and decisions reset. |
+| Decision log | The shield button opens the **signed decision log**: who decided what, on which alert and when, newest first. Every decision, responder sent or recalled and restart is a record signed with this computer's Ed25519 key that also holds the hash of the record before it. **Verify signatures** checks them all: a changed record turns red (CHANGED AFTER SIGNING), the next one amber (LINK BROKEN). The **seal** of the last record changes if records are removed from the end, so note it down. **Show the file** opens `data/desktop/decision-log.jsonl` for the tamper demo. `python -m argus.decision_log verify` checks the file from a terminal. |
 
-Decisions are recorded only for the current session on this computer. Nothing is sent
-to anyone, and a human decides every action.
+The review states belong to the current session. The signed decision log stays on this
+computer. Nothing is sent to anyone, and a human decides every action.
 
 ## The simulated board
 
@@ -211,6 +268,34 @@ Irish links (EWIC, Greenlink, the Celtic Interconnector, IC2, the Moyle intercon
 the Galway–Iceland link and others), not surveyed positions. Positions stay at the
 alert fix; only the two contacts with an ETA count down.
 
+## Brain detectors
+
+`argus.assemble.DETECTORS` runs every registered detector on a vessel's track and
+merges what they find into one set of observations for the rules above. Each finding
+says which detector found it, when, where, why and how strong the evidence is.
+
+| Detector | Looks for | Fills |
+|---|---|---|
+| `legacy_cable_v1` | The four-cue exercise rule from `argus/brain.py` | B1, I1, I3, I4, P, A |
+| `cable_risk` | Behaviour per line from the recent track: anchor drag, loitering, passes, slow in the corridor, anchoring, fishing, slowdown; ETA to the anchor-reachable section | B1–B7, B10, B11, P, A |
+| `ais_spoofing` | Impossible jumps, one identity in two places, speed that does not match the positions, fixes on land, an impossible return after a gap | I2 |
+| `stop_off_port` | Stopped at 0.5 kn or less for 30 min or more, over 3 nm from every port (`ui/assets/irish_ports.json`, `world_ports.json`) and rough anchorage; fishing vessels skipped | B12 |
+| `dark_vessel` | A satellite radar contact while the vessel's AIS was silent 10 min or more, inside its reachable circle (and within reach of the fix where AIS came back); also contacts no AIS vessel could have been | I1, I3, I4 |
+| `declared_vs_actual` | Reports "at anchor" or "moored" while moving 1 kn or more for 10 min; a declared destination (port name or UN/LOCODE) the course has led away from for an hour | B9, C3 |
+
+Only `cable_risk` and `legacy_cable_v1` name a line, so proximity and the line's
+class always come from them. `dark_vessel` is held from the fictional exercise
+(`HELD_FROM_SCENARIO`) until the team agrees to raise it earlier (D63).
+
+Three replay stories show the new detectors on the board's replay clock, scored from
+their tracks like SIM-50 to SIM-53:
+
+| ID | Vessel | Story | Level over time |
+|---|---|---|---|
+| SIM-57 | MOURNE SHADE | AIS silent from T+80 to T+125 on the approach to the Dublin–Holyhead cable; a simulated Sentinel-1 contact at T+110 fits its track | None → Medium at T+110 (I1, I3, worst-case ETA) → Critical at T+132 (AIS back, slow and yawing) |
+| SIM-58 | CALLOW BAY | Declares `IEDUB>GBLIV`, turns north-west, then reports "at anchor" while making 4 kn over the North Dublin cluster | C3 alone at T+145 (None) → Medium at T+164 → High at T+170 (B9) → Critical at T+173 |
+| SIM-59 | TUSKAR CALM | Stops for 2.5 h about 4 nm from both EWIC and the North Dublin cluster, away from any port or anchorage | Low at T+109 → Medium at T+135 (B12) |
+
 ## Limits
 
 - Thresholds and points are design choices for the demo. They need tuning with
@@ -222,6 +307,10 @@ alert fix; only the two contacts with an ETA count down.
   received live AIS. Small boats landing on a beach often carry no AIS at all.
 - The destination check needs a declared destination. The deployed Railway feed does not
   send Message 5 destinations yet, so real ships get no C3 until it is redeployed.
+- The list check matches live ships by MMSI only: the live stream carries no IMO or call
+  sign yet, and adding them needs a Railway redeploy and a Supabase migration. Only about
+  35% of listed ships have an MMSI in the lists, and a ship that takes a new MMSI is found
+  again only once a list records the new number.
 - No live AIS or radar detector feeds this board yet. Received live AIS on the map is
   separate and never scored.
 
@@ -232,14 +321,22 @@ alert fix; only the two contacts with an ETA count down.
 | `argus/levels.py` | Rules: points, caps, gates, overrides and bands |
 | `argus/sites.py` | Coastal sites, anchorages, and the stop and site-loiter detectors |
 | `argus/detectors/route_check.py` | Declared AIS destination against the recent track (rule C3) |
+| `argus/detectors/watchlist.py` | Sanctions and shadow-fleet lists, flag risk, former names and distress beacons (rules C1, C2, I5) |
+| `argus/watchlist_data.py` | OpenSanctions copies, version history, ITU MID helpers and the `scan-live` command |
+| `argus/itu_mids.json` | ITU MID table with ISO country codes |
 | `argus/alert_board.py` | The simulated board: scenarios, coastal-site contacts, minor alerts, tracks and the countdown update |
 | `desktop_alerts.py` | Docked panel, review window and map markers |
 | `desktop_gestures.py` | Two-finger scrolling on Tk 9 and pinch-to-zoom on macOS |
+| `argus/detectors/` | Brain detectors (`cable_risk`, `ais_spoofing`, `stop_off_port`, `dark_vessel`, `declared_vs_actual`) and the port, anchorage and destination lookup (`places.py`) |
+| `argus/brain_board.py` | The board scored through Brain, with the replay stories |
 | `tests/test_levels.py` | Rule cases, including every worked example above |
 | `tests/test_sites.py` | Stop and loiter detection, port and anchorage exclusions, and the new rule cues |
 | `tests/test_route_check.py` | Destination reading, heading-away cases, quiet cases and the SIM-55 story |
+| `tests/test_watchlist.py` | Matching on 38 real list rows, tiers, flag signs, beacons, the once-a-day fetch and offline use |
 | `tests/test_alert_board.py` | Labels, sorting, counts and the countdown raising a level |
 | `tests/test_desktop_alerts.py` | Panel, decisions, filters, map markers and hiding the panel |
 | `tests/test_desktop_gestures.py` | Trackpad scrolling of the queue and pinch zoom steps |
+| `tests/test_stop_off_port.py`, `tests/test_dark_vessel.py`, `tests/test_declared_vs_actual.py` | The three detectors, their thresholds and what they must not flag |
+| `tests/test_detector_stories.py` | SIM-57 to SIM-59 over time, and the innocent stories staying quiet |
 
 Run them with `python -m unittest discover -s tests`.

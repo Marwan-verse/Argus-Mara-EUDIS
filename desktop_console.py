@@ -22,6 +22,7 @@ def build(app):
     header = ctk.CTkFrame(shell, height=64, fg_color=ui.BG, corner_radius=0)
     header.pack(fill="x")
     header.pack_propagate(False)
+    app.header_bar = header  # status chips such as the geomagnetic one pack here
     brand = ctk.CTkFrame(header, fg_color="transparent")
     brand.pack(side="left", padx=20, pady=6)
     ctk.CTkLabel(brand, text="ARGUS MARA", image=app.tools.icons.get('brand', ui.PURPLE, 24),
@@ -105,6 +106,7 @@ def build(app):
         ("ports", "Port directory", lambda: app.open_window("ports")),
         ("radar", "Satellite analysis / historical AIS", lambda: app.open_window("satellite")),
         ("weather", "Weather", lambda: app.open_window("weather")),
+        ("magnet", "Magnetics / storms and seabed search", lambda: app.open_window("magnetics")),
         ("layers", "Display layers", lambda: app.open_window("layers")),
     ):
         button(left, icon, action, title)

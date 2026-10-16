@@ -59,6 +59,32 @@ def two_places_track():
 
 
 class CleanTrackTests(unittest.TestCase):
+    def test_unordered_duplicate_and_invalid_fixes_do_not_create_motion_events(self):
+        track = straight(40)
+        shuffled = list(reversed(track)) + [dict(track[10]), dict(track[10]),
+            {'t': float('nan'), 'lat': 53, 'lon': -6},
+            {'t': 3, 'lat': True, 'lon': -6}, {'t': 4, 'lat': 53, 'lon': float('nan')}, {}]
+        self.assertEqual(spoof.clean_track(shuffled, now=1200), track[:21])
+        self.assertEqual(spoof.detect(vessel(shuffled), {'now': 1200}), [])
+
+    def test_simultaneous_conflicting_positions_are_quality_cue_without_infinite_speed(self):
+        track = straight(10)
+        track.append(moved(track[5], 90, 10))
+        quality = {}
+        cleaned = spoof.clean_track(track, diagnostics=quality)
+        self.assertEqual(quality['conflicting_times'], [300])
+        self.assertEqual(len(cleaned), 9)
+        self.assertFalse(any(s['jump'] for s in spoof.steps_between(cleaned)))
+        finding = spoof.detect(vessel(track), {})[0]
+        self.assertEqual(finding['obs'], {})
+        self.assertIn('receipt time', finding['reasons'][0])
+
+    def test_duplicate_motion_disagreement_becomes_unknown_speed(self):
+        track = straight(2)
+        track += [{**track[0], 'sog_kn': 60, 'cog_deg': 270}]
+        self.assertIsNone(spoof.clean_track(track)[0]['sog_kn'])
+        self.assertIsNone(spoof.clean_track(track)[0]['cog_deg'])
+
     def test_clean_track_has_no_finding(self):
         self.assertEqual(spoof.detect(vessel(straight(200)), {}), [])
 

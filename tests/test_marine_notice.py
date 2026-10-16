@@ -127,7 +127,7 @@ class BoardTests(unittest.TestCase):
         self.assertEqual(why["notices"][0]["label"], "EXERCISE")
 
     def test_ship_in_the_real_notice_area_is_not_explained(self):
-        item = self.by_id["SIM-57"]
+        item = self.by_id["SIM-60"]
         rescore_story(item, 215 * 60)
         self.assertEqual(item["assessment"]["level"], "high")
         why = explain(item)["declared_work"]

@@ -23,7 +23,7 @@ class ComparisonTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.workspace, self.scene, _ = image_fixture(Path(self.temp.name)/'satellite')
+        self.workspace, self.scene, _ = image_fixture(Path(self.temp.name)/'satellite', feature=False)
         self.ais = {'acquired_utc': WHEN, 'vessels': [vessel()], 'coverage': {'status': 'partial'}}
         self.visual = {'image_input_verified': True, 'contacts': []}
 
@@ -63,6 +63,12 @@ class ComparisonTests(unittest.TestCase):
         self.ais['acquired_utc'] = '2026-10-14T12:00:00Z'
         self.assertIn('differs', self.compare()['not_checked'])
 
+    def test_unusable_image_is_abstention_and_cannot_supply_either_mismatch_lead(self):
+        self.visual.update(image_status='unusable', analysis_incomplete=True)
+        result = self.compare([{'id': 'AI-1', 'lat': 53.36, 'lon': -6.12}])
+        self.assertEqual(result['leads'], [])
+        self.assertEqual(result['contact_checks'][0]['status'], 'image_unusable')
+
     def test_nearby_or_ambiguous_contacts_never_create_false_absence(self):
         point = {'id': 'AI-1', 'lat': 53.33, 'lon': -6.12, 'matched_mmsi': None}
         result = self.compare([point])
@@ -74,6 +80,35 @@ class ComparisonTests(unittest.TestCase):
     def test_no_ais_does_not_create_dark_vessel_claim(self):
         self.ais['vessels'] = []
         self.assertEqual(self.compare([{'id': 'AI-1', 'lat': 53.33, 'lon': -6.12}])['leads'], [])
+
+    def test_temporal_uncertainty_withholds_both_mismatch_directions_without_widening_identity_gate(self):
+        from argus.space import timestamp
+        from argus.tracking import temporal_support
+        from argus.satellite_ais import associate
+        ship = self.ais['vessels'][0]
+        ship['track'] = [{'ts': '2026-10-13T11:55:00Z', 'lat': 53.33, 'lon': -6.12,
+                          'sog_kn': 0, 'cog_deg': 0}]
+        ship['position_evidence']['temporal_support'] = temporal_support(ship['track'], timestamp(WHEN), ship['position'])
+        point = {'id': 'AI-1', 'lat': 53.36, 'lon': -6.12}
+        contacts = associate([point], self.ais)
+        self.assertIsNone(contacts[0]['matched_mmsi'])
+        self.assertEqual(contacts[0]['candidates'][0]['assessment'], 'reachable_time_uncertain')
+        result = self.compare(contacts)
+        self.assertEqual(result['leads'], [])
+        self.assertEqual(result['vessel_checks'][0]['status'], 'ais_position_uncertain')
+        self.assertEqual(result['contact_checks'][0]['status'], 'ais_position_uncertain')
+
+    def test_excluded_ais_and_duplicate_ai_do_not_manufacture_dark_contacts(self):
+        point = {'id': 'AI-1', 'lat': 53.33, 'lon': -6.15}
+        self.ais['coverage']['excluded_vessels'] = [{'mmsi': '987654321', 'reason': 'conflicting_positions_at_same_time'}]
+        result = self.compare([point])
+        self.assertFalse(any(lead['kind'] == 'image_without_ais' for lead in result['leads']))
+        self.assertEqual(result['contact_checks'][0]['status'], 'ais_history_conflict')
+        self.ais['coverage'].pop('excluded_vessels')
+        point['overlap_ambiguous'] = True
+        result = self.compare([point])
+        self.assertFalse(any(lead['kind'] == 'image_without_ais' for lead in result['leads']))
+        self.assertEqual(result['contact_checks'][0]['status'], 'duplicate_or_overlapping_observation')
 
     def test_unsafe_motion_moored_missing_size_edges_and_synthetic_do_not_raise(self):
         cases = []

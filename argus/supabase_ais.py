@@ -23,7 +23,7 @@ from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-DEFAULT_URL = 'https://lcpgnzvkntqdhejrsgpa.supabase.co'
+DEFAULT_URL = 'https://zibmytppznydhlggzlaq.supabase.co'
 SERVICE, ACCOUNT = 'ArgusMara.Supabase', 'secret-key'
 LIMIT = 16 * 1024 * 1024
 KEY_FORMAT = re.compile(r'sb_secret_[A-Za-z0-9_-]{16,200}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+')
@@ -184,10 +184,24 @@ def historical_ais_from_database(acquired_utc, area, *, transport=http_rpc):
     rows = packet.get('rows') if isinstance(packet, dict) else None
     if not isinstance(rows, list):
         raise ValueError('Unexpected Supabase AIS response')
+    excluded = packet.get('excluded_vessels', [])
+    reasons = {'conflicting_positions_at_same_time', 'mixed_provenance', 'ambiguous_stream_epochs'}
+    if not isinstance(excluded, list) or any(
+            not isinstance(item, dict) or not isinstance(item.get('mmsi'), str) or
+            not re.fullmatch(r'[0-9]{9}', item['mmsi']) or
+            item.get('reason') not in reasons for item in excluded):
+        raise ValueError('Invalid Supabase AIS source-quality evidence')
     positions = sum(1 for row in rows if isinstance(row, dict) and row.get('msg_type') == 'PositionReport')
     with tempfile.TemporaryDirectory(prefix='argus-supabase-ais-') as folder:
         write_rows_csv(rows, Path(folder)/'supabase_ais.csv')
         result = historical_ais(folder, acquired_utc, area)
+    blocked = {item['mmsi'] for item in excluded}
+    result['vessels'] = [v for v in result['vessels'] if v['mmsi'] not in blocked]
+    combined = result['coverage'].get('excluded_vessels', []) + excluded
+    result['coverage'].update(excluded_vessels=[dict(mmsi=m, reason=r) for m, r in
+                              sorted({(item['mmsi'], item['reason']) for item in combined})],
+                              eligible_vessels=len(result['vessels']),
+                              status='partial' if result['vessels'] else 'unavailable')
     result['source'] = 'supabase'
     result['coverage'].update(source='Team Supabase database (Railway AIS feed copied every 30 s)',
                               database_position_rows=positions)
@@ -211,13 +225,16 @@ def scene_payload(scene, contacts, observed_areas=(), source='argus-coast-watch'
             continue
         items.append({'external_id': str(point.get('id') or index)[:120], 'lat': lat, 'lon': lon,
                       'overlap_ambiguous': point.get('overlap_ambiguous') is True,
-                      'source': 'tensorx_ai', 'label': 'assumption', 'confidence': confidence(point.get('confidence')),
+                      'source': point.get('source') if point.get('source') in {'compact_optical_feature', 'tensorx_ai_pixel_supported'} else 'tensorx_ai',
+                      'localization': point.get('localization') or {},
+                      'label': 'assumption', 'confidence': confidence(point.get('confidence')),
                       'note': str(point.get('description') or '')[:300] or None})
     return {'id': scene['id'], 'sensor': sensor, 'acquired_utc': scene['acquired_utc'],
             'bbox': [float(v) for v in scene['bbox']], 'source': source,
             'label': 'real' if real else 'simulated', 'contacts': items,
             'review_evidence': {'version': 'image-ais-review-v2',
                                 'image_input_verified': bool(analysis and analysis.get('image_input_verified') is True),
+                                'image_status': (analysis or {}).get('image_status', 'limited'),
                                 'clear_footprint_radius_m': 100},
             'observed_areas': [[float(v) for v in area] for area in observed_areas]}
 

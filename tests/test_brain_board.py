@@ -19,7 +19,7 @@ class BrainBoardTests(unittest.TestCase):
 
     def test_large_vessels_keep_their_levels(self):
         original = {item["id"]: item["assessment"] for item in original_board(self.scenario, self.alerts)}
-        self.assertEqual(len(self.items), len(original) + 17)
+        self.assertEqual(len(self.items), len(original) + 20)
         for identifier, assessment in original.items():
             item = self.by_id[identifier]
             if not item["relevance"]["small"] and identifier != "A1":  # A1 also runs the track detectors

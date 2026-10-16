@@ -25,6 +25,8 @@ once for optional image readers. **One click:** `SATELLITE-WATCH-MAC.command` or
 database keys and opens the app with Coast Watch running on images from the last 36 h
 (D83). See [setup and open-source accuracy plan](docs/16-satellite-ai.md).
 
+**Real alerts (D95):** with the team database linked, `python -m argus.live_alerts` runs the alert rules on real ships near the cable routes (last 3 h of AIS, harbour craft left out) and prints rule outcomes for review, labelled real. The read-only database function comes from migration `20261016134500_argus_recent_tracks.sql`. See [real alerts](docs/21-real-alerts.md).
+
 **Team database (optional):** the Supabase project `argus-mara` copies the shared
 Railway AIS feed every 30 seconds by itself, so Coast Watch can compare any image
 with AIS at its acquisition time even when no laptop was recording, both ways:
@@ -39,6 +41,16 @@ once with `python scripts/configure_gfw.py`, then press **Coast Watch → Fetch 
 at the radar time. *Radar contact without AIS* leads are violet on the map and listed in
 Incidents. Detections arrive 4–5 days late. Powered by Global Fishing Watch. See
 [how it works and what was checked](docs/19-gfw-radar.md).
+
+**Magnetics (optional, D91):** the magnet button on the left rail opens two real uses of
+magnetics; neither watches the sea, because a ship's field fades as 1/r³ (a seabed sensor
+sees a 200 m ship only within about 0.5–1 km). *Live magnetic data*, off by default, polls
+NOAA SWPC Kp and the Valentia observatory and shows a storm tier in the header: context
+for electrical cable alarms that never changes an alert. *Plan search* turns the exercise
+vessel's or the selected alert's track (slowdown → cable crossing → speed recovery) into a
+magnetometer search corridor with lines, line-km and hours per platform, ranked search
+points and a GeoJSON export to `data/magnetics/`; every number is a labelled assumption.
+`python -m argus.geomag` prints the live status; `python -m argus.survey_plan` the worked example.
 
 > *"Ireland can crew two ships. Argus Mara gives them a hundred eyes."*
 
@@ -219,6 +231,13 @@ Details and links: [plan §4.5](docs/04-work-plan.md).
 - [x] `argus/brain.py`: read `scenario.json` → write `alerts.json` from four review cues;
       countdown v1 and response options are in `argus/countdown.py`.
       *Owners:* **Nazar K., Myroslav**
+- [x] Brain detectors for a vessel stopped away from ports, a dark vessel seen by satellite radar
+      while its AIS is silent, and a declared status or destination that contradicts the track, with
+      replay stories SIM-54 to SIM-56. [What they find](docs/12-argus-mara-alert-levels.md#brain-detectors).
+      *Owner:* **Myroslav**
+- [ ] Agree whether `dark_vessel` may also score the fictional exercise: it would open the exercise
+      incident at Medium at T+40, when the radar sees the tanker in its AIS gap (D63).
+      *Owners:* **Nazar K., Myroslav, Mykhailo**
 - [x] `ui/index.html`: offline map, cable line, vessel replay, approval and evidence export.
       *Owners:* **Adam, Marwan**
 - [x] Four-minute [demo runbook](docs/demo-runbook.md) and [one-pager](docs/one-pager.md) drafted; live rehearsal and recording still required. *Owner:* **Mykhailo**
@@ -281,6 +300,7 @@ the answer is "after the hackathon". ([plan §4.6](docs/04-work-plan.md))
 | [docs/09-team-skills.md](docs/09-team-skills.md) | How teammates download the repository skills |
 | [docs/10-space-dataset-plan.md](docs/10-space-dataset-plan.md) | Space dataset comparison, implementation sequence and handoffs to Data, Brain and Interface |
 | [docs/12-argus-mara-alert-levels.md](docs/12-argus-mara-alert-levels.md) | How alert levels are scored and how the docked alert panel works |
+| [docs/14-aircraft-and-magnetic-sensing.md](docs/14-aircraft-and-magnetic-sensing.md) | Research (15 Oct): public aircraft (ADS-B) data, tasked aircraft and magnetic sensing between satellite looks, with fleet corrections and a build plan |
 | [docs/demo-runbook.md](docs/demo-runbook.md) | Four-minute click and talk script, offline acceptance and fallback steps |
 | [docs/one-pager.md](docs/one-pager.md) | Current demonstrated capability and explicit validation limits |
 | [docs/ui-skills-survey.md](docs/ui-skills-survey.md) | UI skills and tools ranked for this static offline console |
@@ -469,7 +489,8 @@ sort to time to the asset or newest. Click a row or a map marker to open its rev
 window: the score scale, the indicators behind the level, the time to the asset, the
 recommended action and the log. **Acknowledge**, **Escalate** (duty officer, line
 operator, Irish Coast Guard (MRCC) or Naval Service operations) and **Reject** (with a
-reason) are recorded for the session only; nothing is sent. Countdowns run live, so
+reason) are recorded in a signed decision log on this computer (the shield button: change
+one letter in the file and Verify signatures names the record); nothing is sent. Countdowns run live, so
 GREY HERON rises from High to Critical after about 3.5 minutes; ↻ restarts the
 simulation. Map markers use the level colours, carry **SIM** labels and sit under a
 **SIMULATED** corner badge; **Sim alerts** in the legend hides them. On a trackpad,
@@ -477,3 +498,16 @@ two fingers scroll the queue, and on macOS a pinch zooms the map. Pinching needs
 optional PyObjC package in `requirements-mac.txt`; `UPDATE-AND-RUN-MAC.command`
 installs it on its next run. Full rules:
 [Argus Mara alert levels](docs/12-argus-mara-alert-levels.md).
+
+### Sanctions and shadow-fleet list check (real data)
+
+`python -m argus.watchlist_data update` keeps a daily copy of the OpenSanctions
+maritime list (EU, UK, US, Canadian, Swiss and UN sanctions, Ukraine GUR's shadow fleet
+and port-state detentions; CC BY-NC 4.0) in the git-ignored `data/watchlist/`, checking at
+most once a day. The `watchlist` detector then gives a real ship rule C1 (+2) when its MMSI
+or IMO is on a sanctions list or in GUR's shadow fleet, C2 (+1) for flag-risk signs from
+the bundled ITU MID table, and I5 (+1) for former names. It never matches by name.
+Port-state records, distress beacons (MMSI 970/972/974) and unallocated country codes are
+information only. `python -m argus.watchlist_data scan-live` checks every contact in the
+team's live feed; on 16 Oct it found 13 sanctioned and 6 suspected ships since 8 Oct.
+Details: [lists in the alert rules](docs/12-argus-mara-alert-levels.md#sanctions-and-shadow-fleet-lists-rules-c1-c2-and-i5) (D87).

@@ -36,7 +36,7 @@ from pathlib import Path
 from argus.alert_board import exercise_item
 from argus.brain import detect_vessel
 from argus.contracts import validate_scenario
-from argus.detectors import ais_spoofing, cable_risk, marine_notice, route_check
+from argus.detectors import ais_spoofing, cable_risk, route_check, watchlist, dark_vessel, declared_vs_actual, stop_off_port, marine_notice
 from argus.levels import CRITICAL_ASSETS, LEVEL_NAMES, RANK, RULES_VERSION, assess
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -164,6 +164,10 @@ def clean_vessel(vessel: dict) -> tuple[dict, dict]:
             else:
                 track.append(fix)
     result = {**vessel, "track": track}
+    # Keep normalized receipt-time collisions available to the source-quality
+    # detector; the generic cleanup must not hide contradictory observations.
+    if repeats:
+        result["_source_track"] = fixes
     for key in ("ship_type", "ais_length_m"):
         if key not in vessel:
             continue
@@ -244,8 +248,16 @@ DETECTORS = [
     ais_spoofing.detect,
     cable_risk.detect,
     route_check.detect,
+    watchlist.detect,
+    stop_off_port.detect,
+    dark_vessel.detect,
+    declared_vs_actual.detect,
     marine_notice.detect,
 ]
+# Registered detectors not run on scenario files (the fictional exercise) until the team agrees: dark_vessel
+# would raise the exercise to Medium at T+40, when the radar sees it in its AIS gap, instead of at the agreed
+# T+90 alert (decision D63). Empty the tuple to run it there too; stories and other contacts always run it.
+HELD_FROM_SCENARIO = ("dark_vessel",)
 
 
 def _asset_weight(asset_class: str) -> int:
@@ -383,6 +395,12 @@ def apply_relevance(assessment: dict, rel: dict) -> dict:
     return result
 
 
+def registered(context: dict) -> list:
+    """The registered detectors this context runs: all of them, less any it holds (``context["held"]``)."""
+    held = context.get("held", ())
+    return [detector for detector in DETECTORS if detector.__name__ not in held]
+
+
 _logged_failures: set[tuple[str, str]] = set()
 
 
@@ -447,8 +465,10 @@ def assess_vessel(vessel: dict, context: dict, detectors: list | None = None) ->
     vessel, quality = clean_vessel(vessel)
     findings: list[dict] = []
     errors: list[dict] = []
-    for detector in DETECTORS if detectors is None else detectors:
-        findings.extend(_run_guarded(detector, vessel, context, errors))
+    for detector in registered(context) if detectors is None else detectors:
+        detector_vessel = ({**vessel, "track": vessel["_source_track"]}
+                          if detector is ais_spoofing.detect and "_source_track" in vessel else vessel)
+        findings.extend(_run_guarded(detector, detector_vessel, context, errors))
     observations = merge_observations(findings)
     work = declared_work(findings, observations)
     if work["applied"]:
@@ -462,20 +482,23 @@ def assess_vessel(vessel: dict, context: dict, detectors: list | None = None) ->
 def context_from_scenario(scenario: dict, now: int | None = None) -> dict:
     return {"now": now, "cables": scenario.get("cables", []), "ports": scenario.get("ports", []),
             "anchorages": scenario.get("anchorages", []), "detections": scenario.get("detections", []),
-            "weather": scenario.get("weather"), "assets": scenario.get("assets", [])}
+            "weather": scenario.get("weather"), "assets": scenario.get("assets", []), "held": HELD_FROM_SCENARIO}
 
 
 def build_assessments(scenario: dict, now: int | None = None) -> dict:
+    """Assess every vessel, and every radar contact that no AIS vessel can explain (``dark_vessel``)."""
     validate_scenario(scenario)
     context = context_from_scenario(scenario, now)
+    contacts = ([] if dark_vessel.DETECTOR in context["held"]
+                else dark_vessel.radar_only_vessels(scenario["vessels"], context["detections"], now))
     vessels = []
-    for vessel in scenario["vessels"]:
+    for vessel in scenario["vessels"] + contacts:
         result = assess_vessel(vessel, context)
         vessels.append({"mmsi": vessel["mmsi"], "name": vessel.get("name"),
                         "label": vessel.get("label", "simulated"), **result})
-    vessels.sort(key=lambda item: (-item["assessment"]["rank"], item["mmsi"]))
+    vessels.sort(key=lambda item: (-item["assessment"]["rank"], str(item["mmsi"])))  # radar-only IDs are text
     return {"generated_by": f"argus.assemble ({RULES_VERSION})", "scenario": scenario.get("name", "Scenario"),
-            "now": now, "detectors": [detector.__name__ for detector in DETECTORS],
+            "now": now, "detectors": [detector.__name__ for detector in registered(context)],
             "note": "Levels are rule outcomes for human review, not probabilities of hostile intent.",
             "vessels": vessels}
 

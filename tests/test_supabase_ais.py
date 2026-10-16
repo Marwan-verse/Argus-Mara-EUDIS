@@ -70,6 +70,22 @@ class KeyAndTransportTests(unittest.TestCase):
 
 
 class DatabaseJoinTests(unittest.TestCase):
+    def test_database_source_conflicts_exclude_identity_and_remain_visible(self):
+        packet = database_rows()
+        packet['excluded_vessels'] = [{'mmsi': '123456789', 'reason': 'conflicting_positions_at_same_time'}]
+        with patch.dict(os.environ, {**NO_KEY, 'ARGUS_SUPABASE_KEY': SECRET}):
+            result = supabase_ais.historical_ais_from_database(WHEN, AREA, transport=FakeDatabase(packet))
+        self.assertEqual(result['vessels'], [])
+        self.assertEqual(result['coverage']['excluded_vessels'], packet['excluded_vessels'])
+        self.assertEqual(result['coverage']['status'], 'unavailable')
+        self.assertEqual(result['coverage']['database_position_rows'], 2)
+        for invalid in ([{'mmsi': 123456789, 'reason': 'ambiguous_stream_epochs'}],
+                        [{'mmsi': '123456789', 'reason': 'unknown'}], 'unavailable'):
+            packet['excluded_vessels'] = invalid
+            with patch.dict(os.environ, {**NO_KEY, 'ARGUS_SUPABASE_KEY': SECRET}):
+                with self.assertRaisesRegex(ValueError, 'source-quality'):
+                    supabase_ais.historical_ais_from_database(WHEN, AREA, transport=FakeDatabase(packet))
+
     def test_database_rows_feed_the_same_acquisition_time_join(self):
         fake = FakeDatabase(database_rows())
         with patch.dict(os.environ, {**NO_KEY, 'ARGUS_SUPABASE_KEY': SECRET}):

@@ -119,6 +119,14 @@ class CorruptedTrackTests(unittest.TestCase):
         self.check(track, reordered=2)  # 240 -> 180 -> 120: time went backwards twice
         self.check(list(reversed(straight(6))), reordered=5)
 
+    def test_cleanup_preserves_conflicting_receipts_for_source_quality_review(self):
+        track = straight(5)
+        track.insert(3, {**track[2], "lon": -5.40})
+        result = assess_vessel(vessel(track), {}, [assemble.ais_spoofing.detect])
+        self.assertEqual(len(result['findings']), 1)
+        self.assertEqual(result['findings'][0]['related']['track_quality']['conflicting_times'], [120])
+        self.assertFalse(result['observations'].get('spoof_signs', False))
+
     def test_missing_values(self):
         for key in ("sog_kn", "cog_deg"):
             track = straight(10)
@@ -221,8 +229,8 @@ class FailingDetectorTests(unittest.TestCase):
 
         expected = assess_vessel(EXERCISE, CONTEXT)
         with self.assertLogs("argus.assemble", "WARNING") as logs:
-            result = assess_vessel(EXERCISE, CONTEXT, [bomb, *DETECTORS])
-            again = assess_vessel(EXERCISE, CONTEXT, [*DETECTORS, bomb])
+            result = assess_vessel(EXERCISE, CONTEXT, [bomb, *assemble.registered(CONTEXT)])
+            again = assess_vessel(EXERCISE, CONTEXT, [*assemble.registered(CONTEXT), bomb])
         self.assertEqual(len(logs.output), 1)  # one line per (detector, error type), not per vessel
         self.assertIn("bomb", logs.output[0])
         for outcome in (result, again):

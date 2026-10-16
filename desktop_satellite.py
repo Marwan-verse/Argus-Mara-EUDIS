@@ -567,8 +567,13 @@ class DesktopSatellite:
         self.selected_contact, self.selected_candidate = point, None
         self.latest_button.configure(state='disabled')
         scene = self.current['scene']
-        self.contact_title.configure(text=f"{point['id']} · {point['confidence'].upper()} confidence · AI ASSUMPTION\n"
-             f"{scene['sensor']} · {scene['acquired_utc']}\n{point['description']}")
+        quality = point.get('localization') or {}
+        origin = 'OPTICAL FEATURE · UNCLASSIFIED' if quality.get('status') == 'feature_only' else 'AI ASSUMPTION'
+        location_note = (f"\nPixel support: {quality['status'].replace('_', ' ')} · "
+                         f"{'verified water mask' if quality.get('water_mask_verified') else 'water quality unavailable'}"
+                         if quality else '')
+        self.contact_title.configure(text=f"{point['id']} · {point['confidence'].upper()} confidence · {origin}\n"
+             f"{scene['sensor']} · {scene['acquired_utc']}\n{point['description']}"+location_note)
         if self.image is not None:
             x, y = point['x']*self.image.width, point['y']*self.image.height
             left, top = max(0, min(self.image.width-120, x-60)), max(0, min(self.image.height-72, y-36))
@@ -607,20 +612,26 @@ class DesktopSatellite:
         evidence, latest = candidate['position_evidence'], candidate.get('latest')
         self.latest_button.configure(state='normal' if latest else 'disabled')
         self.candidate_info.set(f"{candidate['name']} · {candidate['mmsi']}\n"
-              f"Image-time error {candidate['distance_m']:.0f} m · fix offset {candidate.get('nearest_fix_offset_s')} s\n"
+              f"Separation from estimated AIS {candidate['distance_m']:.0f} m · fix offset {candidate.get('nearest_fix_offset_s')} s\n"
               f"{'Motion inconsistent · review required' if not candidate.get('motion_consistent', True) else 'Outside 300 m gate · alternative only' if not candidate['within_gate'] else 'AMBIGUOUS · several candidates' if self.selected_contact.get('ambiguous') else 'Provisional · identity unconfirmed'}\n"
               + (f"Latest {'STALE' if latest['stale'] else 'received'}: {latest['received_utc']}\n"
                  f"{latest['lat']:.5f}, {latest['lon']:.5f}\nDestination: {latest.get('destination') or 'Unavailable'}"
                  if latest else 'No latest received position is available.'))
         lines = [f"POSSIBLE IDENTITY · {candidate['name']} · {candidate['mmsi']}",
              f"Image UTC {self.current['scene']['acquired_utc']}",
-             f"Image-time spatial error: {candidate['distance_m']:.0f} m · 300 m gate {'passed' if candidate['within_gate'] else 'failed'}",
+             f"Separation from estimated AIS: {candidate['distance_m']:.0f} m · 300 m gate {'passed' if candidate['within_gate'] else 'failed'}",
              f"Nearest AIS fix: {candidate.get('nearest_fix_offset_s')} seconds from acquisition",
              f"Position method: {evidence['position_method'].replace('_', ' ')}",
              f"Interpolation bracket: {evidence.get('bracket_s', 'N/A')} s · projected fix age: {evidence.get('age_s', 'N/A')} s",
              f"Motion check: {evidence.get('kinematic_consistency', 'unavailable').replace('_', ' ')} · implied {evidence.get('implied_segment_speed_kn')} kn · 80 kn assumption",
              f"{'RECEPTION-TIME ASSUMPTION: observation time is not verified.' if evidence.get('observation_time_assumed') else 'Provider-reported AIS timestamp.'}",
-             f"{'AMBIGUOUS: several ships pass the gate.' if self.selected_contact.get('ambiguous') else 'Provisional association; identity is not confirmed.'}", '']
+             f"{'AMBIGUOUS: several spatial or temporally reachable candidates.' if self.selected_contact.get('ambiguous') else 'Provisional association; identity is not confirmed.'}", '']
+        support = evidence.get('temporal_support')
+        if support:
+            lines += [f"Temporal movement support: up to {support['center_radius_m']:.0f} m around the estimate",
+                      support['caveat'],
+                      'Inside endpoint reachability; no identity match inferred.' if candidate.get('within_temporal_support') and not candidate['within_gate']
+                      else 'Endpoint reachability does not confirm identity.', '']
         if latest:
             lines += [f"LATEST RECEIVED AIS · {'STALE' if latest['stale'] else 'recent reception'}", latest['received_utc'],
                       f"{latest['lat']:.6f}, {latest['lon']:.6f} · {latest['age_s']} seconds old",
@@ -1134,7 +1145,8 @@ class DesktopSatellite:
                 tag = 'satellite-contact-'+point['id']
                 canvas.create_rectangle(x-8, y-8, x+8, y+8, outline='#e1b164', width=2, dash=(3, 2), tags=tag)
                 canvas.create_text(x+11, y-8, anchor='nw', fill='#e1b164',
-                                   text=point['id']+' · '+point['confidence']+' confidence · AI assumption', font=('Segoe UI', 9), tags=tag)
+                                   text=point['id']+' · '+point['confidence']+' confidence · '+
+                                   ('unclassified optical feature' if point['id'].startswith('OPT-') else 'AI assumption'), font=('Segoe UI', 9), tags=tag)
                 canvas.tag_bind(tag, '<Button-1>', lambda event, p=point: self.show_contact(p))
         self.draw_coastal_contacts()
 
@@ -1153,7 +1165,8 @@ class DesktopSatellite:
             tag = f'coastal-contact-{index}'
             canvas.create_polygon(x, y-7, x+7, y, x, y+7, x-7, y, fill='#73532b', outline='#e1b164', width=2, tags=tag)
             if self.app.map_zoom >= 9:
-                canvas.create_text(x+10, y-8, anchor='nw', text='AI lead · '+point['ts'][5:16].replace('T', ' '), fill='#e1b164', font=('Segoe UI', 9), tags=tag)
+                origin = 'Unclassified feature' if point['id'].startswith('OPT-') else 'AI observation'
+                canvas.create_text(x+10, y-8, anchor='nw', text=origin+' · '+point['ts'][5:16].replace('T', ' '), fill='#e1b164', font=('Segoe UI', 9), tags=tag)
             canvas.tag_bind(tag, '<Button-1>', lambda event, p=point: self.open_map_contact(p))
         candidate = self.selected_candidate
         latest = (candidate or {}).get('latest')

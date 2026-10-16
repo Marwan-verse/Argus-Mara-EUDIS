@@ -29,12 +29,19 @@ cleaned track; Brain reads the track as received.
 A fifth declares Fishguard as its AIS destination, then turns away from it
 towards Greenlink and slows by the line (SIM-55, after the Dublin stories), so
 ``route_check`` adds rule C3.
+Three more show the ``dark_vessel``, ``declared_vs_actual`` and
+``stop_off_port`` detectors: a ship whose AIS goes silent on the approach to a
+cable while a simulated satellite radar pass sees it (SIM-57), a ship that
+declares Liverpool but turns towards the North Dublin cluster and reports "at
+anchor" while still moving (SIM-58), and a ship stopped at sea between two
+lines, away from any port or anchorage (SIM-59). A story's declared
+destination and radar contacts are in ``STORY_EXTRAS``.
 
 Two more show the Marine Notice rule (``argus.detectors.marine_notice``). A
 survey vessel runs slow lines along EWIC and is named in a fictional exercise
 notice, so Brain caps it at Low (SIM-56). A ship circles inside the work area of
 the real Marine Notice 49/2026 off Rush, which names other vessels, so nothing
-is explained and its level stands (SIM-57).
+is explained and its level stands (SIM-60).
 
 ``update`` is a pure function of the board time, so a replay can move the
 board forwards or backwards; ``rescore_exercise`` re-scores the exercise
@@ -241,6 +248,39 @@ def _wrong_way_story() -> list[dict]:
     with them at T+04:00, far from their responders."""
     return _timed_track(140 * 60, (52.15, -5.95), [(20, 12.0, 95, None), (45, 11.0, 230, None),
                                                    (35, 5.0, _yaw(210), None)])
+DARK_GAP_S = (80 * 60, 125 * 60)  # SIM-57's AIS is silent from minute 80 until minute 125
+DARK_PASS_S = 110 * 60  # a simulated satellite radar pass sees it at minute 110
+
+
+def _dark_truth() -> list[dict]:
+    """Where SIM-57 really is: north at 12 kn towards the Dublin–Holyhead route, then 6 kn and yawing across it."""
+    start = (_on_line("dublin-holyhead", -5.55) - 15 / 60, -5.55)
+    return _timed_track(60 * 60, start, [(55, 12.0, 0, None), (10, 6.0, 0, None), (35, 6.0, _yaw(0), None),
+                                         (20, 3.0, _yaw(0), None), (40, 12.0, 45, None)])
+
+
+def _dark_story() -> list[dict]:
+    """SIM-57's AIS: its true track with no fixes during the gap. The gap is not filled in."""
+    return [fix for fix in _dark_truth() if not DARK_GAP_S[0] <= fix["t"] < DARK_GAP_S[1]]
+
+
+def _dark_contacts() -> list[dict]:
+    """One simulated radar contact at SIM-57's true position during its AIS gap; Space has matched no AIS to it."""
+    fix = next(fix for fix in _dark_truth() if fix["t"] == DARK_PASS_S)
+    return [{"t": DARK_PASS_S, "lat": fix["lat"], "lon": fix["lon"], "length_m": 196, "source": "sentinel1",
+             "scene_id": "S1A_IW_GRDH_SIMULATED_SIM54", "matched_mmsi": None, "label": "simulated"}]
+
+
+def _declaration_story() -> list[dict]:
+    """Towards Liverpool at 12 kn, then north-west for an hour, then 'at anchor' while still making 4 kn over the lines."""
+    return _timed_track(70 * 60, (53.25, -5.60), [(30, 12.0, 75, None), (60, 12.0, 320, None),
+                                                  (45, 4.0, 320, "at anchor"), (30, 0.3, 320, "at anchor")])
+
+
+def _stop_story() -> list[dict]:
+    """North-east at 11 kn, then stopped for 2.5 h between EWIC and the North Dublin cluster, about 4 nm from each."""
+    spot = (53.50, -4.80)
+    return _timed_track(65 * 60, step(*spot, 225, 11.0 * 40 / 60), [(40, 11.0, 45, None), (150, 0.2, 45, None)])
 
 
 def _survey_story() -> list[dict]:
@@ -293,11 +333,25 @@ STORY_ITEMS = [
       "Declares Fishguard but turned away from it towards Greenlink and slowed by the line",
       "Ask the master on VHF 16 to confirm the destination and intentions; watch the Greenlink corridor.",
       {}), "A", _wrong_way_story),
+    (("SIM-57", "MOURNE SHADE", "General cargo", 190, "dublin-holyhead", 0, 0, 0, 0, 0, "line",
+      "AIS went silent on the approach to the Dublin–Holyhead cable; a satellite radar contact fits its track",
+      "Compare the radar length with the declared one, hail on VHF 16 when AIS returns and send the nearest "
+      "drone for eyes on.",
+      {}), "A", _dark_story),
+    (("SIM-58", "CALLOW BAY", "General cargo", 140, "north-dublin", 0, 0, 0, 0, 0, "line",
+      "Declared Dublin to Liverpool but turned north-west, then reports 'at anchor' while moving over the cables",
+      "Ask the master to confirm the destination and anchor status; request a satellite or drone look before "
+      "the North Dublin cluster.",
+      {}), "A", _declaration_story),
+    (("SIM-59", "TUSKAR CALM", "Bulk carrier", 180, "ewic", 0, 0, 0, 0, 0, "line",
+      "Stopped at sea between EWIC and the North Dublin cluster, away from any port or anchorage",
+      "Hail on VHF 16 to ask why the ship is stopped; offer assistance if it reports engine trouble.",
+      {}), "A", _stop_story),
     (("SIM-56", "GANNET SOUNDER", "Survey vessel", 72, "ewic", 0, 0, 0, 0, 0, "line",
       "Survey lines along EWIC at 3.5 kn, named in the exercise Marine Notice",
       "Declared work: confirm on VHF 16 that the ship is the notified survey vessel; no other action.",
       {}), "A", _survey_story),
-    (("SIM-57", "ROCKABILL TERN", "General cargo", 110, "ewic", 0, 0, 0, 0, 0, "line",
+    (("SIM-60", "ROCKABILL TERN", "General cargo", 110, "ewic", 0, 0, 0, 0, 0, "line",
       "Circling off Rush inside the Marine Notice 49/2026 work area, but not a notified vessel",
       "Not explained by the notice: hail on VHF 16 and ask why the ship is holding over EWIC.",
       {}), "A", _notice_area_story),
@@ -306,10 +360,16 @@ STORY_ITEMS = [
       "Normal transit; Brain ignored the faulty fixes and lists them in the review. Check the AIS receiver.",
       {}), "A", _dirty_feed_story),
 ]
-# Fictional AIS destinations the stories declare (Message 5 text); route_check compares them with the track.
+# What a story's vessel declares and what a satellite sees, beyond its AIS track (fictional and simulated);
+# builders, like the tracks, called once by build_board.
+STORY_EXTRAS = {
+    "SIM-57": {"detections": _dark_contacts},
+    "SIM-58": {"destination": lambda: "IEDUB>GBLIV"},
+}
+
 STORY_DESTINATIONS = {"SIM-55": "GBFIS"}
 # Fictional AIS call signs (Message 5) that the Marine Notice check reads.
-STORY_CALL_SIGNS = {"SIM-56": "EXSIM56", "SIM-57": "EXSIM57"}
+STORY_CALL_SIGNS = {"SIM-56": "EXSIM56", "SIM-60": "EXSIM57"}
 STORY_TRAIL_S = 3 * 3600  # the map trail shows the window the detectors read
 
 # Board-only detectors whose reasons are already the item's title; other detectors' reasons become notes.
@@ -393,14 +453,15 @@ def story_vessel(item: dict, now: float | None = None) -> dict:
     received = item["story"].get("received", item["story"]["track"])
     if now is not None:
         received = [fix for fix in received if _received_by(fix, now)]
-    return {**_vessel(item, item.get("ais_class", "A")), "track": received}
+    return {**_vessel(item, item.get("ais_class", "A")), "track": received,
+            "destination": item["story"].get("destination", item.get("destination"))}
 
 
 def rescore_story(item: dict, now: float) -> None:
     """Score a story on its track up to replay time ``now`` with the registered detectors; move it on the map."""
     track = item["story"]["track"]
     _rescore(item, assess_vessel(story_vessel(item, now), {"now": int(now), "cables": STORY_LINES,
-                                                           "notices": EXERCISE_NOTICES}))
+                     "notices": EXERCISE_NOTICES, "detections": item["story"].get("detections", [])}))
     seen = [fix for fix in track if fix["t"] <= now]
     if seen:
         last = seen[-1]
@@ -408,8 +469,9 @@ def rescore_story(item: dict, now: float) -> None:
                     track=[(fix["lat"], fix["lon"]) for fix in seen if fix["t"] >= now - STORY_TRAIL_S][:-1])
     if item.get("cable_id") in LINES:
         item["line_id"], item["line_name"] = item["cable_id"], LINES[item["cable_id"]][0]
-    # The story's title only once Brain sees behaviour; before that the card says what it does see.
-    if item["assessment"]["groups"]["B"]:
+    # The story's title only once Brain sees behaviour or an identity cue (such as a dark radar contact);
+    # before that the card says what it does see.
+    if item["assessment"]["groups"]["B"] or item["assessment"]["groups"]["I"]:
         item["title"] = item["story"]["title"]
     else:
         distance = item["observations"].get("distance_nm")
@@ -423,7 +485,7 @@ def rescore_story(item: dict, now: float) -> None:
 
 
 def build_board(scenario: dict | None = None, alerts: list | None = None) -> list[dict]:
-    """Same items as ``alert_board.build_board`` plus seventeen extras, scored through ``argus.assemble``.
+    """Same items as ``alert_board.build_board`` plus twenty extras, scored through ``argus.assemble``.
 
     Story items are scored at the end of their track here; a replay scores them at its own time.
     """
@@ -446,9 +508,10 @@ def build_board(scenario: dict | None = None, alerts: list | None = None) -> lis
     for row, ais_class, make_track in STORY_ITEMS:
         received = make_track()
         track = clean_vessel({"track": received})[0]["track"]  # what the map and card show
+        extras = {key: make() for key, make in STORY_EXTRAS.get(row[0], {}).items()}
         items.append({**_item(*row), "ais_class": ais_class, "source": "track",
                       "destination": STORY_DESTINATIONS.get(row[0]), "call_sign": STORY_CALL_SIGNS.get(row[0]),
-                      "story": {"track": track, "received": received, "start_s": track[0]["t"], "title": row[11]}})
+                      "story": {"track": track, "received": received, "start_s": track[0]["t"], "title": row[11], **extras}})
     context = context_from_scenario(scenario) if scenario else {}
     for item in items:
         if item.get("story"):

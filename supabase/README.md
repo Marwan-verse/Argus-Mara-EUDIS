@@ -3,7 +3,77 @@
 An optional shared database for AIS history and satellite-versus-AIS comparison
 (decision D74). The offline exercise does not use it.
 
-**Pending D77 extension:** the new
+## Current deployment â€” 16 October 2026 (D95)
+
+The active project is **argus-mara** in **marwan-verse's projects**, region
+**eu-west-1 (Ireland)**, project ID `zibmytppznydhlggzlaq`:
+`https://zibmytppznydhlggzlaq.supabase.co`.
+[Open the project](https://supabase.com/dashboard/project/zibmytppznydhlggzlaq).
+The previous `lcpgnzvkntqdhejrsgpa` project was inaccessible to the connected
+account and was not modified. The Python client's default now uses the new
+project; an explicit `ARGUS_SUPABASE_URL` still overrides it.
+
+All six existing schema migrations and
+`20261016130559_preserve_ship_history.sql` plus
+`20261016132518_align_tracking_quality.sql` are deployed on the new project.
+The subsequent `20261016133900_temporal_tracking_support.sql` adds endpoint
+reachability to both comparison directions. `20261016135525_vision_image_usability.sql`
+withholds image-based leads when the review declares the image unusable.
+`20261016140530_optical_pixel_support.sql` preserves optical localization metadata
+and withholds matches/dark-contact leads from unsupported or unclassified features.
+All are deployed screening assumptions for review, not calibrated tracking accuracy.
+The initial satellite migration was applied as `argus_satellite_compare_keep_history`,
+with its retention function replaced by a no-op and retention cron omitted;
+the forward preservation migration records that final policy for future installs.
+**No AIS history is automatically deleted.** This supersedes the original
+14-day deletion policy below. Storage still grows and must be monitored; the
+existing motion-review worker checks a rolling 14-day window, while older
+received observations remain stored.
+
+`argus.ais_observations` retains complete received ship objects, including
+fields not normalized into the position/static tables, metadata-only updates
+and corrections. SHA-256 keys deduplicate exact repeated objects within a
+stream. These are the Railway feed's partial snapshots/updates, not every
+original AIS radio message. Extra declarations are preserved as supplied,
+not validated identities. The private table has RLS and no public access.
+
+The 11,989 real rows in this computer's `data/ais/capture/` recordings from
+8â€“15 October were imported using `scripts/export_ship_history_sql.py`.
+Imports retain original CSV fields and the source file's SHA-256 in
+`ais_observations`, plus queryable positions and supported static declarations.
+Import export time is `source_generated_utc`; original receipt times stay in
+the payload and normalized tables. Generated SQL contains private observation
+data and stays under ignored `data/ship-history-import/`. Batches are atomic
+and idempotent. No older continuous voyage history is inferred from the
+collector's previously retained last fixes.
+
+The cloud collector runs every 30 seconds without the desktop. Desktop
+history checks still need **Connect team database** with a secret key belonging
+to this new project, entered only in the masked native prompt. The connection
+marker `data/satellite/database.link` is a local setting, not the database.
+No local key was available to connect this computer automatically. SOC hosts
+likewise need the new project's URL/key in their existing private configuration.
+
+D97 makes complete raw correction objects part of acquisition-time source-quality
+checks. Conflicting positions and competing stream epochs appear in the private
+AIS RPC's `excluded_vessels`; the Python handoff and direct SQL comparison both
+withhold unsupported unmatched-image leads. SQL name/length lookups remain
+within the selected epoch. The initial hosted backlog of 2,043 ships was checked
+and saved through the existing lease APIs and Python rules at the 16 October
+13:33:30 UTC sync checkpoint. This was a one-time connector run; automatic future
+Python checks still need the configured desktop/SOC worker.
+
+Validation: hosted status and archive counts, active sync cron, absence of a
+retention cron, private-schema/RPC grants, RLS and the Supabase security advisor;
+`node tests/test_ship_history_db.mjs` verifies no deletion, complete objects,
+corrections, duplicate imports and SQL escaping in isolated PostgreSQL.
+
+## Original deployment record â€” 15 October 2026
+
+The following records describe the previous project and its then-pending work;
+the deployment above supersedes them.
+
+**D77 extension:** the new
 `20261015201441_vessel_history_queue.sql` migration adds whole-fleet history
 revision/lease tracking and five service-role APIs for the Python worker. It has
 been tested in isolated PostgreSQL but **has not been applied to the hosted
@@ -11,7 +81,7 @@ project**; the current connector account cannot access Argus Mara. See
 [fleet-history setup and verification](../docs/18-fleet-history.md). The original
 four-function deployment described below remains the recorded hosted state.
 
-**Pending D79 comparison hardening:**
+**D79 comparison hardening:**
 `20261015221628_align_satellite_ais_comparison.sql` adds verified-image manifests,
 100 m clear-footprint flags, epoch/motion/24-hour static gates, and competing-contact
 protection. Apply after D77. Legacy scenes cannot generate leads until republished
@@ -37,7 +107,7 @@ PostgreSQL/PostGIS. This migration has not been applied to the hosted project.
 
 ## Connect a computer
 
-1. Supabase dashboard → project `argus-mara` → Project Settings → API Keys →
+1. Supabase dashboard â†’ project `argus-mara` â†’ Project Settings â†’ API Keys â†’
    Secret keys: create or copy a secret key (`sb_secret_...`). It can read and
    write the whole database: never paste it into chat, Git or a command line.
 2. Run `python scripts/configure_supabase.py` and paste the key when asked. It is
@@ -57,7 +127,7 @@ checks the key and prints the lines), then rebuild the host.
 ## Security
 
 Tables live in the private `argus` schema, which the REST API does not serve, with
-row level security on. The only entry points are four `public.argus_*` functions
+row level security on. The entry points are the explicitly granted `public.argus_*` functions
 that only the secret key may call; the publishable key gets HTTP 401 (checked
 15 October 2026).
 
@@ -65,11 +135,11 @@ that only the secret key may call; the publishable key gets HTTP 401 (checked
 
 - AIS is only what the Railway collector receives from AISstream: partial coverage,
   and `received_utc` is the collector's receipt time, not the AIS message time.
-- History starts on 15 October 2026 at 17:46 UTC, plus the last fix of every ship
-  the collector had seen since 8 October. Older images have no AIS here.
-- Positions are kept 14 days, plus two hours around every saved scene. Watch
+- Cloud collection starts on 16 October, supplemented by the 11,989 imported
+  real capture rows from 8–15 October. Older images still need acquisition-day AIS.
+- Received history is retained without automatic deletion (D95). Watch
   `database_mb` in `status` against the 500 MB free limit.
 - A free project can be paused after a period without use; check it before an event.
 
-The schema is in `migrations/`. The original D74 migrations were recorded as applied
-on 15 October 2026; the D77 and D79 migrations above remain pending.
+The schema is in `migrations/`. Deployment status for the active project is recorded above. Historical setup
+notes for the inaccessible original project do not describe the active project.

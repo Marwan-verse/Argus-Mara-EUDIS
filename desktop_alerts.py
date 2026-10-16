@@ -21,7 +21,10 @@ on it can rise, and the review window warns before that happens.
 """
 from __future__ import annotations
 
+import getpass
 import math
+import os
+import subprocess
 import sys
 import tkinter as tk
 import tkinter.font as tkfont
@@ -29,6 +32,7 @@ import tkinter.font as tkfont
 import customtkinter as ctk
 
 from argus import responders
+from argus.decision_log import DecisionLog
 from argus.alert_board import inside, line_path, sort_key
 from argus.brain_board import EXERCISE_NOTICES, build_board, update
 from argus.countdown import step
@@ -66,9 +70,14 @@ CHIP["NOTICE"] = (NOTICE_COLOUR, "#2b2440")
 IN_TIME, LATE, UNAVAILABLE = "#47c7da", "#ec8a3c", "#7d8b97"
 RESPONSE_SHAPE = {"aircraft": "square", "helicopter": "square", "ship": "circle", "drone": "diamond",
                   "hail": "ring"}
-# List groups after the open incidents by level: quiet incidents, watched contacts, closed incidents.
-GROUP_TITLES = {"critical": "CRITICAL", "high": "HIGH", "medium": "MEDIUM", "quiet": "QUIET · BELOW MEDIUM",
-                "watching": "WATCHING · LOW, NO INCIDENT", "closed": "CLOSED"}
+# D94: one queue by importance. Within a band, real data comes before simulated contacts; Low (quiet
+# incidents, watched contacts, low-priority satellite leads) and Closed fold away until asked for.
+GROUP_TITLES = {"critical": "CRITICAL", "high": "HIGH", "medium": "MEDIUM", "low": "LOW · QUIET AND WATCHED",
+                "closed": "CLOSED AND REVIEWED", "sources": "SOURCES · WHAT WAS CHECKED"}
+# A satellite or radar lead's review priority (argus.satellite_workspace.with_priority) decides its band;
+# an unknown priority is shown, not folded away.
+LEAD_BAND = {"high": "high", "medium": "medium", "low": "low", None: "medium"}
+PRIORITY_ORDER = {"high": 0, "medium": 1, None: 1, "low": 2}
 # How often the panel checks the exercise replay clock.
 FOLLOW_MS = 250
 
@@ -238,8 +247,61 @@ class CardRow:
         return height
 
 
+class Lead(Link):
+    """A real-data entry in the queue: a satellite or radar lead, a vessel history or an analyst report."""
+
+    def __init__(self, text: str, command, *, band: str, tag: str, when, title: str, lines: str, action: str,
+                 subtitle: str, detail: str, attention: bool = False, secondary: Link | None = None):
+        super().__init__(text, command, kind="entry", title=title, lines=lines, action=action)
+        self.band, self.tag, self.when = band, tag, str(when or "")
+        self.subtitle, self.detail, self.attention, self.secondary = subtitle, detail, attention, secondary
+        self.key = ""
+        self.hovered = False
+
+
+class LeadRow:
+    """A real lead drawn like an incident card: band stripe, name, time and source tag, what, status."""
+
+    def __init__(self, board, lead: Lead):
+        self.board, self.lead, self.key = board, lead, lead.key
+
+    def draw(self, view, y: float, width: float) -> float:
+        board, ui, lead = self.board, self.board.ui, self.lead
+        canvas = view.canvas
+        tags = (f"row:{self.key}", view.action(lead.command))
+        name_h = board.name_font.metrics("linespace")
+        line_h = board.meta_font.metrics("linespace")
+        reason_h = board.reason_font.metrics("linespace")
+        height = 10 + name_h + 2 + reason_h + 3 + line_h + (3 + line_h if lead.secondary else 0) + 10
+        canvas.create_rectangle(0, y, width, y + height, fill=ROW_HOVER if lead.hovered else ui.CARD,
+                                outline="", tags=tags)
+        canvas.create_line(12, y + height - 1, width - 4, y + height - 1, fill=ui.LINE, tags=tags)
+        stripe = ui.LINE if lead.band == "closed" else STYLE.get(lead.band, STYLE["none"])[0]
+        canvas.create_rectangle(6, y + 9, 9, y + height - 9, fill=stripe, outline="", tags=tags)
+        x, right, top = 20, width - 12, y + 10
+        canvas.create_text(right, top + 2, text=lead.tag, anchor="ne", fill=ui.TEAL, font=board.tag_font, tags=tags)
+        room = right - board.tag_font.measure(lead.tag) - 8
+        when = short_utc(lead.when) if lead.when else ""
+        if when:
+            canvas.create_text(room, top + 1, text=when, anchor="ne", fill=ui.MUTED, font=board.meta_font, tags=tags)
+            room -= board.meta_font.measure(when) + 8
+        canvas.create_text(x, top, text=clip(lead.title, board.name_font, max(60, room - x)), anchor="nw",
+                           fill=ui.INK, font=board.name_font, tags=tags)
+        top += name_h + 2
+        canvas.create_text(x, top, text=clip(lead.subtitle, board.reason_font, right - x), anchor="nw",
+                           fill=SECONDARY, font=board.reason_font, tags=tags)
+        top += reason_h + 3
+        canvas.create_text(x, top, text=clip(lead.detail, board.meta_font, right - x), anchor="nw",
+                           fill=STYLE["medium"][0] if lead.attention else ui.MUTED, font=board.meta_font, tags=tags)
+        top += line_h
+        if lead.secondary:
+            canvas.create_text(x, top + 3, text=lead.secondary.text.upper() + "  ›", anchor="nw", fill=ui.TEAL,
+                               font=(SANS, 8, "bold"), tags=(f"row:{self.key}", view.action(lead.secondary.command)))
+        return height
+
+
 class HeaderRow:
-    """A group title with its count; Watching and Closed fold open and shut when clicked."""
+    """A band title with its count; Low and Closed fold open and shut when clicked."""
 
     def __init__(self, board, key: str, text: str, count: str, gap: int, command=None):
         self.board, self.key, self.text, self.count, self.gap, self.command = board, key, text, count, gap, command
@@ -301,9 +363,11 @@ class SectionRow:
         top = y + 12
         background = canvas.create_rectangle(0, y, width, y + 1, fill=ui.CARD, outline="", tags=(row,))
         for kind, *values in self.section.blocks:
+            if kind == "entry" and isinstance(values[0], Lead):
+                continue  # Drawn in its band of the queue (LeadRow), not here
             if kind == "title":
-                canvas.create_text(x, top, text=values[0], anchor="nw", fill=ui.INK, font=(SANS, 10, "bold"), tags=(row,))
-                top += 22
+                canvas.create_text(x, top, text=values[0], anchor="nw", fill=ui.MUTED, font=(SANS, 8, "bold"), tags=(row,))
+                top += 18
             elif kind == "text":
                 item = canvas.create_text(x, top, text=values[0], anchor="nw", fill=ui.MUTED, font=(SANS, 9),
                                           width=right - x, tags=(row,))
@@ -385,7 +449,8 @@ class AlertBoard:
         self.hovered: str | None = None
         self.level_filter: str | None = None
         self.show_closed = False
-        self.show_watching = False
+        self.show_low = app.tools.settings.get("show_low_alerts", False) is True  # D94, saved like the demo switch
+        self.leads: dict[str, Lead] = {}
         self.evidence_leads = []
         self.show_reviewed_evidence = tk.BooleanVar(app.root, value=False)
         self.evidence_page = 0
@@ -408,6 +473,8 @@ class AlertBoard:
         self.halos: list[tuple[int, float, float]] = []
         self.pulse = False
         self.flashing: dict[str, str] = {}
+        self.decision_log = DecisionLog()
+        self.log_window: DecisionLogWindow | None = None
         app.alert_board = self
         self.dialog = ReviewDialog(self)
         self._build()
@@ -430,6 +497,10 @@ class AlertBoard:
                                 width=30, height=30, fg_color="transparent", hover_color=ui.HOVER)
         restart.pack(side="right", padx=2)
         app.tools.style_button(restart, "Reset incidents and decisions at this replay time")
+        seal = ctk.CTkButton(head, text="", image=app.tools.icons.get("seal"), command=self.open_log,
+                             width=30, height=30, fg_color="transparent", hover_color=ui.HOVER)
+        seal.pack(side="right", padx=2)
+        app.tools.style_button(seal, "Signed decision log: who decided what and when, and a check that nothing was changed")
         tk.Label(head, text="INCIDENTS", bg=ui.CARD, fg=ui.INK, font=(SANS, 13, "bold"), anchor="w").pack(
             side="left", fill="x", expand=True)
         # The replay clock gets a row of its own, so a narrow panel can never clip the time.
@@ -451,7 +522,7 @@ class AlertBoard:
             command=self.toggle_demo_alerts, font=ctk.CTkFont(SANS, 12),
             checkbox_width=16, checkbox_height=16, height=26)
         self.demo_switch.pack(fill="x", padx=16, pady=(8, 0))
-        tk.Label(panel, text="Satellite / AIS review leads appear below.\n"
+        tk.Label(panel, text="Real leads rank first in their band; Low is folded.\n"
                  "Live AIS alone does not establish a threat.",
                  bg=ui.CARD, fg=ui.MUTED, font=(SANS, 9), justify="left", anchor="w",
                  wraplength=250).pack(fill="x", padx=(20, 16), pady=(4, 6))
@@ -481,7 +552,7 @@ class AlertBoard:
             cell.grid(row=0, column=index * 2, sticky="nsew")
             line = tk.Frame(cell, bg=ui.CARD)
             line.pack(pady=(4, 0))
-            code = tk.Label(line, text="WATCH" if level == "low" else CODES[level], bg=ui.CARD, fg=ui.MUTED,
+            code = tk.Label(line, text=CODES[level], bg=ui.CARD, fg=ui.MUTED,
                             font=(MONO, 9), cursor="hand2")
             code.pack(side="left")
             count = tk.Label(line, text="0", bg=ui.CARD, fg=STYLE[level][0], font=(MONO, 12, "bold"), cursor="hand2")
@@ -490,7 +561,8 @@ class AlertBoard:
             underline.pack(fill="x", padx=12, pady=(5, 0))
             for widget in (cell, line, code, count, underline):
                 widget.bind("<Button-1>", lambda _event, value=level: self.set_filter(value))
-            app.tools.attach_tooltip(cell, "Show watched contacts: Low, not incidents" if level == "low"
+            app.tools.attach_tooltip(cell, "Show the Low band: quiet incidents, watched contacts, low-priority leads"
+                                     if level == "low"
                                      else f"Show {LEVEL_NAMES[level].lower()} incidents only")
             self.tiles[level] = (code, underline)
             self.tiles[level + "-count"] = count
@@ -529,23 +601,38 @@ class AlertBoard:
         section = self.history_frame
         section.clear()
         summary = packet.get('summary', {})
+        worker = packet.get('worker', {})
+        unlinked = worker.get('state') == 'unlinked'
         section.add('title', f"FLEET HISTORY REVIEW · {self.history_lead_count}")
         text = (f"{summary.get('checked_vessels', 0)} / {summary.get('total_vessels', 0)} recorded vessels checked\n"
                 f"{summary.get('never_checked', 0)} never checked · {summary.get('new_evidence_pending', 0)} awaiting new evidence checks\n"
                 + source_health(summary)+'\n'
                 + packet.get('worker', {}).get('message', 'History inventory is loading.'))
-        if not packet.get('inventory_complete'):
+        if unlinked:
+            text = ('History checks are blocked: team database is not connected.\n'
+                    'Live map positions do not supply the recorded history needed for these checks.')
+        elif not packet.get('inventory_complete'):
             text += '\nInventory is still loading; missing entries are not clean results.'
         section.add('text', text)
+        if unlinked:
+            satellite = self.app.satellite
+            if satellite.remote:
+                section.add('text', 'The SOC host administrator must connect the team database on the host.')
+            else:
+                section.add('button', Link('Connect team database', satellite.connect_database, kind='button'))
         for row in packet.get('vessels', []):
             result = row.get('result') or {}
             findings = [f for f in result.get('findings', []) if f.get('review_required')]
             title = f"{result.get('name') or row['mmsi']} · {row['mmsi']}"
             lines = (f"Motion history requires review\nChecked {short_utc(row.get('checked_utc'))} · derived assumption\n"
                      + '\n'.join(f['reason'] for f in findings[-2:]))
-            section.add('entry', Link(f"{title}\n{lines}\nOpen history evidence",
+            section.add('entry', Lead(f"{title}\n{lines}\nOpen history evidence",
                                       lambda mmsi=row['mmsi']: self.app.satellite.open_fleet(mmsi),
-                                      title=title, lines=lines, action="Open history evidence"), STYLE["medium"][0])
+                                      band="medium", tag="HISTORY · REAL", when=row.get('checked_utc'), title=title,
+                                      lines=lines, action="Open history evidence",
+                                      subtitle="Motion history requires review",
+                                      detail=findings[-1]['reason'] if findings else "Derived assumption"),
+                        STYLE["medium"][0])
         section.add('button', Link('Open all vessel histories', lambda: self.app.satellite.open_fleet(), kind='button'))
         if relayout:
             self.relayout()
@@ -563,6 +650,12 @@ class AlertBoard:
                                 f"{result.get('image_contacts', 0)} image contacts · "
                                 f"{result.get('images_without_ais', 0)} images without contemporaneous AIS\n"
                                 f"{result.get('partial_analysis_images', 0)} images with incomplete detail review")
+        if result.get('reviews_checked') and result.get('images_without_ais') == result.get('reviews_checked'):
+            self.evidence_status += ('\nComparison blocked: none of the checked images has AIS at acquisition time. '
+                                     'Image contacts alone cannot establish an AIS mismatch.')
+        if result.get('images_with_ais_conflicts'):
+            self.evidence_status += (f"\n{result['images_with_ais_conflicts']} images with conflicting AIS history; "
+                                     'unmatched-contact leads withheld pending source review.')
         if result.get('radar_detections'):
             self.evidence_status += (f"\n{result['radar_detections']} radar detections (Global Fishing Watch) · "
                                      f"{result.get('radar_leads', 0)} without AIS")
@@ -577,6 +670,8 @@ class AlertBoard:
         section.clear()
         section.add('title', f"SATELLITE / AIS REVIEW · {len(self.evidence_leads)} leads")
         section.add('text', self.evidence_status)
+        section.add('button', Link('Open satellite images and AIS coverage',
+                                  lambda: self.app.open_window('satellite'), kind='button'))
 
         def refilter():
             self.evidence_page = 0
@@ -584,8 +679,13 @@ class AlertBoard:
             self.relayout(top=True)
         section.add('toggle', 'Show reviewed outcomes', self.show_reviewed_evidence, refilter)
         visible = [r for r in self.evidence_leads if self.show_reviewed_evidence.get() or r.get('review_status') not in CLOSED_OUTCOMES]
+        # D94: evidence that changed first, then review priority, then the newest image.
+        visible.sort(key=lambda r: str(r.get('acquired_utc') or ''), reverse=True)
+        visible.sort(key=lambda r: (not r.get('evidence_changed'), PRIORITY_ORDER.get(r.get('priority'), 1)))
         self.evidence_page = min(self.evidence_page, max(0, (len(visible)-1)//50))
-        section.add('text', f'{len(visible)} shown · analyst outcomes retain the original evidence')
+        low = sum(1 for r in visible if r.get('priority') == 'low' and r.get('review_status') not in CLOSED_OUTCOMES)
+        section.add('text', f'{len(visible)} shown · {low} low-priority folded under LOW · '
+                            'analyst outcomes retain the original evidence')
         start = self.evidence_page*50
         for lead in visible[start:start+50]:
             state = OUTCOMES.get(lead.get('review_status'), 'Unreviewed')
@@ -598,14 +698,20 @@ class AlertBoard:
             lines = f"{lead['title']}\n{source} · {state}\n{lead['reason']}"
             action = lead.get('action_text') or 'Open image evidence'
             closed = lead.get('review_status') in CLOSED_OUTCOMES
-            section.add('entry', Link(f"{title}\n{lines}\n{action}", lambda row=lead: self.open_evidence(row),
-                                      title=title, lines=lines, action=action),
-                        self.ui.MUTED if closed else STYLE["high"][0])
+            secondary = None
             if lead.get('evidence_key'):
                 def review(row=lead):
                     from desktop_evidence_review import EvidenceReview
                     EvidenceReview(self, row)
-                section.add('button', Link('Record analyst outcome', review, kind='button'))
+                secondary = Link('Record analyst outcome', review, kind='button')
+            band = "closed" if closed else LEAD_BAND.get(lead.get('priority'), "medium")
+            why = lead.get('priority_reason') or lead['reason']
+            section.add('entry', Lead(f"{title}\n{lines}\n{action}", lambda row=lead: self.open_evidence(row),
+                                      band=band, tag="RADAR · REAL" if lead.get('radar') else "SAT · REAL",
+                                      when=lead.get('acquired_utc'), title=title, lines=lines, action=action,
+                                      subtitle=lead['title'], detail=f"{state} · {why}",
+                                      attention=bool(lead.get('evidence_changed')), secondary=secondary),
+                        self.ui.MUTED if closed else STYLE["high"][0])
         if len(visible) > 50:
             def turn(delta):
                 self.evidence_page += delta
@@ -637,8 +743,10 @@ class AlertBoard:
                 vessel = report["vessel"]
                 title = f"{vessel['name']} · {vessel['id']}"
                 lines = f"{report['category']}\n{entries[-1]['sender']} · {vessel['label']} · {len(entries)} report(s)"
-                link = Link(f"{title}\n{lines}\nReview concern", lambda found=entries: review_reports(self.app, found),
-                            title=title, lines=lines, action="Review concern")
+                link = Lead(f"{title}\n{lines}\nReview concern", lambda found=entries: review_reports(self.app, found),
+                            band="high", tag="REPORT · ANALYST", when=report.get('created_utc'), title=title,
+                            lines=lines, action="Review concern", subtitle=report['category'],
+                            detail=f"{entries[-1]['sender']} · {vessel['label']} · {len(entries)} report(s)")
                 section.add('entry', link, self.ui.TEAL)
                 self.report_cards.append(link)
         if relayout:
@@ -707,13 +815,21 @@ class AlertBoard:
         if hasattr(self.app, 'require_tool') and not self.app.require_tool('response.review'):
             return
         item = self.by_id[identifier]
-        self.rescore(lambda: self.replay.send(item, asset_id), f"Sent {asset_id} to {item['name']} (simulated)")
+        def action():
+            events = self.replay.send(item, asset_id)
+            self.signed(item, "Sent responder", f"Sent {asset_id} (simulated)", asset=asset_id)
+            return events
+        self.rescore(action, f"Sent {asset_id} to {item['name']} (simulated)")
 
     def recall(self, identifier: str, asset_id: str) -> None:
         if hasattr(self.app, 'require_tool') and not self.app.require_tool('response.review'):
             return
         item = self.by_id[identifier]
-        self.rescore(lambda: self.replay.recall(item, asset_id), f"Recalled {asset_id} from {item['name']}")
+        def action():
+            events = self.replay.recall(item, asset_id)
+            self.signed(item, "Recalled responder", f"Recalled {asset_id}", asset=asset_id)
+            return events
+        self.rescore(action, f"Recalled {asset_id} from {item['name']}")
 
     def rescore(self, action, text: str) -> None:
         """Run a change that scores the board again at this replay time; repaint and announce what rose."""
@@ -772,11 +888,42 @@ class AlertBoard:
             return
         before = self.snapshot()
         self.replay.decide(item, status, text, reason, to)
+        self.signed(item, status, text, reason=reason, to=to)
         self.sync_exercise(item, status)
         after = self.snapshot()
         for other in {key for key in after if after[key] != before[key]} - {identifier}:
             self.paint(other)  # a closed incident frees its assets for the others
         self.changed(identifier)
+
+    def operator(self) -> str:
+        """The SOC account that is signed in, otherwise this computer's user."""
+        client = getattr(self.app, "soc_client", None)
+        user = getattr(client, "user", None) if client else None
+        if user and user.get("username"):
+            return user["username"]
+        return f"{getpass.getuser()} (this computer)"
+
+    def signed(self, item: dict | None, action: str, text: str, **details) -> None:
+        """Add a decision to the signed log; if the file cannot be written, the decision still stands."""
+        record = {"operator": self.operator(), "action": action, "detail": text, "replay": self.stamp(self.replay.now),
+                  "simulated": True, **{key: value for key, value in details.items() if value}}
+        if item is not None:
+            incident = self.tracker.incident(item) or {}
+            record.update(alert=item["id"], vessel=item["name"], level=incident.get("level") or item["assessment"]["level"])
+        try:
+            self.decision_log.append(**record)
+        except OSError as error:
+            self.app.map_status_label.configure(text=f"Decision kept, but the signed log could not be written: {error}")
+            return
+        if self.log_window is not None:
+            self.log_window.refresh()
+
+    def open_log(self) -> None:
+        if self.log_window is None or not self.log_window.window.winfo_exists():
+            self.log_window = DecisionLogWindow(self)
+        self.log_window.window.deiconify()
+        self.log_window.window.lift()
+        self.log_window.refresh()
 
     def mark_reviewed(self, identifier: str) -> None:
         if self.status(identifier) != "New":
@@ -911,17 +1058,20 @@ class AlertBoard:
 
     def hover_row(self, key: str | None) -> None:
         """The pointer moved onto another row of the list (None: off the list)."""
-        previous, self.hovered = self.hovered, key if key in self.cards else None
+        previous, self.hovered = self.hovered, key if key in self.cards or key in self.leads else None
         for identifier in {previous, self.hovered} - {None}:
             if identifier in self.cards:
                 self.paint(identifier)
+            elif identifier in self.leads:
+                self.leads[identifier].hovered = identifier == self.hovered
+                self.list.redraw(identifier)
 
     def matches_filter(self, identifier: str) -> bool:
         group = self.group(identifier)
         if self.level_filter is None:
             return True
         if self.level_filter == "low":
-            return group == "watching"
+            return group in ("watching", "quiet")  # The Low band: watched contacts and quiet incidents
         return group == self.level_filter
 
     def visible_items(self) -> list[dict]:
@@ -933,17 +1083,31 @@ class AlertBoard:
         incident = self.incident(identifier)
         return (not (incident and incident.get("needs_review_again")), sort_key(self.by_id[identifier]))
 
+    def current_leads(self) -> list[Lead]:
+        """Real entries of the shown sources, each with its band (D94)."""
+        found = []
+        for section in (self.reports_frame, self.evidence_frame, self.history_frame):
+            if section.shown:
+                found.extend(block[1] for block in section.blocks if block[0] == "entry" and isinstance(block[1], Lead))
+        return found
+
     def relayout(self, top: bool = False) -> None:
         ui = self.ui
         rows = []
         for section in (self.history_frame, self.evidence_frame, self.reports_frame):
             section.shown = section is not self.reports_frame or bool(self.app.vessel_reports.entries)
-            if section.shown and section.blocks:
-                rows.append(SectionRow(self, section))
         groups = {item["id"]: self.group(item["id"]) for item in self.items}
         first = True
         self.order = []
-        toggles = {"closed": self.toggle_closed, "watching": self.toggle_watching}
+        self.leads = {}
+        bands: dict[str, list[Lead]] = {band: [] for band in GROUP_TITLES}
+        for lead in self.current_leads():
+            bands.setdefault(lead.band, []).append(lead)
+        for band in bands.values():
+            # Newest first, then anything whose evidence changed (stable sort keeps the rest in order).
+            band.sort(key=lambda lead: lead.when, reverse=True)
+            band.sort(key=lambda lead: not lead.attention)
+        toggles = {"closed": self.toggle_closed, "low": self.toggle_low}
 
         def header(key, count):
             nonlocal first
@@ -957,55 +1121,90 @@ class AlertBoard:
             self.order.append(item["id"])
             first = False
 
+        def lead_row(lead):
+            nonlocal first
+            lead.key = f"lead:{len(self.leads)}"
+            lead.hovered = lead.key == self.hovered
+            self.leads[lead.key] = lead
+            rows.append(LeadRow(self, lead))
+            first = False
+
         def members(group):
             return sorted((item for item in self.items if groups[item["id"]] == group
                            and self.matches_filter(item["id"])), key=lambda item: self._order(item["id"]))
 
+        def band_leads(band):
+            return bands.get(band, []) if self.level_filter in (None, band) else []
+
         mode = self.sort_mode.get()
         shown = 0
         if mode == "Severity":
-            for group in ("critical", "high", "medium", "quiet"):
-                found = members(group)
-                if found:
-                    header(group, len(found))
+            for band in ("critical", "high", "medium"):
+                leads, found = band_leads(band), members(band)
+                if leads or found:
+                    header(band, len(leads) + len(found))
+                    for lead in leads:  # Real data first
+                        lead_row(lead)
                     for item in found:
                         card(item)
-                    shown += len(found)
+                    shown += len(leads) + len(found)
         else:
             def time_key(item):
                 observations = item["observations"]
                 eta = 0.0 if observations.get("in_corridor") else observations.get("eta_min")
                 return (eta if eta is not None else 1e9, sort_key(item))
             key = time_key if mode == "Time to asset" else (lambda item: (item.get("raised_min_ago", 0), sort_key(item)))
-            found = sorted((item for group in ("critical", "high", "medium", "quiet") for item in members(group)), key=key)
+            for band in ("critical", "high", "medium"):
+                for lead in band_leads(band):
+                    lead_row(lead)
+                    shown += 1
+            found = sorted((item for group in ("critical", "high", "medium") for item in members(group)), key=key)
             for item in found:
                 card(item)
-            shown = len(found)
-        if not shown and self.level_filter != "low" and not self.app.vessel_reports.entries and not self.evidence_leads and not self.history_lead_count:
+            shown += len(found)
+        if not shown and self.level_filter != "low":
             self.empty.configure(text=("Fictional / simulated alerts hidden.\n"
-                                      "No satellite / AIS review leads loaded yet.")
+                                      "No real review leads available. See the history and image coverage status above.")
                                  if not self.show_demo_alerts.get() else
-                                 ("No open incidents at this level." if self.level_filter else "No open incidents."))
+                                 ("Nothing at this level." if self.level_filter else
+                                  "Nothing above Low. Low items are folded below."))
             rows.append(EmptyRow(self, self.empty.cget("text")))
-        watching = members("watching")
-        if watching:
-            expanded = self.show_watching or self.level_filter == "low"
-            header("watching", f"{len(watching)} · {'hide' if expanded else 'show'}")
+        low_leads = bands.get("low", []) if self.level_filter in (None, "low") else []
+        quiet, watching = members("quiet"), members("watching")
+        low_count = len(low_leads) + len(quiet) + len(watching)
+        if low_count:
+            expanded = self.show_low or self.level_filter == "low"
+            header("low", f"{low_count} · {'hide' if expanded else 'show'}")
             if expanded:
-                for item in watching:
+                for lead in low_leads:
+                    lead_row(lead)
+                for item in quiet + watching:
                     card(item)
+        closed_leads = bands.get("closed", []) if self.level_filter is None else []
         closed = members("closed")
-        if closed:
-            header("closed", f"{len(closed)} · {'hide' if self.show_closed else 'show'}")
-            if self.show_closed:
+        if closed or closed_leads:
+            expanded = self.show_closed or bool(closed_leads and self.show_reviewed_evidence.get())
+            header("closed", f"{len(closed) + len(closed_leads)} · {'hide' if expanded else 'show'}")
+            if expanded:
+                for lead in closed_leads:
+                    lead_row(lead)
                 for item in closed:
                     card(item)
+        # The sources' own summaries (how much was checked, how fresh) close the list.
+        sources = [section for section in (self.history_frame, self.evidence_frame)
+                   if section.shown and any(block[0] != "entry" for block in section.blocks)]
+        if sources:
+            header("sources", "")
+            rows.extend(SectionRow(self, section) for section in sources)
         counts = {level: 0 for level in LEVELS}
         for group in groups.values():
             if group in counts:
                 counts[group] += 1
-            elif group == "watching":
+            elif group in ("watching", "quiet"):
                 counts["low"] += 1
+        for lead in self.current_leads():
+            if lead.band in counts:
+                counts[lead.band] += 1
         for level in LEVELS:
             code, underline = self.tiles[level]
             active = self.level_filter == level
@@ -1070,12 +1269,17 @@ class AlertBoard:
         self.show_closed = not self.show_closed
         self.relayout()
 
-    def toggle_watching(self) -> None:
+    def toggle_low(self) -> None:
+        """Open or fold the Low band (quiet incidents, watched contacts, low-priority leads); remembered."""
         if self.level_filter == "low":
             self.set_filter(None)
             return
-        self.show_watching = not self.show_watching
+        self.show_low = not self.show_low
+        self.app.tools.settings["show_low_alerts"] = self.show_low
+        self.app.tools.schedule_save()
         self.relayout()
+
+    toggle_watching = toggle_low  # The older name, kept for callers and tests
 
     def set_width(self, pixels: int) -> None:
         wrap = max(150, pixels - 92)
@@ -1200,6 +1404,7 @@ class AlertBoard:
             self.paint(identifier)
         self.relayout(top=True)
         self.app._draw_map()
+        self.signed(None, "Simulation restarted", "Incidents and decisions reset at this replay time")
         self.app.map_status_label.configure(text="Incidents restarted at this replay time · decisions reset")
 
     def snapshot(self) -> dict[str, tuple]:
@@ -1345,6 +1550,7 @@ class AlertBoard:
                 if self._label(x, y + 12, f"{selected['line_name']} · illustrative route",
                                STYLE[selected["assessment"]["level"]][0], ("sim-selected",), "n", occupied, force=False):
                     break
+        self.draw_radar(items, occupied)
         self.draw_response(occupied)
         self.draw_assigned(occupied)
         if items:
@@ -1355,6 +1561,23 @@ class AlertBoard:
             box = app.map.create_rectangle(left - 7, top - 3, right + 7, bottom + 3, fill=ui.BG, outline=ui.LINE,
                                            tags=("sim-badge", "chart-fixed"))
             app.map.tag_lower(box, label)
+
+    def draw_radar(self, items, occupied) -> None:
+        """Satellite radar contacts of the shown stories once the replay reaches them, drawn like the exercise's."""
+        app = self.app
+        layer = app.map_layers.get("Radar contacts")
+        if self.replay.now is None or (layer is not None and not layer.get()):
+            return
+        for item in items:
+            for detection in (item.get("story") or {}).get("detections", []):
+                if detection["t"] > self.replay.now:
+                    continue
+                x, y = app._project(detection["lat"], detection["lon"])
+                tags = ("sim-radar", f"sim-alert:{item['id']}")
+                app.map.create_polygon(x, y - 8, x + 8, y, x, y + 8, x - 8, y, fill="#f6d293", outline="#8f4d00",
+                                       width=2, tags=tags)
+                text = f"SAR {self.stamp(detection['t'])} · {detection.get('length_m', '?')} m · {detection['label']}"
+                self._label(x + 12, y + 12, text, self.ui.INK, tags, "w", occupied, force=item["id"] == self.selected)
 
     def draw_notice_areas(self, item: dict, occupied) -> None:
         """The work areas of the Marine Notices the selected contact touches, dashed in the notice colour."""
@@ -1503,6 +1726,99 @@ class AlertBoard:
         where = f"{incident['id']} {self.status(identifier)}" if incident else self.status(identifier)
         return (f"{kind} · {item['name']} · {item['assessment']['level_name']} {item['assessment']['score']} · "
                 f"{where} · {item['title']}")
+
+
+VERIFIED = "#7ee0a1"  # Result colour when every signature and link checks out.
+
+
+class DecisionLogWindow:
+    """The signed decision log: newest decisions first, a verify button and the file for a tamper test."""
+
+    def __init__(self, board: AlertBoard):
+        import run_gui as ui
+        self.board, self.ui = board, ui
+        self.window = ctk.CTkToplevel(board.app.root)
+        self.window.title("Signed decision log")
+        self.window.geometry("760x520")
+        self.window.configure(fg_color=ui.CARD)
+        self.window.transient(board.app.root)
+        top = tk.Frame(self.window, bg=ui.CARD)
+        top.pack(fill="x", padx=18, pady=(16, 4))
+        tk.Label(top, text="Signed decision log", bg=ui.CARD, fg=ui.INK, font=(SANS, 15, "bold")).pack(side="left")
+        tk.Label(top, text="SIM", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 7, "bold"), padx=5,
+                 highlightthickness=1, highlightbackground=ui.LINE).pack(side="left", padx=(8, 0), pady=(3, 0))
+        self.key_label = tk.Label(self.window, text="", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 10), anchor="w",
+                                  justify="left", wraplength=720)
+        self.key_label.pack(fill="x", padx=18)
+        self.text = ctk.CTkTextbox(self.window, wrap="word", fg_color=ui.BG, text_color=ui.INK,
+                                   font=ctk.CTkFont(SANS, 12), corner_radius=6)
+        self.text.pack(fill="both", expand=True, padx=18, pady=10)
+        self.text.tag_config("changed", foreground=STYLE["critical"][0])
+        self.text.tag_config("link", foreground=STYLE["medium"][0])
+        self.bad: dict = {}  # From the last check: record number -> "changed" or "link".
+        self.result = tk.Label(self.window, text="", bg=ui.CARD, fg=ui.MUTED, font=(SANS, 11), anchor="w",
+                               justify="left", wraplength=700)
+        self.result.pack(fill="x", padx=18)
+        buttons = tk.Frame(self.window, bg=ui.CARD)
+        buttons.pack(fill="x", padx=18, pady=(8, 16))
+        self.verify_button = ctk.CTkButton(buttons, text="Verify signatures", command=self.verify, width=150, height=30,
+                                           fg_color=ui.TEAL, hover_color="#6ed5e3", text_color=ui.BG)
+        self.verify_button.pack(side="left")
+        ctk.CTkButton(buttons, text="Show the file", command=self.show_file, width=120, height=30,
+                      fg_color="transparent", border_width=1).pack(side="left", padx=8)
+        ctk.CTkButton(buttons, text="Close", command=self.window.withdraw, width=84, height=30,
+                      fg_color="transparent", border_width=1).pack(side="right")
+
+    def refresh(self) -> None:
+        log = self.board.decision_log
+        try:
+            records = log.records()
+        except ValueError:
+            records = None
+        key = log.public_key() if log.key_path.exists() else None
+        from argus.decision_log import fingerprint
+        seal = log.seal()
+        self.key_label.configure(text=(f"Signed on this computer with key {fingerprint(key)}. "
+                                       if key else "No decisions yet; this computer gets its key with the first one. ")
+                                 + (f"Seal of the last record: {seal}. Note it down: removing records from the "
+                                    "end changes it. " if seal else "") + f"File: {log.path}")
+        self.text.configure(state="normal")
+        self.text.delete("1.0", "end")
+        if records is None:
+            self.text.insert("end", "The log file is not readable. Press Verify signatures to see where.")
+        rows = [r for r in records or [] if r.get("kind") == "decision"]
+        for record in reversed(rows):
+            when = record.get("time", "")[11:19] + " UTC" if len(record.get("time", "")) >= 19 else record.get("time", "")
+            vessel = f"{record['vessel']} ({record['alert']}) · " if record.get("vessel") else ""
+            problem = self.bad.get(record.get("seq"))
+            tags = (problem,) if problem else ()
+            changed = {"changed": "  · CHANGED AFTER SIGNING", "link": "  · LINK BROKEN"}.get(problem, "")
+            self.text.insert("end", f"{when} · {record.get('operator', '?')} · {record.get('action', '?')}{changed}\n", tags)
+            self.text.insert("end", f"    {vessel}{record.get('detail', '')}\n", tags)
+        if records is not None and not rows:
+            self.text.insert("end", "No decisions yet. Acknowledge, escalate, reject or send a responder, "
+                                    "and each decision appears here, signed.")
+        self.text.configure(state="disabled")
+
+    def verify(self) -> None:
+        result = self.board.decision_log.verify()
+        self.bad = result.bad
+        colour = VERIFIED if result.ok else STYLE["critical"][0]
+        details = "" if result.ok or len(result.problems) == 1 else f"  (+{len(result.problems) - 1} more)"
+        self.result.configure(text=result.summary() + details, fg=colour)
+        self.refresh()
+
+    def show_file(self) -> None:
+        path = self.board.decision_log.path
+        if not path.exists():
+            self.result.configure(text="There is no log file yet.", fg=self.ui.MUTED)
+            return
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", str(path)])
+        elif os.name == "nt":
+            subprocess.Popen(["explorer", "/select,", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path.parent)])
 
 
 class ReviewDialog:
