@@ -8,9 +8,9 @@ import customtkinter as ctk
 from argus import responders
 from argus.collab_crypto import validate_payload
 from argus import report_ai
-from argus.report_ai import build_pack, check_all, draft_report
+from argus.report_ai import build_pack, check_all, draft_report, prefill_report
 from argus.report_pdf import save_pdf, text_hash
-from argus.vessel_reports import CATEGORIES, make_report
+from argus.vessel_reports import CATEGORIES, REASON_LIMIT, make_report
 from desktop_soc_view import BG, CARD, MUTED, button, label
 
 WARN = "#ffb176"
@@ -92,7 +92,7 @@ class ReportDialog:
         self.pack = evidence_pack(app, self.vessel, item)
         self.window = ctk.CTkToplevel(app.root)
         self.window.title("Report vessel")
-        self.window.geometry("640x800")
+        self.window.geometry("780x900")
         self.window.minsize(580, 700)
         self.window.configure(fg_color=CARD)
         self.window.transient(app.root)
@@ -105,10 +105,10 @@ class ReportDialog:
         label(self.window, "Category", text_color=MUTED).pack(anchor="w", padx=22, pady=(12, 4))
         self.category = ctk.CTkOptionMenu(self.window, values=list(CATEGORIES), width=360)
         self.category.pack(fill="x", padx=22)
-        label(self.window, "Why are you reporting this vessel? (required, up to 2000 characters)",
+        label(self.window, f"Report narrative (fully editable, up to {REASON_LIMIT} characters)",
               wraplength=580, text_color=MUTED).pack(anchor="w", padx=22, pady=(12, 4))
         # Undo lets the analyst take back a draft that replaced their own text (Ctrl+Z).
-        self.reason = ctk.CTkTextbox(self.window, height=200, wrap="word", undo=True)
+        self.reason = ctk.CTkTextbox(self.window, height=340, wrap="word", undo=True)
         self.reason.pack(fill="both", expand=True, padx=22)
         tools = ctk.CTkFrame(self.window, fg_color="transparent")
         tools.pack(fill="x", padx=22, pady=(10, 0))
@@ -120,8 +120,16 @@ class ReportDialog:
         self.pdf_button.pack(side="left", padx=(8, 0))
         self.notes = ctk.CTkTextbox(self.window, height=150, wrap="word", fg_color=BG, text_color=MUTED)
         self.notes.pack(fill="x", padx=22, pady=(8, 0))
-        self.show_notes("Draft with AI writes a draft from the evidence for you to edit. Check report compares "
-                        "your text with the system data. Nothing is sent until you create or share the report.")
+        prefill = prefill_report(self.pack)
+        self.reason.insert("1.0", prefill["text"])
+        self.reason.edit_reset()
+        self.category.set(prefill["category"])
+        self.generation = {key: prefill[key] for key in ("method", "model", "generated_utc", "evidence")}
+        self.show_notes("Prefilled from available system evidence, without an AI call. Rewrite any part of the "
+                        "narrative and change the category. Unknown information is left explicit. "
+                        "Check report compares your text with the evidence. Draft with AI replaces the narrative "
+                        "with a shorter draft (Ctrl+Z restores it). Nothing is sent until you create or share."
+                        + ("\n" + "\n".join(prefill["notes"]) if prefill["notes"] else ""))
         self.problem = label(self.window, "", text_color=WARN, wraplength=580, justify="left")
         self.problem.pack(fill="x", padx=22, pady=6)
         scope = "Shared with your verified SOC session." if app.soc_client else "Local report · kept until this app closes."

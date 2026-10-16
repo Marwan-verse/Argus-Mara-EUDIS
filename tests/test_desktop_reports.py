@@ -57,6 +57,7 @@ class DesktopReportTests(unittest.TestCase):
     def test_empty_reason_blocked_other_saved_and_survives_replay_reset(self):
         dialog = open_report(self.app, VESSEL)
         dialog.category.set("Other")
+        dialog.reason.delete("1.0", "end")
         dialog.submit()
         self.assertEqual(self.app.vessel_reports.entries, [])
         self.assertIn("Reason requires", dialog.problem.cget("text"))
@@ -75,6 +76,21 @@ class DesktopReportTests(unittest.TestCase):
         board.open("SIM-40", reveal=False)
         board.dialog.report_button.invoke()
         self.assertEqual(self.app.report_dialog.vessel, board_snapshot(board.by_id["SIM-40"]))
+
+    def test_form_opens_prefilled_and_analyst_can_replace_every_word(self):
+        with patch("argus.report_ai.json_http") as network:
+            dialog = open_report(self.app, VESSEL)
+            self.assertIn("Vessel and source:", dialog.reason.get("1.0", "end"))
+            self.assertIn("SOC analyst review:", dialog.reason.get("1.0", "end"))
+            self.assertEqual(dialog.generation["method"], "prefill")
+            network.assert_not_called()
+        dialog.reason.delete("1.0", "end")
+        dialog.reason.insert("1.0", "Analyst replacement after reviewing the contact.")
+        dialog.category.set("Other")
+        dialog.submit()
+        saved = self.app.vessel_reports.entries[0]["report"]
+        self.assertEqual(saved["reason"], "Analyst replacement after reviewing the contact.")
+        self.assertEqual(saved["category"], "Other")
 
     def settle(self, dialog):
         for _ in range(1500):  # up to about 15 s: a PDF render is slower under a loaded test run

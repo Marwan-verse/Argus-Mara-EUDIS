@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 CATEGORIES = ("Suspicious activity", "AIS / identity concern", "Unsafe navigation",
               "Infrastructure concern", "Other")
 LABELS = {"real", "reconstructed", "simulated", "fictional", "assumption"}
+REASON_LIMIT = 4000
 
 
 def _text(value, maximum, title):
@@ -32,7 +33,7 @@ def validate_report(report):
         raise ValueError("Invalid report ID or UTC timestamp") from None
     if not isinstance(report["category"], str) or report["category"] not in CATEGORIES:
         raise ValueError("Choose a report category")
-    _text(report["reason"], 2000, "Reason")
+    _text(report["reason"], REASON_LIMIT, "Reason")
     vessel = report["vessel"]
     if not isinstance(vessel, dict) or set(vessel) != {"id", "name", "label", "lat", "lon"}:
         raise ValueError("Invalid reported vessel")
@@ -49,7 +50,7 @@ def validate_report(report):
 
 
 def make_report(vessel, category, reason):
-    _text(reason, 2000, "Reason")
+    _text(reason, REASON_LIMIT, "Reason")
     report = {"id": str(uuid4()), "vessel": deepcopy(vessel), "category": category,
               "reason": reason.strip(), "created_utc": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     return validate_report(report)

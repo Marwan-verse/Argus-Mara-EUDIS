@@ -22,6 +22,24 @@ Every fact has an ID (`E1`, `E2`, ...) and a label: SIMULATED, EXERCISE, REAL,
 ILLUSTRATIVE, ASSUMPTION, RULE OUTCOME, DATA ISSUE or LIMITATION. The window
 shows a one-line summary of the pack under the vessel name.
 
+## Automatic report prefill (D111)
+
+Opening Report vessel immediately fills an editable narrative and suggests a
+category, using local code without an AI request. Eight sections cover vessel
+and source, position and movement, assessment and incident, indicators and
+findings, infrastructure and response context, evidence limits, suggested
+follow-up and SOC analyst review. Facts retain their provenance labels. Missing
+evidence is stated explicitly; follow-up is a proposal and analyst review stays
+pending. Analysts can replace the entire narrative and change the category.
+
+The narrative accepts up to 4,000 characters. Prefill retains whole facts within
+both that limit and the existing encrypted message size limit, prioritizing
+coverage across sections. If facts are omitted, the window says how many; the
+PDF evidence appendix still holds the full pack. The shared report keys are
+unchanged, but teammates need this version to receive narratives over the old
+2,000-character limit. Draft with AI remains an optional shorter replacement;
+Ctrl+Z restores the prior narrative. Creating or sharing remains explicit.
+
 ## Draft with AI
 
 One text-only request to TensorX `qwen/qwen3.8-flash-next`. The pack goes in

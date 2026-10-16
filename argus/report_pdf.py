@@ -100,6 +100,7 @@ def blocks(pack: dict, text: str, category: str, *, check: dict | None = None, g
     found.append(("heading", "Appendix C · How the text was produced"))
     generation = generation or {}
     method = {"ai": "AI-assisted draft, validated by code against the evidence",
+              "prefill": "System-prefilled sections from local evidence (no AI); editable by the analyst",
               "template": "Template draft written by code from the evidence (no AI)"}.get(
         generation.get("method"), "Written by the analyst (no draft tool used)")
     found.append(("body", f"Method: {method}."))

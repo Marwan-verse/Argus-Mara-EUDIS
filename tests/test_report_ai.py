@@ -8,7 +8,8 @@ from unittest.mock import patch
 
 from argus.brain_board import build_board
 from argus.report_ai import (AI_LABEL, TEMPLATE_LABEL, build_pack, check_all, check_report, draft_report, extract,
-                             strip_label, suggest_category, template_draft)
+                             strip_label, suggest_category, template_draft, prefill_report, PREFILL_LABEL)
+from argus.collab_crypto import validate_payload
 from argus.vessel_reports import CATEGORIES, make_report
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -117,6 +118,31 @@ class ReportAITests(unittest.TestCase):
         self.assertIn("Brain level Medium, score 6", text)
         self.assertIn("not evidence of hostile intent", text)
 
+    def test_extensive_prefill_fits_encrypted_sharing_for_every_contact(self):
+        for item in self.items:
+            with self.subTest(item=item["id"]):
+                pack = build_pack(snapshot(item), item, context(item))
+                draft = prefill_report(pack)
+                validate_payload("report", make_report(snapshot(item), draft["category"], draft["text"]))
+                self.assertIn("SOC analyst review:", draft["text"])
+                self.assertIn("Cause and intent remain unknown", draft["text"])
+                self.assertIn("duty officer decides every action", draft["text"])
+                self.assertNotIn(PREFILL_LABEL, strip_label(draft["text"]))
+                for fact in pack["facts"]:
+                    if fact["id"] in draft["evidence"]:
+                        self.assertIn(fact["text"], draft["text"])
+
+    def test_live_prefill_preserves_unknowns_and_available_ais(self):
+        for record in (None, RECORD):
+            draft = prefill_report(build_pack(LIVE, live=record))
+            self.assertIn("No Brain assessment", draft["text"])
+            self.assertIn("AIS is self-reported", draft["text"])
+            self.assertIn("Infrastructure exposure and responder availability not established", draft["text"])
+            if record:
+                self.assertIn("10.2 kn", draft["text"])
+                self.assertIn("12:11:58 UTC", draft["text"])
+            validate_payload("report", make_report(LIVE, draft["category"], draft["text"]))
+
     def test_wrong_times_positions_numbers_names_ids_and_level_are_found(self):
         pack = self.pack("SIM-50")
         text = ("Simulated contact VESNA DRIFT (SIM-50) at 53.60 N, 4.90 W at T+02:10 and 14:05 UTC, doing 15 kn, "
@@ -177,7 +203,7 @@ class ReportAITests(unittest.TestCase):
     def test_empty_long_and_missing_parts_are_reported(self):
         pack = self.pack("SIM-50")
         self.assertEqual(self.kinds(pack, "  \n"), ["missing"])
-        self.assertIn("length", self.kinds(pack, "Simulated VESNA DRIFT, Brain level Medium. " + "x" * 2000))
+        self.assertIn("length", self.kinds(pack, "Simulated VESNA DRIFT, Brain level Medium. " + "x" * 4000))
         missing = check_report(pack, "A simulated vessel slowed near the line.", "Other")["findings"]
         self.assertEqual([finding["kind"] for finding in missing], ["missing", "missing"])
 

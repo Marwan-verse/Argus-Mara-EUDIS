@@ -38,6 +38,12 @@ receiving client. Reports do not enter Brain scoring, response dispatch or eithe
 demo JSON file. They survive replay reset but remain session-local in memory.
 This extends the annotation-only workflow described above.
 
+D111 expands the native report narrative to 4,000 characters and prepopulates
+eight editable sections from the local evidence pack, without a network or AI
+call. Facts retain provenance, unknowns remain explicit and review stays pending.
+Prefill respects the existing encrypted message budget; report keys and session
+storage are unchanged. Analysts can replace the full narrative before submission.
+
 *Proposed implementation structure, 7 October 2026. This follows decisions D13–D15 and D22. It does not change the seven-beat demo.*
 
 ## Browser frontend (D37, 9 October 2026)

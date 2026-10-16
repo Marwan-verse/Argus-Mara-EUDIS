@@ -36,11 +36,11 @@ from argus.provenance import now_utc
 from argus.satellite import atomic_json, json_http
 from argus.satellite_ai import API, PRICE_VERIFIED, PRICES, exclusive, get_key, read_ledger
 from argus.space import finite
-from argus.vessel_reports import CATEGORIES
+from argus.vessel_reports import CATEGORIES, REASON_LIMIT
 
 PACK_VERSION = 1
-REASON_LIMIT = 2000
 TARGET_LENGTH = 1500
+PREFILL_LABEL = "System-prefilled draft · pending analyst review"
 TEMPLATE_LABEL = "Template draft from system data · reviewed by analyst"
 AI_LABEL = "AI-assisted draft · reviewed by analyst"
 DATA_TAGS = {"simulated": "SIMULATED", "fictional": "EXERCISE", "real": "REAL"}
@@ -239,6 +239,67 @@ def fact_text(pack: dict, topic: str) -> str | None:
 
 
 # ----- template draft ------------------------------------------------------------------
+
+
+def prefill_report(pack: dict) -> dict:
+    """A fuller, editable local draft; never calls AI or invents missing evidence.
+
+    Keep complete facts and their provenance. Reserve space for every section,
+    including human review, before adding detail within the SOC message budget.
+    """
+    sections = [
+        ("Vessel and source", ("identity", "source", "data_label"),
+         "Source detail not available in this snapshot."),
+        ("Position and movement", ("position", "motion", "destination", "raised"),
+         "Movement and observation time not available in this snapshot."),
+        ("Assessment and incident", ("summary", "level", "incident", "no_brain"),
+         "No incident assessment available in this snapshot."),
+        ("Indicators and findings", ("factor", "finding", "rule"),
+         "No detector findings available in this snapshot."),
+        ("Infrastructure and response context", ("line", "line_other", "responders"),
+         "Infrastructure exposure and responder availability not established by this snapshot."),
+        ("Evidence limits", ("ais_limit", "small_vessel", "data_issue"),
+         "Cause and intent remain unknown. An AIS gap or unmatched radar contact is a lead for review."),
+        ("Suggested follow-up", ("recommendation",),
+         "Proposed for analyst review: verify identity and observation timing, corroborate available evidence, "
+         "and record alternative explanations before requesting a duty-officer decision."),
+        ("SOC analyst review", (),
+         "Pending analyst review. Record your assessment, corroboration, outstanding questions and requested "
+         "follow-up here. Cause and intent remain unknown. The system triggers no operational action: "
+         "the duty officer decides every action."),
+    ]
+    selected = [[] for _ in sections]
+    # The analyst review footer always restates the pack's no-action boundary.
+    used = fact_ids(pack, "no_action")
+
+    def render():
+        return "\n\n".join(
+            title + ":\n" + ("\n".join(lines) if lines else fallback)
+            for (title, _topics, fallback), lines in zip(sections, selected)
+        ) + "\n\n— " + PREFILL_LABEL
+
+    # First facts in each section precede additional detail, so rich detector
+    # output cannot displace identity, caveats or the analyst's review section.
+    candidates = [[fact for topic in topics for fact in pack["facts"] if fact["topic"] == topic]
+                  for _title, topics, _fallback in sections]
+    for offset in range(max(map(len, candidates), default=0)):
+        for index, facts in enumerate(candidates):
+            if offset >= len(facts):
+                continue
+            fact = facts[offset]
+            selected[index].append(f"{fact['label']}: {_sentence(fact['text'])}")
+            text = render()
+            # canonical SOC JSON escapes non-ASCII; leave room for the envelope.
+            if len(text) > REASON_LIMIT or len(json.dumps(text, ensure_ascii=True)) > 5000:
+                selected[index].pop()
+            else:
+                used.append(fact["id"])
+    omitted = len(pack["facts"]) - len(used)
+    return {"text": render(), "category": pack["category"], "evidence": used,
+            "method": "prefill", "model": None,
+            "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "notes": ([f"{omitted} evidence facts omitted to fit the report; the PDF evidence appendix retains the full pack."]
+                      if omitted else [])}
 
 def _sentence(text: str) -> str:
     text = text.strip()
@@ -445,7 +506,8 @@ def allowed(pack: dict) -> dict:
 
 def strip_label(text: str) -> str:
     """The report body without the generated-text label line."""
-    lines = [line for line in text.splitlines() if TEMPLATE_LABEL not in line and AI_LABEL not in line]
+    lines = [line for line in text.splitlines()
+             if not any(label in line for label in (TEMPLATE_LABEL, AI_LABEL, PREFILL_LABEL))]
     return "\n".join(lines).strip()
 
 

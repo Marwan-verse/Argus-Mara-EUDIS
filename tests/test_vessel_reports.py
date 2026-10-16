@@ -3,7 +3,7 @@ from copy import deepcopy
 import unittest
 
 from argus.collab_crypto import validate_payload
-from argus.vessel_reports import CATEGORIES, ReportStore, make_report
+from argus.vessel_reports import CATEGORIES, REASON_LIMIT, ReportStore, make_report
 
 VESSEL = {"id": "123456789", "name": "TEST CONTACT", "label": "simulated", "lat": 53.2, "lon": -6.1}
 
@@ -21,7 +21,7 @@ class VesselReportTests(unittest.TestCase):
     def test_received_reports_reject_invalid_fields_and_unsafe_text(self):
         original = make_report(VESSEL, "Other", "Please verify this observation.")
         invalid = [{**original, "category": []}, {**original, "category": "Unknown"},
-                   {**original, "reason": " "}, {**original, "reason": "x" * 2001},
+                   {**original, "reason": " "}, {**original, "reason": "x" * (REASON_LIMIT + 1)},
                    {**original, "reason": "hidden\u202etext"}, {**original, "created_utc": "yesterday"},
                    {**original, "created_utc": "2026-10-15T12:00:00"}, {**original, "id": "bad"},
                    {**original, "sender": "spoofed analyst"}]
