@@ -17,6 +17,7 @@ from test_gfw_sar import fetched
 
 class RadarDesktopTests(unittest.TestCase):
     def setUp(self):
+        # Collect earlier tests' Tk objects here, on the main thread (see test_soc_launcher).
         gc.collect()
 
     def test_radar_markers_details_and_incident_review(self):
@@ -84,6 +85,10 @@ class RadarDesktopTests(unittest.TestCase):
                 self.assertEqual(errors, [])
             finally:
                 app.close()
+                # Also collect this test's own Tk objects now, on the main thread. If a later
+                # test's background job collects them, a Tk __del__ waits forever on the
+                # destroyed interpreter and Python cannot exit (Windows 3.11 CI timed out).
+                gc.collect()
 
 
 if __name__ == '__main__':
