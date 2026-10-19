@@ -21,7 +21,7 @@ from test_supabase_ais import FakeDatabase
 ROOT = Path(__file__).resolve().parents[1]
 TOKEN = 'eyJhbGciOiJSUzI1NiJ9.' + 'a'*40 + '.synthetic-test-' + 'b'*20  # not a real token
 SECRET = 'sb_secret_' + 'x'*24
-NO_TOKEN = {'GFW_API_TOKEN': '', 'ARGUS_SUPABASE_KEY': SECRET, 'ARGUS_SUPABASE_KEY_FILE': '', 'ARGUS_SUPABASE_LINK': ''}
+NO_TOKEN = {'GFW_API_TOKEN': '', 'ARGUS_SUPABASE_URL': 'https://example.supabase.co', 'ARGUS_SUPABASE_KEY': SECRET, 'ARGUS_SUPABASE_KEY_FILE': '', 'ARGUS_SUPABASE_LINK': ''}
 START, END = '2026-10-10', '2026-10-12'
 SCENE_START, SCENE_END, SCENE_TIME = '2026-10-10T18:05:20Z', '2026-10-10T18:05:46Z', '2026-10-10T18:05:33Z'
 EXACT_TIME = '2026-10-10T18:05:41Z'

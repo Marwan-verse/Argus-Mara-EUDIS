@@ -1,6 +1,6 @@
-"""Optional link to the team's Supabase database: AIS history and satellite comparison.
+"""Optional operator-configured Supabase archive: AIS history and satellite comparison.
 
-The database copies the team's public Railway AIS feed by itself every 30 seconds
+The configured database can copy the operator's AIS feed every 30 seconds
 (pg_cron + pg_net, see supabase/migrations), so AIS history keeps growing while
 every laptop is closed. This module only reads AIS at an image's acquisition
 time, saves image scenes and contacts, and asks the database to compare both
@@ -23,12 +23,9 @@ from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-# D106: the one team database is argus-mara in the Argus Mara organisation.
-DEFAULT_URL = 'https://lcpgnzvkntqdhejrsgpa.supabase.co'
+# Public distributions never select a maintainer's database.
+DEFAULT_URL = ''
 ROOT = Path(__file__).resolve().parents[1]
-# D108: the team project's publishable key may ship in this private repository. The database
-# lets it run only these read-only functions; every write still needs the secret key.
-PUBLISHABLE_KEY = 'sb_publishable_kpSx9M-p6dLzdJVy7KADXA_IDrgi8Sl'
 READ_FUNCTIONS = frozenset({'argus_ais_status', 'argus_ais_rows', 'argus_recent_tracks', 'argus_history_index'})
 SERVICE, ACCOUNT = 'ArgusMara.Supabase', 'secret-key'
 LIMIT = 16 * 1024 * 1024
@@ -62,20 +59,22 @@ def linked_url(root=None):
         return None
     url = url.strip().rstrip('/')
     parts = urlsplit(url)
-    if parts.scheme != 'https' or parts.path or not (parts.hostname or '').endswith('.supabase.co'):
+    if (parts.scheme != 'https' or parts.path or parts.query or parts.fragment
+            or parts.username or parts.password or not (parts.hostname or '').endswith('.supabase.co')):
         return None
     return url
 
 
 def base_url(*, follow_link=True, root=None):
-    """ARGUS_SUPABASE_URL, else the project this workspace was linked to, else the team project.
+    """Explicit ARGUS_SUPABASE_URL, else the project this workspace was linked to.
 
-    New keys are checked against the explicit or team project (``follow_link=False``).
+    New keys require an explicit project (``follow_link=False``).
     """
     url = (os.environ.get('ARGUS_SUPABASE_URL', '').strip() or (linked_url(root) if follow_link else None)
            or DEFAULT_URL).rstrip('/')
     parts = urlsplit(url)
-    if parts.scheme != 'https' or not parts.hostname or parts.path:
+    if (parts.scheme != 'https' or not parts.hostname or parts.path or parts.query or parts.fragment
+            or parts.username or parts.password):
         raise ValueError('ARGUS_SUPABASE_URL must be an https://<project>.supabase.co address')
     return url
 
@@ -123,7 +122,7 @@ def save_key(key):
 
 def configured():
     try:
-        return bool(get_key())
+        return bool(get_key()) and bool(base_url())
     except ValueError:
         return False
 
@@ -146,7 +145,7 @@ def linked(root):
 def link(root):
     path = Path(root)/LINK_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({'url': base_url(follow_link=False), 'note': 'Coast Watch uses the team Supabase database. '
+    path.write_text(json.dumps({'url': base_url(follow_link=False), 'note': 'Coast Watch uses the configured Supabase database. '
                                 'Delete this file to stop.'}, indent=2) + '\n', encoding='utf-8')
     return path
 
@@ -183,12 +182,18 @@ def http_rpc(url, payload, key, timeout=30):
 
 
 def read_key():
-    """This computer's secret key, else the team project's publishable read key (D108)."""
+    """Locally configured credentials only; no bundled project or access key."""
     try:
         key = get_key()
     except ValueError:
         key = ''
-    return key or (PUBLISHABLE_KEY if base_url() == DEFAULT_URL else '')
+    if key:
+        return key
+    publishable = os.environ.get('ARGUS_SUPABASE_PUBLISHABLE_KEY', '').strip()
+    if publishable and os.environ.get('ARGUS_SUPABASE_URL', '').strip():
+        base_url(follow_link=False)
+        return publishable
+    return ''
 
 
 def own_workspace(root):
@@ -208,9 +213,9 @@ def enable_keyless_read():
 
 
 def readable(root):
-    """Team data can be read here: a linked workspace, or the app's own workspace with the publishable key.
+    """A linked workspace, or the app's own workspace with explicit read credentials.
 
-    Writing still needs a linked workspace and the secret key (``linked``). Keyless reading
+    Writing still needs a linked workspace and the secret key (``linked``). Read-only access
     is on only after ``enable_keyless_read()``, so tests and servers stay offline unless linked.
     """
     if linked(root):

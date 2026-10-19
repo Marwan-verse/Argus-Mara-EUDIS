@@ -58,6 +58,11 @@ def connect_tensorx(root, ask=getpass, choose=satellite_ai.choose_model, save=sa
 def connect_database(root, ask=getpass, rpc=supabase_ais.http_rpc, save=supabase_ais.save_key,
                      link=supabase_ais.link, attempts=3):
     """Ask for the team database secret key hidden, check it with one free status call, then link."""
+    try:
+        url = supabase_ais.base_url(follow_link=False)
+    except ValueError:
+        print('Set ARGUS_SUPABASE_URL to your own project before connecting a database.')
+        return None
     for _ in range(attempts):
         key = ask('Team database secret key, sb_secret_... (hidden, Enter to skip): ').strip()
         if not key:
@@ -66,7 +71,7 @@ def connect_database(root, ask=getpass, rpc=supabase_ais.http_rpc, save=supabase
             print('  Not saved: that is not a Supabase secret key (sb_secret_...)')
             continue
         try:
-            state = rpc(supabase_ais.base_url(follow_link=False)+'/rest/v1/rpc/argus_ais_status', {}, key)
+            state = rpc(url+'/rest/v1/rpc/argus_ais_status', {}, key)
             save(key)
             link(root)
         except (ValueError, OSError) as error:
@@ -233,7 +238,7 @@ def main(argv=None):
     # D108: reading the team database needs no key; only the computer that publishes holds one.
     database = show_database(now) if supabase_ais.readable(root) else None
     if not supabase_ais.linked(root):
-        print('  Team database   read only with the built-in key; results are published by the computer that '
+        print('  Team database   read only with locally configured credentials; results are published by the computer that '
               'holds the team key' if database is not None else
               '  Team database   not reachable · only AIS this computer records from now on can be compared')
 

@@ -6,6 +6,7 @@ import hashlib
 from importlib.util import find_spec
 from io import BytesIO
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -272,6 +273,19 @@ class CoastalScanTests(unittest.TestCase):
 
 
 class SatelliteCustodyTests(unittest.TestCase):
+    def setUp(self):
+        self.feed_config = patch.dict(os.environ, {'ARGUS_LIVE_SERVER': 'https://ais.example'})
+        self.feed_config.start()
+        self.addCleanup(self.feed_config.stop)
+
+    def test_capture_requires_a_user_configured_feed_before_any_request(self):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {'ARGUS_LIVE_SERVER': ''}):
+            workspace, _, _ = fixture(Path(temp)/'satellite')
+            with patch('argus.satellite_capture.json_http') as transport:
+                with self.assertRaisesRegex(ValueError, 'ARGUS_LIVE_SERVER'):
+                    AISCapture(workspace).capture(transport)
+                transport.assert_not_called()
+
     def real_snapshot(self, **fields):
         return snapshot(generated_utc=WHEN, feed={'status': 'live', 'label': 'real'},
             vessels=[vessel(label='real', lat=53.33, lon=-6.12, sog_kn=8, cog_deg=90,

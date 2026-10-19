@@ -297,6 +297,6 @@ def build(app):
         app.fit_ireland()
 
     app.root.after(250, fit_ireland_when_ready)
-    if os.environ.get("ARGUS_AIS_AUTOCONNECT", "1") != "0":
+    if app.ais_tracker.address.get().strip() and os.environ.get("ARGUS_AIS_AUTOCONNECT", "1") != "0":
         app.root.after(350, app.ais_tracker.connect)
     app.tools.setup()

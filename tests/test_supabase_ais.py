@@ -16,7 +16,7 @@ from test_satellite import AREA, WHEN, fixture
 
 SECRET = 'sb_secret_' + 'x'*24
 LEGACY = 'eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.c2lnbmF0dXJl'
-NO_KEY = {'ARGUS_SUPABASE_KEY': '', 'ARGUS_SUPABASE_KEY_FILE': '', 'ARGUS_SUPABASE_LINK': ''}
+NO_KEY = {'ARGUS_SUPABASE_URL': 'https://example.supabase.co', 'ARGUS_SUPABASE_KEY': '', 'ARGUS_SUPABASE_KEY_FILE': '', 'ARGUS_SUPABASE_LINK': ''}
 
 
 def database_rows():
@@ -182,25 +182,29 @@ class ProjectAddressTests(unittest.TestCase):
     def link_to(self, url):
         (self.root/supabase_ais.LINK_FILE).write_text(json.dumps({'url': url}), encoding='utf-8')
 
-    def test_without_a_link_the_team_project_is_used(self):
-        self.assertEqual(supabase_ais.base_url(), 'https://lcpgnzvkntqdhejrsgpa.supabase.co')
+    def test_without_a_link_or_explicit_url_configuration_is_required(self):
+        with self.assertRaisesRegex(ValueError, 'ARGUS_SUPABASE_URL'):
+            supabase_ais.base_url()
 
     def test_a_linked_workspace_keeps_the_project_its_key_was_checked_against(self):
         self.link_to('https://otherprojectref.supabase.co/')
         self.assertEqual(supabase_ais.base_url(), 'https://otherprojectref.supabase.co')
-        self.assertEqual(supabase_ais.base_url(follow_link=False), supabase_ais.DEFAULT_URL)
+        with self.assertRaises(ValueError):
+            supabase_ais.base_url(follow_link=False)
         with patch.dict(os.environ, {'ARGUS_SUPABASE_URL': 'https://explicitref.supabase.co'}):
             self.assertEqual(supabase_ais.base_url(), 'https://explicitref.supabase.co')
 
     def test_a_link_file_cannot_send_the_key_outside_supabase(self):
         for url in ('https://example.com', 'http://otherprojectref.supabase.co', 'https://x.supabase.co/rest', 42):
             self.link_to(url)
-            self.assertEqual(supabase_ais.base_url(), supabase_ais.DEFAULT_URL, url)
+            with self.assertRaises(ValueError):
+                supabase_ais.base_url()
 
-    def test_linking_records_the_explicit_or_team_project_not_an_old_link(self):
+    def test_linking_records_the_explicit_project_not_an_old_link(self):
         self.link_to('https://otherprojectref.supabase.co')
-        supabase_ais.link(self.root)
-        self.assertEqual(json.loads((self.root/supabase_ais.LINK_FILE).read_text())['url'], supabase_ais.DEFAULT_URL)
+        with patch.dict(os.environ, {'ARGUS_SUPABASE_URL': 'https://example.supabase.co'}):
+            supabase_ais.link(self.root)
+        self.assertEqual(json.loads((self.root/supabase_ais.LINK_FILE).read_text())['url'], 'https://example.supabase.co')
 
 
 
@@ -217,6 +221,8 @@ class ReadKeyTests(unittest.TestCase):
         self.no_secret = patch.object(supabase_ais, 'get_key', return_value='')
         self.no_secret.start()
         os.environ.pop('ARGUS_SUPABASE_READ', None)
+        os.environ['ARGUS_SUPABASE_URL'] = 'https://example.supabase.co'
+        os.environ['ARGUS_SUPABASE_PUBLISHABLE_KEY'] = 'sb_publishable_' + 'test_only_not_a_real_key'
         supabase_ais.enable_keyless_read()  # as run_gui.main does
 
     def tearDown(self):
@@ -224,11 +230,14 @@ class ReadKeyTests(unittest.TestCase):
         self.env.stop()
         self.folder.cleanup()
 
-    def test_without_a_secret_the_team_project_is_read_with_the_publishable_key(self):
-        self.assertEqual(supabase_ais.read_key(), supabase_ais.PUBLISHABLE_KEY)
-        self.assertTrue(supabase_ais.PUBLISHABLE_KEY.startswith('sb_publishable_'))
-        with patch.dict(os.environ, {'ARGUS_SUPABASE_URL': 'https://otherprojectref.supabase.co'}):
-            self.assertEqual(supabase_ais.read_key(), '')  # never another project's data with the team key
+    def test_reading_requires_an_explicit_url_and_local_publishable_key(self):
+        self.assertEqual(supabase_ais.read_key(), os.environ['ARGUS_SUPABASE_PUBLISHABLE_KEY'])
+        with patch.dict(os.environ, {'ARGUS_SUPABASE_PUBLISHABLE_KEY': ''}):
+            self.assertEqual(supabase_ais.read_key(), '')
+            self.assertFalse(supabase_ais.readable(self.root))
+        with patch.dict(os.environ, {'ARGUS_SUPABASE_URL': ''}):
+            self.assertEqual(supabase_ais.read_key(), '')
+            self.assertFalse(supabase_ais.readable(self.root))
 
     def test_only_the_apps_own_workspace_reads_without_a_link(self):
         self.assertTrue(supabase_ais.readable(self.root))
@@ -250,7 +259,7 @@ class ReadKeyTests(unittest.TestCase):
         transport = lambda url, payload, key: calls.append((url.rsplit('/', 1)[-1], key)) or {}
         for name in sorted(supabase_ais.READ_FUNCTIONS):
             supabase_ais.rpc(name, {}, transport=transport)
-        self.assertEqual({key for _, key in calls}, {supabase_ais.PUBLISHABLE_KEY})
+        self.assertEqual({key for _, key in calls}, {os.environ['ARGUS_SUPABASE_PUBLISHABLE_KEY']})
         for name in ('argus_save_scene', 'argus_compare_scene', 'argus_history_claim', 'argus_history_finish'):
             with self.assertRaisesRegex(ValueError, 'not configured'):
                 supabase_ais.rpc(name, {}, transport=transport)

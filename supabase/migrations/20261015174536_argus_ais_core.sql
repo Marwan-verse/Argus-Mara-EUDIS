@@ -56,7 +56,7 @@ create table argus.ais_sync_state (
   last_error_utc timestamptz
 );
 insert into argus.ais_sync_state (id, source_url)
-values (1, 'https://shared-live-ais-production.up.railway.app');
+values (1, 'https://your-ais-collector.example');
 
 create table argus.ais_sync_runs (
   id bigint generated always as identity primary key,

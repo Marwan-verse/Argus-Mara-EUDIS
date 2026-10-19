@@ -12,7 +12,7 @@ from argus.live_client import LivePoller, LiveState, server_url
 from desktop_prediction import AMBER, draw_areas, draw_marker, live_prediction, outlined_text
 from desktop_tracks import ReceivedTracks
 
-DEFAULT_SERVER = "https://shared-live-ais-production.up.railway.app"
+DEFAULT_SERVER = ""
 
 
 def vessel_type(value):

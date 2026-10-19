@@ -57,8 +57,8 @@ MID_FILE = Path(__file__).with_name("itu_mids.json")
 INDEX_URL = "https://data.opensanctions.org/datasets/latest/maritime/index.json"
 VERSIONS_URL = "https://data.opensanctions.org/artifacts/maritime/versions.json"
 VERSION_URL = "https://data.opensanctions.org/artifacts/maritime/{version}/maritime.csv"
-LIVE_FEED = "https://shared-live-ais-production.up.railway.app/api/v1/vessels"
-ALLOWED_HOSTS = ("data.opensanctions.org", "shared-live-ais-production.up.railway.app")
+LIVE_FEED = ""
+ALLOWED_HOSTS = ("data.opensanctions.org",)
 USER_AGENT = "ArgusMara/1.0 (EUDIS Defence Hackathon team; watchlist detector)"
 LICENCE = "CC BY-NC 4.0"
 CREDIT = f"OpenSanctions, {LICENCE}"
@@ -582,7 +582,14 @@ def scan_vessels(vessels: list[dict], watch: WatchList) -> dict:
 
 
 def _fetch_live(url: str) -> list[dict]:
-    envelope = json.loads(_http_get(url, MAX_JSON_BYTES))
+    from argus.live_client import server_url, fetch_json
+    if not url:
+        raise ValueError("Use --feed https://your-collector.example/api/v1/vessels or --file snapshot.json")
+    parts = urlsplit(url)
+    origin = server_url(f"{parts.scheme}://{parts.netloc}")
+    if parts.path != '/api/v1/vessels' or parts.query or parts.fragment:
+        raise ValueError("Feed must end in /api/v1/vessels without query parameters")
+    envelope = fetch_json(origin + '/api/v1/vessels')
     vessels = envelope.get("vessels") if isinstance(envelope, dict) else None
     if not isinstance(vessels, list):
         raise ValueError("the live feed did not return a vessel list")
@@ -624,7 +631,7 @@ def main(argv=None) -> int:
     checking.add_argument("--imo")
     checking.add_argument("--name", help="the AIS name, used only to pick between records and to warn")
     scanning = commands.add_parser("scan-live", help="check every contact in the team's live AIS feed")
-    scanning.add_argument("--feed", default=LIVE_FEED)
+    scanning.add_argument("--feed", default=(os.environ.get("ARGUS_LIVE_SERVER", "").rstrip("/") + "/api/v1/vessels") if os.environ.get("ARGUS_LIVE_SERVER") else LIVE_FEED)
     scanning.add_argument("--file", type=Path, help="a saved /api/v1/vessels response instead of the feed")
     scanning.add_argument("--all", action="store_true", help="also list the information-only matches")
     scanning.add_argument("--output", type=Path, help="write the report as JSON")

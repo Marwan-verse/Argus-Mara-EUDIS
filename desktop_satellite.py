@@ -872,8 +872,13 @@ class DesktopSatellite:
             return
         from tkinter import simpledialog
         from argus import supabase_ais
-        key = simpledialog.askstring('Connect team database',
-            'Enter the Argus Mara Supabase secret key. It is verified and saved in this computer’s credential store; never put it in chat.',
+        try:
+            url = supabase_ais.base_url(follow_link=False)
+        except ValueError:
+            self.message('Set ARGUS_SUPABASE_URL to your own project before connecting a database.')
+            return
+        key = simpledialog.askstring('Connect your database',
+            'Enter your Supabase secret key on this trusted computer. It is verified and saved in the operating system credential store; never share it.',
             show='•', parent=self.app.root)
         if not key:
             return
@@ -881,7 +886,7 @@ class DesktopSatellite:
         def work():
             if not supabase_ais.valid_key(key):
                 raise ValueError('Expected a Supabase secret or service-role key')
-            state = supabase_ais.http_rpc(supabase_ais.base_url(follow_link=False)+'/rest/v1/rpc/argus_ais_status', {}, key)
+            state = supabase_ais.http_rpc(url+'/rest/v1/rpc/argus_ais_status', {}, key)
             supabase_ais.save_key(key)
             supabase_ais.link(self.workspace.root)
             return state

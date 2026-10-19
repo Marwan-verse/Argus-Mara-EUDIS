@@ -1,516 +1,160 @@
-# ARGUS MARA: our EUDIS Defence Hackathon project
-
-**Private SOC collaboration:** the native app supports authenticated two-device
-sessions for 2–16 participants, encrypted chat/contact exchange and sharing of its existing map Ping.
-Start `RUN-SOC-WINDOWS.bat` or `sh RUN-SOC-MAC-LINUX.command` to require login.
-See [SOC deployment, groups and encryption](soc/README.md). The regular offline
-demo remains available without private credentials or a server. `python run_gui.py`
-shows sign-in with **Continue offline** (one window, no Docker) and **Start local
-server + two sign-in windows**. See [automatic local startup](soc/LOCAL-DEMO.md).
-
-For two computers using a VS Code/GitHub forwarded link, start
-`HOST-SOC-FORWARDED-WINDOWS.bat` on the account-owning machine and follow
-[the forwarded-port guide](soc/FORWARDED-PORT.md). Both native clients sign in
-to the same forwarded HTTPS URL with their existing SOC accounts.
-
-**Satellite analysis:** the native radar button opens public Sentinel catalogue
-search, small georeferenced optical/SAR crops, acquisition-time archived AIS and
-manual TensorX vision review. **Coast Watch → Start scan** enables rolling new-image
-screening around Ireland’s ~40 km coastal belt and continuous private AIS capture.
-Click an amber lead for its source pixels, image-time AIS candidates and latest
-received positions. AI contacts are unreviewed assumptions, with cached
-results and a conservative $20 pilot ceiling. Run `INSTALL-SATELLITE-WINDOWS.bat`
-once for optional image readers. **One click:** `SATELLITE-WATCH-MAC.command` or
-`SATELLITE-WATCH-WINDOWS.bat` installs the readers, asks once for the TensorX and team
-database keys and opens the app with Coast Watch running on images from the last 36 h
-(D83). See [setup and open-source accuracy plan](docs/16-satellite-ai.md).
-
-**Real alerts (D104, D107):** with the team database linked, the alert rules run on real ships near the cable routes (last 3 h of AIS, harbour craft left out). The desktop app shows the results every 5 min in Incidents and on the map, tagged AIS · REAL, and `python -m argus.live_alerts` prints them. They are rule outcomes for review, labelled real. The read-only database function comes from migration `20261016134500_argus_recent_tracks.sql`. See [real alerts](docs/21-real-alerts.md).
-
-**Team database (no key needed to read, D108):** the Supabase project `argus-mara` copies the shared
-Railway AIS feed every 30 seconds by itself, so Coast Watch can compare any image
-with AIS at its acquisition time even when no laptop was recording, both ways:
-image contacts without AIS, and large ships whose AIS position shows nothing on the
-image. Link a computer with `python scripts/configure_supabase.py`. See
-[the database guide](supabase/README.md) and D74.
-
-**Radar contacts (optional, D84):** Global Fishing Watch publishes Sentinel-1 radar
-vessel detections, and radar sees through cloud. Connect a free non-commercial token
-once with `python scripts/configure_gfw.py`, then press **Coast Watch → Fetch radar**
-(or run `python -m argus.gfw_sar fetch`). Each radar cell is compared with the team AIS
-at the radar time. *Radar contact without AIS* leads are violet on the map and listed in
-Incidents. Detections arrive 4–5 days late. Powered by Global Fishing Watch. See
-[how it works and what was checked](docs/19-gfw-radar.md).
-
-**Magnetics (optional, D91):** the magnet button on the left rail opens two real uses of
-magnetics; neither watches the sea, because a ship's field fades as 1/r³ (a seabed sensor
-sees a 200 m ship only within about 0.5–1 km). *Live magnetic data*, off by default, polls
-NOAA SWPC Kp and the Valentia observatory and shows a storm tier in the header: context
-for electrical cable alarms that never changes an alert. *Plan search* turns the exercise
-vessel's or the selected alert's track (slowdown → cable crossing → speed recovery) into a
-magnetometer search corridor with lines, line-km and hours per platform, ranked search
-points and a GeoJSON export to `data/magnetics/`; every number is a labelled assumption.
-`python -m argus.geomag` prints the live status; `python -m argus.survey_plan` the worked example.
-
-> *"Ireland can crew two ships. Argus Mara gives them a hundred eyes."*
-
-**What it is:** a rule-based early-warning demonstration for Ireland's undersea internet cables and gas and power lines. It works like this:
-- It watches ships using their public AIS signals and satellite radar.
-- It flags review cues such as speed changes, reception gaps and uncertain radar associations.
-- It then starts a **countdown to the cable at risk** and shows which response can get there in time.
-- **A human always decides.**
-
-**Where and when:** the EUDIS Defence Hackathon at DCU:Innovate Hub, Dublin, **15–17 October 2026**. We are in **Challenge 3**, the Department of Defence's "Space-Enabled Maritime Domain Awareness".
-
-**Team:** the Cyber team, eight of us, captained by Mykhailo.
-
-**Status (8 Oct 2026):** **our place is confirmed**. The seven-beat offline interface,
-rule-generated alert and fictional Space evidence page run together. The two published
-historical radar contacts remain a separate review example; measured evaluation numbers
-and external data replacement are pending. See [DECISIONS.md](DECISIONS.md) D29–D30.
-
-**Irish vessel images for the demonstration:** [Nazar's offline image pack](demo/imagery/README.md)
-contains six internet-cable risk demo cards, ten labelled vessel close-ups from
-Ireland and the North Sea, two Irish overviews and contact sheets. The imagery is
-real; names/codes are fictional and cable/behavior overlays are simulated.
-Sources, dates and reuse terms are included with the images.
-
-**Run the native desktop application:** double-click `RUN-GUI-WINDOWS.bat` on Windows.
-It creates an ignored `.venv` and installs the UI packages on first run. In a Git clone,
-`UPDATE-AND-RUN-WINDOWS.bat` (Windows) or `UPDATE-AND-RUN-MAC.command` (macOS) first pulls
-the latest commits of the checked-out branch, then starts the app. Alternatively,
-create a virtual environment, run `python -m pip install -r requirements.txt`, then
-`python run_gui.py`. The app needs Python 3.10+ with Tkinter (Tcl/Tk) enabled; on
-Windows, include **Tcl/Tk and IDLE** in the Python installer. Use
-`python run_gui.py --check` to validate the local inputs without opening a window.
-
-The app opens in the **tactical chart** look: a detailed dark chart built from EMODnet
-Bathymetry relief (seabed and land), a satellite HD layer (Esri World Imagery, street level),
-a lat/lon margin scale, cursor position with MGRS, a nautical-mile scale bar and marking
-banners. Both maps are online and cached on the device; run
-`python scripts/prefetch_map_tiles.py` once before a demo to store Irish waters (about
-3,200 tiles, about 100 MB) for offline use. The **original look** stays available:
-`UPDATE-AND-RUN-OLD-MAC.command`, `UPDATE-AND-RUN-OLD-WINDOWS.bat`,
-`RUN-GUI-OLD-WINDOWS.bat`, or `python run_gui.py --old`.
-CustomTkinter styles the native dashboard and Pillow displays NASA JPEG imagery; the
-same two JSON files drive the replay. Choose **Continue offline** or use
-`python run_gui.py --offline` for a single session without Docker. The local
-two-window option starts the separate SOC Docker stack when selected.
-The map is draggable and zoomable. Use the mouse wheel or scroll vertically with
-two fingers on a trackpad over the map to zoom around the pointer; the `+` and `−`
-buttons also remain available. **Offline coastline** covers the world without
-internet; **NASA Blue Marble · online** requests only visible imagery tiles. Use
-**World** to fit the globe and the map layers panel to show NGA World Port Index
-points and historical, stylized submarine cable routes. These reference layers are
-display context only; they do not feed the alert or countdown. The cable layer is
-CC BY-NC-SA 3.0 and must be replaced or licensed for commercial distribution.
-The right `+` opens tabs in a resizable side pane; the bottom `+` opens panels in a
-resizable lower pane. Drag tabs to reorder or move them between panes, or right-click
-a tab to move or close it. The lower-pane menu also includes map tools.
-
-**Browse reference data:** open **Port directory** to search all 3,805 local ports
-by name, WPI ID or country code. Filter by country or restrict the list to the
-current map view. Select a row for coordinates and provenance; double-click it,
-press Enter or choose **Center selected port** to locate it. Click a port marker
-to inspect it, or a numbered cluster to zoom in. Port names appear at closer zooms.
-**Cable directory** searches 497 historical route records and fits a selected
-route, including systems crossing the date line. **Fit exercise** frames the
-scenario track and cable. The scale bar and cursor coordinates help orientation.
-These additions remain offline. The desktop now uses the dark console theme
-described in the integrated AIS section below.
-
-**Optional shared live AIS:** [live/README.md](live/README.md) explains the single
-Railway collector, private persistent archive, English browser map and live mode
-of the team's native dashboard. Run `python run_live_gui.py --server https://YOUR-SERVER`
-to receive the shared observations; `run_gui.py` remains the offline exercise.
-Deploy the separate `feat/shared-live-ais` branch with a `/data` volume and put the
-AIS key only in Railway Variables. A tested local service is not a confirmed
-cloud deployment or proof of a working real feed. See decision D36.
-
-> **The one rule: assemble the whole demo first, then make it good.** Ugly, on invented data,
-> but complete. Then replace one invented part per day with a real one. If a replacement fails,
-> the working demo is still there.
-
----
-
-## Browser frontend development
-
-The browser replay, live AIS console, evidence controls and recorder map export
-use Svelte 5. Run `npm ci`, `npm run check`, `npm run build` and `npm run test:browser`
-from the repository root. Committed bundles keep the offline demo and Python
-server runnable without Node. See [the UI guide](ui/README.md) for setup and checks.
-
-## The demo the judges will see
-
-1. **A map of Ireland:** ships move, cables lie on the seabed, and the shallow areas where an anchor can reach the seabed glow.
-2. **A fictional tanker enters a simulated AIS reception gap** and disappears from the AIS layer.
-3. **A separate simulated radar contact appears.** Its 228 m length estimate and the tanker's 180 m AIS declaration warrant review; association and identity are unconfirmed.
-4. **AIS returns and the vessel turns toward an illustrative cable.** Its observed speed reaches 9.1 kn at minute 90; the cause is unknown.
-5. **The rule-generated alert appears, with a ticking countdown:** expected cable crossing in 1 h 13 min 31 s; earliest planning estimate 1 h 1 min 15 s.
-6. **The response panel:** assumed aircraft and VHF responses arrive in time; the patrol ship and next satellite look do not.
-7. **The officer approves**, and an evidence pack is generated.
-
-Beats 1–7 are pinned down in [`demo/`](demo/). Regenerate with
-`python3 demo/make_scenario.py`, then `python3 -m argus.brain`, and run
-`python3 scripts/check_contracts.py`. The generator does not overwrite Brain's alert.
-
-## The plan
-
-No hour-by-hour schedule — we do not yet know what will take how long. **Two hard deadlines
-only.**
-
-| Stage | What happens |
-|---|---|
-| **1. Now** | Each workstream builds its own piece against the sample files. Nobody waits for anybody |
-| **2. ⬅ hard deadline: Sun 11 Oct, evening** | **The demo runs end to end.** All seven beats, on invented data. Screen recording made. Until this works, no new work starts |
-| **3. Then** | Replace invented parts with real ones, one at a time. Real cables and depth, countdown v2, one real space example, and the two numbers |
-| **4. ⬅ hard deadline: Tue 13 Oct evening** | **Feature freeze.** Anything not working is cut. Wed: offline dry runs, final screen capture, `git tag pre-hackathon` |
-| **5. 15–17 Oct** | The hackathon. Mentors first, build second. Freeze Fri 17:00. Pitch Sat |
-
-Details in [docs/04-work-plan.md](docs/04-work-plan.md); the Russian version — the one to read
-daily — is [docs/plan-ru.md](docs/plan-ru.md).
-
-## Who owns what
-
-| Workstream | Owners | In plain words | This week's job |
-|---|---|---|---|
-| **Story + integration** | **Mykhailo** (captain) | The pitch and the people | Organisers, demo script, **the AIS recorder on his own machine**; every evening checks the demo still runs |
-| **Data** | **Ihor Maslovskyi** + **Bohdan** | Collects everything: cables, seabed depth, traffic | Cable routes and depth; vessel-density grids; the scenario file |
-| **Brain** | **Nazar Kyrychenko** + **Myroslav** | Notices suspicious behaviour and runs the countdown | Anchor-drag rule; countdown; response ETAs; the two numbers |
-| **Space** | **Nazariy Buryak** | Satellite radar: reviews AIS-unmatched contacts and checks vessel size with uncertainty | Offline evidence packs, provenance manifest, AIS handoff and two real contacts implemented; [instructions and remaining dataset access](space/README.md#update-for-teammates--8-october-2026) |
-| **Interface** | **Adam Pohořilský** + **Marwan** | What the judges see | Map, moving vessels, alert card with the live countdown, action panel, evidence page |
-
-**Why pairs.** One person who gets stuck goes quiet for two days; two people talk, and talking
-unsticks them. Space has a single owner because it is the one piece nobody else depends on.
-
-**How we stay unblocked:** two JSON files, agreed once — `demo/scenario.json` (*what happened*,
-written by Data) and `demo/alerts.json` (*what Argus Mara noticed*, written by Brain). The
-interface reads both and plays them. **No backend in v1**, so there is nothing to deploy and
-nothing to break on stage. Full contract: [demo/README.md](demo/README.md).
-
-**Data we do not have to collect ourselves:** Global Fishing Watch has
-satellite-radar detections over Irish waters including *AIS-unmatched* contacts that need review;
-EMODnet has shipping-density grids for Irish waters; the Danish Maritime Authority publishes
-free raw AIS, though for Danish waters. There is no free archive of raw *Irish* AIS, so we tune
-the detector on the Danish data and show on our own recording that it works on Irish traffic.
-Details and links: [plan §4.5](docs/04-work-plan.md).
-
-"How to build it" for every piece is in [docs/05-build-guide.md](docs/05-build-guide.md).
-
-## Open tasks
-
-**Start now**
-
-- [x] ~~Start the AIS recorder.~~ **Done — running since 7 Oct**, on Mykhailo's own Mac.
-      It stays on until we leave for the event. [Instructions, if anyone else needs them](recorder/README.md).
-- [ ] Confirm it is actually writing: `.venv/bin/python recorder/check.py` about fifteen minutes
-      after starting, then once a day. *Owner:* **Mykhailo**
-- [ ] Share a copy of `data/ais/` with Brain every couple of days (a zip in the team chat is
-      fine — it is git-ignored and must never go to GitHub). *Owner:* **Mykhailo**
-- [ ] Get a Global Fishing Watch API token and pull its **radar detections for Irish waters**,
-      especially the *AIS-unmatched* contacts for review. **The request/fetch CLI is ready; the account step is
-      pending.** The live client that compares them with team AIS is `argus/gfw_sar.py` (D84).
-      The selected public-data path already supplies two historical contacts.
-      API reports contain grid counts; per-contact downloads supply scene IDs and lengths.
-      [Space instructions](space/README.md). *Owner:* **Nazariy**
-- [x] Offline radar/AIS matching, custody candidates and the vessel-length review check:
-      [`argus/space.py`](argus/space.py), with tests. *Owner:* **Nazariy**
-- [x] Review the mentor-suggested SAR, imagery and maritime datasets; document source priorities,
-      access limits and handoffs to Data, Brain and Interface. [Space dataset plan](docs/10-space-dataset-plan.md).
-      *Owner:* **Nazariy**
-- [x] Extend Space with a coverage manifest, normalized AIS input and offline evidence pages.
-      Run `python3 -m argus.evidence` for the two historical contacts; a separate fictional
-      pack supports the demo handoff. [Instructions](space/README.md#generate-an-offline-evidence-pack).
-      *Owner:* **Nazariy**, with Data, Brain and Interface handoffs
-- [ ] Verify the newer GFW per-contact export schema and obtain overlapping SAR/AIS data.
-      The verified historical CSV remains the fallback; the newer adapter and a recent real
-      combined replay are pending. [Current status](space/README.md#workstream-status).
-      *Owner:* **Nazariy**, with Data, Brain and Interface handoffs
-- [ ] Download cable and pipeline routes (EMODnet, TeleGeography), seabed depth (GEBCO or
-      EMODnet), and the EMODnet vessel-density grids. *Owners:* **Ihor, Bohdan**
-- [x] `argus/brain.py`: read `scenario.json` → write `alerts.json` from four review cues;
-      countdown v1 and response options are in `argus/countdown.py`.
-      *Owners:* **Nazar K., Myroslav**
-- [x] Brain detectors for a vessel stopped away from ports, a dark vessel seen by satellite radar
-      while its AIS is silent, and a declared status or destination that contradicts the track, with
-      replay stories SIM-54 to SIM-56. [What they find](docs/12-argus-mara-alert-levels.md#brain-detectors).
-      *Owner:* **Myroslav**
-- [ ] Agree whether `dark_vessel` may also score the fictional exercise: it would open the exercise
-      incident at Medium at T+40, when the radar sees the tanker in its AIS gap (D63).
-      *Owners:* **Nazar K., Myroslav, Mykhailo**
-- [x] `ui/index.html`: offline map, cable line, vessel replay, approval and evidence export.
-      *Owners:* **Adam, Marwan**
-- [x] Four-minute [demo runbook](docs/demo-runbook.md) and [one-pager](docs/one-pager.md) drafted; live rehearsal and recording still required. *Owner:* **Mykhailo**
-
-**Then**
-
-- [ ] Mark the cable sections shallower than 250 m — the anchor-reach zone. *Owners:* **Ihor, Bohdan**
-- [ ] Countdown v2 with an uncertainty cone (≈50 futures). *Owners:* **Nazar K., Myroslav**
-- [ ] The two numbers: false alarms per day vs a geofence, and *Eagle S* warning time.
-      *Owners:* **Nazar K., Myroslav, Mykhailo**
-- [x] Find **one real** unmatched radar contact: **two published GFW contacts**, with original
-      rows, source attribution and checksums. These are review candidates, not proof of AIS
-      shutdown. [Examples and limitations](space/README.md#two-verified-real-contacts).
-      *Owner:* **Nazariy**
-- [x] [`PRIOR_WORK.md`](PRIOR_WORK.md) drafted from the pre-event repository; review and create the planned tag on 14 Oct. *Owner:* **Mykhailo**
-
-**Optional, ten minutes each — send and forget, nothing waits on these**
-
-- [ ] Email the Sea-Scan team at Trinity ([why, and the template](docs/04-work-plan.md#48-sea-scan-trinity-worth-sending-not-worth-waiting-for)).
-      Without any reply we may still say *"designed to complement Sea-Scan"*. *Owner:* **Mykhailo**
-- [ ] Ask CADFEM for the free Ansys STK licence (satellite passes) — needs an `@setu.ie`
-      address, not Gmail. *Owner:* **Mykhailo / Nazariy**
-- [ ] If we missed the 7 Oct organisers' webinar, ask Kevin Littlewood for the recording.
-      *Owner:* **Mykhailo**
-
-**What we are deliberately NOT building:** a learned ML detector, an LLM brief, drones, new
-satellite tasking, a real Sea-Scan integration, a database or logins. If someone proposes one,
-the answer is "after the hackathon". ([plan §4.6](docs/04-work-plan.md))
-
-## Rules we follow
-
-- **A human decides every action.** Nothing kinetic, and no weapons.
-- **Public data only.** Use fictional ship names in demo scenarios, and label everything *real*, *reconstructed* or *simulated*.
-- **Never commit secrets** such as API keys; use environment variables.
-- **Don't call Trinity's Sea-Scan our partner** unless their team agrees in writing.
-- **Always keep a demo that runs end to end**, even an ugly one. Cut, don't stretch.
-- **Every evening at 21:00, a 15-minute call.** Everyone shares a screen — showing, not
-  describing. If you are stuck, say so on the call, not in a message at 2 a.m.
-
-## What's in this repo
-
-For a short, plain-English list of app functions and where to find them, open
-the [feature guide by category](docs/features/README.md).
-
-| Path | What |
-|---|---|
-| [recorder/](recorder/) | The ship recorder — double-click to start — plus a health check and a map preview |
-| [demo/](demo/) | **The contract everyone builds against:** the scenario and alert files, with a generator |
-| [space/](space/) | Nazariy's offline radar/AIS tools, real contact examples, and Space handoff instructions |
-| [argus/](argus/) | Python analysis, Space importers and shared contract checks; Brain implementation goes here |
-| [ui/](ui/) | Interface workstream's static browser entry point and offline assets |
-| [DECISIONS.md](DECISIONS.md) | Decisions we've made, and why |
-| [docs/01-hackathon-analysis.md](docs/01-hackathon-analysis.md) | The event, the judges, past winners, Irish context |
-| [docs/02-ideas.md](docs/02-ideas.md) | The full Argus Mara brief (§1) |
-| [docs/03-playbook.md](docs/03-playbook.md) | The 4-minute pitch, hard questions, demo rules |
-| [docs/04-work-plan.md](docs/04-work-plan.md) | The detailed plan with dates and checklists |
-| [docs/05-build-guide.md](docs/05-build-guide.md) | How to build each part |
-| [docs/06-challenge-3-deep-dive.md](docs/06-challenge-3-deep-dive.md) | Everything about our challenge |
-| [docs/plan-ru.md](docs/plan-ru.md) | The plan in Russian, in simple words |
-| [docs/sources.md](docs/sources.md) | Sources |
-| [docs/07-architecture.md](docs/07-architecture.md) | The current code layout, language choices, contract units and workstream ownership |
-| [docs/08-research-and-next-ideas.md](docs/08-research-and-next-ideas.md) | Checked primary sources, caveats and suggested next improvements |
-| [docs/09-team-skills.md](docs/09-team-skills.md) | How teammates download the repository skills |
-| [docs/10-space-dataset-plan.md](docs/10-space-dataset-plan.md) | Space dataset comparison, implementation sequence and handoffs to Data, Brain and Interface |
-| [docs/12-argus-mara-alert-levels.md](docs/12-argus-mara-alert-levels.md) | How alert levels are scored and how the docked alert panel works |
-| [docs/14-aircraft-and-magnetic-sensing.md](docs/14-aircraft-and-magnetic-sensing.md) | Research (15 Oct): public aircraft (ADS-B) data, tasked aircraft and magnetic sensing between satellite looks, with fleet corrections and a build plan |
-| [docs/demo-runbook.md](docs/demo-runbook.md) | Four-minute click and talk script, offline acceptance and fallback steps |
-| [docs/one-pager.md](docs/one-pager.md) | Current demonstrated capability and explicit validation limits |
-| [docs/ui-skills-survey.md](docs/ui-skills-survey.md) | UI skills and tools ranked for this static offline console |
-| [PRIOR_WORK.md](PRIOR_WORK.md) | Draft declaration of work completed before the event |
-| [skills/](skills/) | Portable codebase and interface skills for teammates |
-| [scripts/check_contracts.py](scripts/check_contracts.py) | Checks the two demo JSON files before integration |
-
-## Integrated desktop AIS and SAR next step (12 October)
-
-Launch `RUN-GUI-WINDOWS.bat`. The native layout now follows the Osiris reference:
-a full-window chart, compact gold identity header, UTC/feed readouts, narrow icon
-rails, bottom map-mode controls and floating panels. The old sidebar, summary
-cards and permanent assessment column are removed from the main application.
-F11 toggles fullscreen.
-
-The application automatically connects to the team's shared service at
-`https://shared-live-ais-production.up.railway.app`. It starts with the Irish
-coastal region in view and draws every received position, independent of the
-90-row directory page. Green ships have fresh fixes, muted ships are stale and
-gold identifies the selected boat. Shapes follow received AIS course when
-available; positions are never predicted. Provider reception is incomplete;
-these are all received contacts, not a claim to observe every ship at sea.
-
-Click any ship to open its name, MMSI, received UTC and evidence label. The
-triangle icon opens the directory. Search any contact by name or MMSI, use
-**Center selected** or **Fit AIS**, and use **Show more** to extend the directory.
-The latest validated snapshot is cached in ignored
-`data/desktop/ais_latest.json` for immediate display and offline use, with its
-actual timestamps. Cached observations are never presented as a live connection.
-An alternative service can be entered in the directory or supplied through
-`ARGUS_LIVE_SERVER`; switching services clears the previous service's contacts.
-Disconnect clears displayed contacts and stops polling.
-
-Selecting a ship also draws its **recorded path** in gold, with a marker at the
-first retained fix. Other ships' paths stay hidden. **Clear ship selection**
-removes the path; **Show selected ship path** toggles it and **Fit recorded path**
-frames the received fixes. Local history survives app restarts in the same
-ignored cache, with limits of 24 hours, 720 fixes per ship and 100,000 fixes in
-total. Older contacts can be evicted to stay within the limit. Long gaps (over
-15 minutes), source-stream changes and provenance changes break the line.
-The starting fix describes where local recording began; a departure port is
-unknown and voyages before recording cannot be recovered from the public feed.
-
-**Declared destination** shows the vessel's unverified AIS Message 5 text and
-its separate received UTC, following the
-[USCG Message 5 definition](https://www.navcen.uscg.gov/ais-class-a-static-voyage-message-5).
-No destination line or future route is invented. Until a declaration is received
-(or when the service has not yet deployed the optional field), it reads
-**Not reported**. Destination updates do not reset the age of a position fix.
-
-The **EXERCISE** map control opens the fictional replay and its explicit operator
-review. Exercise overlays and playback controls are hidden in the initial Irish
-AIS view. Hiding the exercise returns to Ireland. Live AIS never changes the
-fictional countdown or creates a live threat score or operational response.
-
-The diamond icon opens the [SAR next-step plan](docs/08-sar-next-step.md). Raw
-SAR detection remains planned work. Local display geometry and the fictional
-contracts stay usable without a live connection.
-
-### Irish ports and left alerts panel
-
-The **Alerts** panel is docked between the left icon rail and the map. It lists
-labelled simulated contacts and the fictional exercise alert, sorted Critical to
-Low, and opens a review window to acknowledge, escalate or reject each one. See
-[Argus Mara alert levels](docs/12-argus-mara-alert-levels.md) for the scoring rules
-and the panel. Live AIS is not scored; no live threat assessment or operational
-action is created.
-
-Irish ports are displayed by default. The offline layer adds all 142 commercial,
-fishing and ferry records from the Marine Irish Digital Atlas layers served by
-[Ireland's Marine Atlas](https://atlas.marine.ie/arcgis/rest/services/TransportNetworks/MapServer),
-alongside 21 NGA Irish reference records. Multiple categories can refer to the same
-harbour; this is not a count of unique ports or an exhaustive list of every pier
-or marina. These are historical catalogue locations, not surveyed navigation
-fixes. The source records specify **CC BY 4.0**; attribution and source hashes
-are stored in `ui/assets/irish_ports.json`.
-
-Click a port to inspect its source/category and center it, or open the anchor
-icon for the directory (initially filtered to **Irish coast**). **Irish coast ports
-only** in Map layers can be turned off for the global NGA layer.
-
-Rebuild the derived catalogue with `python scripts/prepare_irish_ports.py --fetch`.
-Downloaded source responses stay in ignored `data/maps/`; the compact attributed
-reference layer is bundled for offline use.
-
-### Desktop navigation and review controls
-
-- **Ship filters:** the AIS panel's **Filters** tab controls fresh fixes, reported
-  vessel type and minimum/maximum speed in knots. Filters affect both the directory
-  and map. Missing speeds do not match an active speed range; invalid limits show
-  an explanation. Reset restores all contacts. AIS type codes are displayed using
-  broad [USCG AIS type labels](https://www.navcen.uscg.gov/ais-class-a-static-voyage-message-5).
-- **Selected ship:** the details tab shows speed, course, type, source, received
-  UTC and fix age. **Follow selected ship** recentres on received fixes only.
-  Panning, opening an exercise, fitting a view or choosing a search result stops
-  following. No movement is predicted.
-- **Alert review:** every alert card has **New**, **Reviewed**, **Acknowledged**,
-  **Escalated** and **Rejected** states with summary counts. Opening a card
-  reviews it, and review must precede acknowledgement. These states last for the
-  session and never approve an operational response; the existing explicit
-  simulated response approval remains separate.
-- **Legend:** the bottom **Ships**, **Stale**, **Ports** and **Cables** switches
-  directly control the map. **SAR demo** controls the simulated radar layer while
-  the fictional exercise is open. Stale toggles the same freshness filter as the
-  AIS panel.
-- **Saved views:** the left round view icon opens Irish coast, Irish Sea, Western
-  approaches, Dublin Bay and Cork Harbour presets. Save the current centre and
-  zoom with a name; open or delete a custom saved view from the same panel.
-- **Panel layout:** drag the right edge of Alerts or the left edge of the detail
-  panel to resize. The Alerts **×** and **!** icon hide/show the left panel; the
-  detail **×** hides the right panel. Panel widths and alert visibility are saved.
-- **Global search:** click **Search Ctrl+K** or press **Ctrl+K**. Search vessel
-  names, MMSIs, vessel types, ports and saved views, or enter latitude/longitude
-  such as `53.35, -6.25` or `53.35N 6.25W`. Use Up/Down and Enter to select;
-  Escape closes search. Searching includes all contacts regardless of map filters;
-  selecting a ship restores its visibility and clears ship filters.
-
-View, layout and filter preferences are saved only in ignored
-`data/desktop/ui_preferences.json`. Contact observations retain their source UTC
-and provenance; the shared scenario and alert JSON files are unchanged.
-
-### Desktop visual polish
-
-The desktop uses Segoe UI for controls and prose, with monospace UTC, counts and
-countdowns. Original locally rendered outline icons share an 18 px size and
-consistent stroke. Gold marks controls and selected boats, cyan marks reference selections, alert
-levels use red, orange, amber and blue, and quieter neutral colours describe
-ordinary layers.
-
-The exercise alert card keeps its countdown. **Details** expands the trigger
-explanation and review-state selector; **Open replay** opens the same fictional
-exercise. Observation age and operator approval remain
-explicit. The header separates connection status, received/fresh counts and UTC.
-
-Stale ship fixes use smaller muted dots; selected boats retain a gold ring.
-Ordinary port markers have no bright borders, and historical cable lines are
-thinner and muted. Hover over an icon for its tooltip. Buttons and search fields
-have visible keyboard focus. Panel and search opening transitions last about
-130 ms; **Reduce panel motion** in Map layers disables them and is saved locally.
-
-### Click-to-open vessel card
-
-Click a received boat marker to open a white, draggable vessel card over the
-chart, following the supplied reference layout. Its header shows the name/type;
-Irish ship-station MMSIs (MID 250) get an Irish flag, following the
-[ITU MID table](https://www.itu.int/gladapp/Allocation/MIDs). Other identities
-retain an AIS badge. The selected marker has a bold outlined name and a gold
-past track. Closing the card clears the selection and path.
-
-The card shows the first locally recorded fix, declared destination, received
-age/UTC, speed/course and reported navigation status using
-[USCG AIS status codes](https://www.navcen.uscg.gov/ais-class-a-reports).
-The voyage arrow is a schematic summary; it does not represent voyage progress
-or predict a route. Departure port remains unknown. ETA and draught read as
-unavailable because the shared feed does not currently supply them.
-
-**Past track** toggles the selected history. **Vessel details** opens the full
-AIS details tab. **Measure route** activates the existing two-point map distance
-tool. **Add to fleet** saves the MMSI in the ignored local AIS cache; click again
-to remove it. These controls do not dispatch an operational action.
-
-For a vessel photograph, place an operator-supplied JPEG or PNG at
-`data/desktop/vessel_photos/<nine-digit-MMSI>.jpg` (or `.jpeg` / `.png`). Images
-stay local and ignored. Without a matching photograph, the card displays a
-labelled placeholder. The reference screenshot's photograph is not reused for
-other vessels. The card scrolls and stays within the viewport after dragging,
-resizing or Windows display scaling.
-
-### Map ping
-
-The target-shaped **Ping** button sits directly below the ruler on the right
-toolbar. Click it, then click a map position to show a labelled cyan ping for
-15 seconds. Panning and zooming keep it anchored to that coordinate. Click Ping
-again while armed to cancel, or press **Escape** on the map to clear it. A new
-ping replaces the previous one. **Reduce panel motion** also stops the ping's
-pulsing rings. Pings are local operator annotations; they are not sent to a
-ship or another team member and do not create an alert.
-
-### Docked alert board (simulated)
-
-The left **Alerts** panel is the main working list. It shows 45 labelled items:
-the fictional exercise alert, 15 hand-written scenarios, 4 coastal-site contacts
-(stopped away from ports, or loitering by a naval base, landfall or wind farm) and 25
-frequent minor alerts, sorted Critical → High → Medium → Low. Click a level counter to filter, or change the
-sort to time to the asset or newest. Click a row or a map marker to open its review
-window: the score scale, the indicators behind the level, the time to the asset, the
-recommended action and the log. **Acknowledge**, **Escalate** (duty officer, line
-operator, Irish Coast Guard (MRCC) or Naval Service operations) and **Reject** (with a
-reason) are recorded in a signed decision log on this computer (the shield button: change
-one letter in the file and Verify signatures names the record); nothing is sent. Countdowns run live, so
-GREY HERON rises from High to Critical after about 3.5 minutes; ↻ restarts the
-simulation. Map markers use the level colours, carry **SIM** labels and sit under a
-**SIMULATED** corner badge; **Sim alerts** in the legend hides them. On a trackpad,
-two fingers scroll the queue, and on macOS a pinch zooms the map. Pinching needs the
-optional PyObjC package in `requirements-mac.txt`; `UPDATE-AND-RUN-MAC.command`
-installs it on its next run. Full rules:
-[Argus Mara alert levels](docs/12-argus-mara-alert-levels.md).
-
-### Sanctions and shadow-fleet list check (real data)
-
-`python -m argus.watchlist_data update` keeps a daily copy of the OpenSanctions
-maritime list (EU, UK, US, Canadian, Swiss and UN sanctions, Ukraine GUR's shadow fleet
-and port-state detentions; CC BY-NC 4.0) in the git-ignored `data/watchlist/`, checking at
-most once a day. The `watchlist` detector then gives a real ship rule C1 (+2) when its MMSI
-or IMO is on a sanctions list or in GUR's shadow fleet, C2 (+1) for flag-risk signs from
-the bundled ITU MID table, and I5 (+1) for former names. It never matches by name.
-Port-state records, distress beacons (MMSI 970/972/974) and unallocated country codes are
-information only. `python -m argus.watchlist_data scan-live` checks every contact in the
-team's live feed; on 16 Oct it found 13 sanctioned and 6 suspected ships since 8 Oct.
-Details: [lists in the alert rules](docs/12-argus-mara-alert-levels.md#sanctions-and-shadow-fleet-lists-rules-c1-c2-and-i5) (D87).
+# Argus Mara
+
+**A maritime intelligence workspace for reviewing AIS, satellite imagery and infrastructure context around Ireland.**
+
+Built for **EUDIS Defence Hackathon 2026 — Challenge 3: Space-Enabled Maritime Domain Awareness**. We are opening the project so others can inspect the implementation, reproduce the demo and contribute improvements.
+
+Argus Mara brings received ship observations, dated satellite imagery, port and cable reference layers, explainable review leads and analyst reports into one native desktop application. It also includes an offline browser replay and optional, separately deployed data and collaboration services.
+
+This is a hackathon research prototype, not a validated navigation, surveillance or operational decision system. An AIS gap, motion anomaly, list match or unmatched image contact is a **lead for human review**, not proof of identity or malicious intent. Human approval remains explicit; the application does not carry out operational responses.
+
+## What we built
+
+| Area | Implemented behavior |
+| --- | --- |
+| Maritime map | Ireland/world views, source-labelled chart and imagery layers, coordinate tools, port/cable directories and vessel cards. |
+| AIS and history | Optional shared collector, timestamped received positions, declared speed/course/destination, local recorded tracks with gaps preserved, filters, search and fleet-history checks. |
+| Satellite review | Sentinel-1/2 catalogue search, georeferenced imagery crops, saved reviews, image-acquisition-time AIS comparison and optional AI-assisted contact suggestions. Coast Watch organises coastal coverage and records coverage/quality gaps. |
+| Review leads | Explainable rules over available observations, source-quality checks, separate real-data and fictional exercise queues, and optional watchlist/radar inputs. |
+| Analyst reporting | Evidence-prefilled editable reports, uncertainty and provenance, optional AI drafting/checking, PDF output and explicit sharing controls. |
+| Investigation lab | Source timelines, pairwise encounter review, fictional scenario branches and evaluation against authored exercise labels. |
+| Collaboration | Optional private SOC relay, account/group permissions and endpoint-encrypted rooms with peer-code verification. Requires a separate deployment. |
+| Offline exercise | A reproducible fictional scenario, countdown/planning assumptions, simulated responder comparison and a human-reviewed exercise record. |
+
+The fictional replay is kept separate from real observations. Every evidence item should be labelled **real**, **reconstructed**, **simulated**, **fictional** or **assumption**. AI suggestions remain unreviewed assumptions until checked. The feature guides describe [the implementation and its limits](docs/features/README.md).
+
+## Quick start: native desktop
+
+Use **Python 3.12** with **Tkinter/Tcl-Tk**, Git and an internet connection for the first dependency installation. The base desktop code supports Python 3.10+, but optional imagery packages should use Python 3.12 or newer. Node, Docker and API keys are **not required for the offline exercise**.
+
+Clone this repository using its GitHub **Code** button, then open a terminal in the repository root.
+
+### Windows PowerShell
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe run_gui.py --check
+.\.venv\Scripts\python.exe run_gui.py --offline
+```
+
+Include **Tcl/Tk and IDLE** when installing Python. `RUN-GUI-WINDOWS.bat` is also available; its normal entrypoint offers sign-in or **Continue offline**. Update-and-run launchers pull the current branch before launching, so use the direct commands above for a fixed checkout.
+
+### macOS / Linux
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python run_gui.py --check
+python run_gui.py --offline
+```
+
+On Debian/Ubuntu, install the matching `python3-tk` and `python3-venv` OS packages if missing. On macOS, use a Python distribution with working Tk; `python -m tkinter` should open a small test window. The optional `requirements-mac.txt` adds native gesture support.
+
+`--offline` skips SOC sign-in and Docker. It does not disable every public map/catalogue request: chart tiles and satellite schedules can use the network. The bundled coastline, reference data and fictional replay work without external accounts; high-detail map tiles need to have been cached first. Select the offline coastline layer when disconnected. To suppress connected background features during a deterministic offline session, set:
+
+```powershell
+# PowerShell; use export NAME=value on macOS/Linux
+$env:ARGUS_AIS_AUTOCONNECT = "0"
+$env:ARGUS_SUPABASE_READ = "0"
+$env:ARGUS_REAL_ALERTS = "0"
+$env:ARGUS_SATELLITE_AUTOSTART = "0"
+$env:ARGUS_S1_PLAN_NETWORK = "0"
+```
+
+Map caches live in your OS user-cache directory. `python scripts/prefetch_map_tiles.py --help` describes optional prefetching; respect map-provider usage and redistribution terms.
+
+## Offline browser demo
+
+```bash
+python scripts/serve_demo.py
+```
+
+Open **http://127.0.0.1:8000/ui/**. Committed browser bundles run without Node or a frontend build. The server binds to loopback and serves the checkout for local development; do not expose it publicly or use it to host private files. This replay uses the committed fictional scenario, not your live AIS feed.
+
+## Enable connected features
+
+A fresh checkout contains **no maintainer service address or database access key**. Bring your own services and credentials. Live traffic, historical recordings and cached satellite reviews are not included. Missing data remains unavailable; installing the app cannot recreate earlier AIS coverage.
+
+`.env.example` lists supported settings but **the Python app does not automatically load .env files**. Set environment variables in your shell/service, or use the interactive credential helpers. Never put secrets in command-line arguments, browser code, issues or commits.
+
+### AIS collector and recording
+
+1. For direct recording, obtain your own AISstream API key and follow [the recorder guide](recorder/README.md). Install `recorder/requirements.txt`; the launcher asks for the key privately and stores it in ignored `recorder/.apikey`. Recordings stay under ignored `data/`.
+2. For a shared map/feed, deploy your own collector using [live/README.md](live/README.md). Its separate dependencies are in `live/requirements.txt`; Docker deployment requires a persistent archive volume and the provider key in the host's secret manager.
+3. Set `ARGUS_LIVE_SERVER=https://your-ais-collector.example`, or enter your collector origin in the desktop AIS panel and connect. The same setting supplies Coast Watch's receipt-time AIS capture.
+4. Alternatively run `python run_live_gui.py --server https://your-ais-collector.example` for the dedicated read-only view.
+
+Reception is partial. A stale last fix is not a current position, and an archive contains only what its collector received while running.
+
+### Satellite imagery and AI assistance
+
+```bash
+python -m pip install -r requirements-satellite.txt -r recorder/requirements.txt
+```
+
+Open **Satellite analysis** to search the catalogue, inspect source imagery and work with local reviews. Image-time comparison requires your own recorded AIS covering that time. For optional TensorX assistance, run `python scripts/configure_satellite.py`; it asks for a key without echoing it and stores it in the OS credential store. You can instead supply `TENSORX_API_KEY` through a private host environment.
+
+Catalogue/imagery access and paid AI analysis are separate. AI requests can incur charges; starting **Coast Watch** enables automatic analysis under its local budget ledger, and an enabled scan may resume on later launches. Review the controls before starting, and set `ARGUS_SATELLITE_AUTOSTART=0` to prevent automatic resume. See [satellite setup, storage and budget behavior](docs/16-satellite-ai.md).
+
+### Optional historical AIS database
+
+Supabase is optional and belongs to the operator. Set `ARGUS_SUPABASE_URL` to your own project before running `python scripts/configure_supabase.py`. That helper stores a privileged key locally; use it only on a trusted workstation/host, never distribute it to users. Read-only clients can instead use an explicitly configured `ARGUS_SUPABASE_PUBLISHABLE_KEY` with the narrowly granted read functions on their own project. See [schema installation and permissions](supabase/README.md); database availability and capture history must be established separately.
+
+### Optional radar, watchlists and collaboration
+
+- **GFW radar:** `python scripts/configure_gfw.py` stores your own token securely. Follow [the radar guide](docs/19-gfw-radar.md). Published detections are delayed historical data, not a live radar sensor.
+- **Watchlists:** `python -m argus.watchlist_data update` downloads an attributed OpenSanctions snapshot into ignored local storage. Check source terms before reuse; list associations require review.
+- **SOC collaboration:** follow [soc/README.md](soc/README.md) for a separate Docker/HTTPS relay and [the local demonstration guide](soc/LOCAL-DEMO.md). Each participant needs an authorised account and must verify peer codes. No accounts, passwords, relay address or team database are bundled.
+
+## Datasets and reuse
+
+| Source | Used for | Important boundary |
+| --- | --- | --- |
+| AISstream / your collector | Received AIS positions, declarations and history | Your own key/service; partial reception. No private team archive is distributed. |
+| NGA World Port Index | 3,805 bundled port reference entries | Public reference data; retain provenance. |
+| Marine Atlas / MIDA | 142 Irish port records | CC BY 4.0; categories may represent the same harbour more than once. |
+| TeleGeography historical cable snapshot | 497 reference route records | Reconstructed/historical, approximate geometry; **CC BY-NC-SA 3.0**, not surveyed asset locations. |
+| Natural Earth | Coastline and coastal planning geometry | Public domain; simplified display/planning geometry. |
+| EMODnet / Esri and other credited map providers | Online/cached chart and imagery backgrounds | Provider-specific attribution, usage and tile redistribution terms apply. |
+| Copernicus Sentinel-1/2 | Radar/optical catalogue and imagery review | Acquisition time, image quality and coverage limits remain explicit. |
+| Global Fishing Watch | Optional published radar vessel detections | Personal token, publication delay and provider terms. |
+| OpenSanctions | Optional maritime list context | CC BY-NC 4.0 source terms; matching is a review lead. |
+
+See [source notes](docs/sources.md), [reference-layer preparation](scripts/prepare_world_map.py) and [the labelled imagery pack](demo/imagery/README.md). The code licence does not replace any dataset, image, map-provider or dependency licence. In particular, the bundled non-commercial cable data and optional non-commercial sources require replacement or separate permission for commercial redistribution.
+
+## Development and verification
+
+Python owns analysis, detection, countdown and data preparation. Svelte 5 under `ui/src/` owns browser interfaces. The desktop is Python/CustomTkinter; Node is a development tool.
+
+```bash
+python run_gui.py --check
+python scripts/check_contracts.py
+python -m pip install -r requirements.txt -r live/requirements.txt -r soc/requirements.txt
+python -m unittest discover -s tests -v
+python scripts/check_public_release.py
+```
+
+Run tests from a clean checkout, or apply the background-disable settings above first so existing local capture/scan state cannot resume during desktop tests. Install the satellite and recorder requirements for optional imagery tests. On headless Linux, desktop tests require a display (for example Xvfb); some optional tests skip without their dependencies.
+
+For browser development, install **Node 22+** and run from the repository root:
+
+```bash
+npm ci
+npx playwright install chromium
+npm run check
+npm run build
+npm test
+npm run test:browser
+```
+
+Commit rebuilt browser bundles for offline use. Preserve the `demo/scenario.json` / `demo/alerts.json` interfaces, units and coordinate order. Read [CONTRIBUTING.md](CONTRIBUTING.md), [AGENTS.md](AGENTS.md) and [the architecture](docs/07-architecture.md) before changes. The optional [trailer project](trailer/README.md) has its own dependencies.
+
+## Open-source release and security
+
+Project-owned code is released under the [MIT licence](LICENSE); third-party assets retain their own terms. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Please report vulnerabilities privately using [SECURITY.md](SECURITY.md). Do not attach raw observations, credentials, account databases, private reports or logs to public issues. Maintainers must complete [the publication checklist](docs/open-source-release.md), including revoking historic database access, before changing repository visibility. Old Git history is not cleaned by deleting a key from the current files.
+
+Thank you to EUDIS, our lecturer, mentors, teammates and everyone who shared their time and feedback during the hackathon.

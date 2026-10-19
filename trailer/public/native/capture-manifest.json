@@ -1,0 +1,18 @@
+{
+  "captured_utc": "2026-10-17T14:06:37.075254+00:00",
+  "dataset_mode": "Real local cached observations; no live refresh or new AI analysis during capture",
+  "ais_vessels_in_cache": 2148,
+  "ais_positions_rendered": 2138,
+  "satellite_reviews_considered": 8,
+  "screens": [
+    "ais.png",
+    "analyst-report.png",
+    "cables.png",
+    "coast-watch.png",
+    "contact-comparison.png",
+    "fleet-history.png",
+    "overview.png",
+    "ports.png",
+    "satellite-review.png"
+  ]
+}

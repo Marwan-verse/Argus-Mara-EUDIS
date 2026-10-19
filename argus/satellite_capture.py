@@ -10,11 +10,16 @@ import os
 from pathlib import Path
 
 from argus.live_client import validate_envelope
+from argus.live_client import server_url
 from argus.provenance import now_utc
 from argus.satellite import atomic_json, json_http
 from argus.space import timestamp
 
-FEED = 'https://shared-live-ais-production.up.railway.app/api/v1/vessels'
+def feed_url():
+    address = os.environ.get('ARGUS_LIVE_SERVER', '').strip()
+    if not address:
+        raise ValueError('Set ARGUS_LIVE_SERVER to your own AIS collector before recording')
+    return server_url(address) + '/api/v1/vessels'
 FIELDS = ['mmsi', 'msg_type', 'lat', 'lon', 'sog', 'cog', 'recv_utc', 'time_utc',
           'timestamp_source', 'stream_id', 'ship_name', 'ship_type_description', 'destination', 'nav_status', 'label', 'present_fields', 'length_m']
 
@@ -30,7 +35,8 @@ class AISCapture:
 
     def capture(self, transport=json_http, now=None):
         now = datetime.now(timezone.utc).timestamp() if now is None else now
-        envelope = validate_envelope(transport(FEED))
+        feed = feed_url()
+        envelope = validate_envelope(transport(feed))
         if envelope['feed']['label'] != 'real':
             raise ValueError('Automatic capture requires a real AIS feed')
         if not envelope['snapshot']:
@@ -97,7 +103,7 @@ class AISCapture:
                 os.fsync(output.fileno())
             written += len(points)
         result = {'vessels': rows, 'stream_id': stream, 'sequence': envelope['sequence'], 'captured_utc': now_utc(),
-                  'feed': envelope['feed'], 'source': FEED,
+                  'feed': envelope['feed'], 'source': feed,
                   'caveat': 'Partial polled AIS. Times are reception times, not guaranteed observation times. Latest received fixes may be stale.'}
         atomic_json(self.path, result)
         return {'recorded_rows': written, 'latest_vessels': len(rows), 'captured_utc': result['captured_utc']}

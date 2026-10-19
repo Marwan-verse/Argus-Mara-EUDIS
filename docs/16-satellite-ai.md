@@ -1,5 +1,8 @@
 # Satellite review with TensorX
 
+> **Public-source setup:** use your own `ARGUS_LIVE_SERVER` and `ARGUS_SUPABASE_URL`; no team address or built-in database key ships with the application. Follow [the current README](../README.md#enable-connected-features) and [database setup](../supabase/README.md) first. Earlier references below to a shared team database describe the hackathon deployment, not an included service.
+
+
 The native app now has **Satellite analysis** on both radar buttons and in the
 panel menu. It is an optional private workspace: the offline replay and its two
 JSON contracts are unchanged. Opening the app, viewing AIS, searching scenes and

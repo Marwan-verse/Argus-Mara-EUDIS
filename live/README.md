@@ -2,11 +2,11 @@
 
 One cloud service records AISstream messages around Ireland, saves a private
 Parquet archive and shares the latest received positions. Teammates can open the
-same HTTPS link in a browser or connect the existing white native dashboard.
+same HTTPS link in a browser or connect the native dashboard.
 The collector keeps running when every viewer closes the page. The Mac can sleep
 after the cloud feed and its durable archive have been verified.
 
-This is an optional companion requested by the captain, separate from the offline
+This is an optional companion, separate from the offline
 fictional exercise. It does not run the detector, infer malicious behaviour,
 predict movement or authorize responses. A marker is the last received fix, not
 proof of a ship's current position. Both views show received UTC and freshness;
@@ -23,82 +23,37 @@ pure, tested observation-store and map-projection helpers. The Svelte migration
 was requested on local `main`; the deployment instructions below describe the
 separate collector rollout and do not authorize a deployment or push.
 
-## Deploy on the verified Railway Trial
+## Deploy your own collector
 
-The code is on `feat/shared-live-ais`; merge approval stays with Marwan. Railway
-can deploy this branch before it is merged. Do not select or push `main` for this
-setup. No paid plan is needed to try it.
+This optional service is independent of the offline exercise. No maintainer feed is bundled. Use one collector per provider key and persistent storage; check your provider's terms and your host's current plan/costs before deployment.
 
-1. Open [Railway projects](https://railway.com/dashboard), choose **New project →
-   Empty project**, then add one empty service, e.g. `shared-live-ais`. Configure
-   the service and archive before attaching a code source. Do not add Postgres,
-   Redis or a second collector.
-2. In the service's build settings select Dockerfile path **live/Dockerfile**.
-   Keep the repository root directory `/`, one replica and health check
-   `/healthz` with a 120-second timeout. Disable **Serverless /
-   App sleeping**; collection must continue with no visitors. Disable automatic
-   PR environments so each pull request does not start another collector.
-   Select **EU West / Amsterdam** (currently `europe-west4-drams3a`). Limit the
-   service to **0.5 GB memory** and **1 vCPU**. New services reject
-   `railway.json`/`railway.toml` Config as Code references; use service settings
-   or the platform's supported Infrastructure as Code separately.
-3. Add a **Volume** to this service and set its mount path to **/data**. The Trial
-   volume limit is 0.5 GB. The image uses `/data/ais`, and refuses to collect if
-   `/data` is not an actual mount. A redeploy without a volume cannot preserve
-   history. No existing Mac archive is uploaded or deleted by deployment.
-4. Connect `Marwan-verse/Defence-Hackaton` in Source settings, explicitly using
-   **feat/shared-live-ais**. If the repository is missing, its owner must allow
-   the Railway GitHub app to access that repository. Alternatively, the official
-   Railway CLI supports uploading local source to the explicitly selected
-   project/service/environment; no GitHub installation is required for that
-   route. Do not include raw recordings or keys in an upload. Start the first
-   deployment without `AISSTREAM_API_KEY`.
-5. Under **Settings → Networking**, generate a public domain, target the
-   service's `PORT` (typically 8080). Open that HTTPS link. `/healthz` must show
-   `process_ready: true`, `persistent_volume_verified: true`,
-   `feed.archive_status: ready` and `feed.status: no_key`. HTTP 200 proves process
-   health; it does not prove AIS reception.
-6. In the service's private **Variables**, add **AISSTREAM_API_KEY** and paste
-   your AISstream key there. Do not put the key in Git, chat, a build argument,
-   public link or frontend code. Leave `ARGUS_AIS_LABEL=real` (the default).
-   `ARGUS_REQUIRE_VOLUME=1` is set by the image; keep it enabled. Leave `PORT`
-   to Railway. Deploy the changes. Check for `feed.status: live`, increasing
-   `archived_rows_this_run` and recent `last_received_utc`.
-7. Keep the Mac recording until this works. Restart the Railway service once:
-   previously received contacts should return with their original UTC stamps,
-   collection should reconnect and archived bytes should be retained. A new
-   `stream_id` on restart is expected. Then the Mac recorder can be stopped by
-   its owner; do not delete its existing recordings.
+1. Build from the repository root using `live/Dockerfile`. The image installs `live/requirements.txt` and serves the committed browser bundle; Node is not required at runtime.
+2. Mount a persistent volume at `/data`. The image requires a real mount (`ARGUS_REQUIRE_VOLUME=1`); an ephemeral container filesystem cannot preserve the private archive.
+3. Run one replica, with the host's `PORT` routed through HTTPS. Use `/healthz` as the health check. Keep background collection running when no browser is open.
+4. Configure `AISSTREAM_API_KEY` only in the hosting platform's private environment/secret manager. The collector never reads `recorder/.apikey`. Do not put a genuine key in Docker build arguments or source.
+5. Before adding the key, verify `/healthz` reports a ready process, verified persistent storage and `feed.status: no_key`. Then add your key and verify fresh receipt times, increasing archive counters and `feed.status: live`.
+6. Restart the service and verify retained contacts return with their original timestamps. Back up the archive and monitor storage; do not delete a previous recorder's files just because the service starts.
 
-Anyone with the domain can read the normalized public AIS feed. Viewers need no
-Railway account or AIS key. The private raw archive has no HTTP download route;
-only the Railway project owner has archive administration access. This service
-does not add logins or expose repository files. Internet reception and provider
-reconnections can leave genuine gaps; the server cannot recover packets never
-delivered by AISstream.
+For a local container smoke test without a key (empty `no_key` feed):
 
-## Use the team's native GUI
+```bash
+docker build -f live/Dockerfile -t argus-shared-ais .
+docker run --rm -p 127.0.0.1:8080:8080 -v argus-ais:/data argus-shared-ais
+```
 
-From a checkout of this branch with Python and Tkinter installed:
+A shared deployment requires your own HTTPS endpoint. The normalised latest-position API is publicly readable by design; the raw archive has no HTTP download endpoint. Do not host a sensitive/private observation feed on that public interface without a separately reviewed access-control design.
+
+## Connect the desktop
+
+Set `ARGUS_LIVE_SERVER` to your collector's HTTPS origin, or enter it in the desktop AIS panel and connect. For the dedicated read-only view:
 
 ```bash
 python -m pip install -r requirements.txt
-python run_live_gui.py --server https://YOUR-DOMAIN.up.railway.app
+python run_live_gui.py --server https://your-ais-collector.example
+python run_live_gui.py --server https://your-ais-collector.example --check
 ```
 
-This reuses `run_gui.ArgusApp`, the team's white shell, wheel/trackpad navigation,
-global local coastline and reference directories. The native mode polls bounded
-updates every two seconds. All contacts are searchable, including static reports
-that have not supplied a position. Only contacts with received coordinates are
-mapped. It starts with zero contacts and reconnects automatically. Check access
-without opening a window:
-
-```bash
-python run_live_gui.py --server https://YOUR-DOMAIN.up.railway.app --check
-```
-
-`python run_gui.py` continues to run the unchanged offline exercise. No live data
-is silently substituted into `demo/scenario.json` or `demo/alerts.json`.
+Only contacts with received coordinates are mapped. Missing/stale positions remain explicit. The regular `run_gui.py --offline` exercise remains available without a collector. Neither a viewer connection nor an HTTP 200 proves fresh AIS reception.
 
 ## Read-only API
 
@@ -188,46 +143,9 @@ expiry; a deployment is not a backup. Existing Mac recordings remain a separate
 backup of the period recorded there. The cloud starts collecting from deployment,
 not retrospectively from the first day on the Mac.
 
-## Trial credits and an estimate
+## Hosting costs
 
-The account screenshot offers **$5 credit**, **0.5 GB RAM per service** and
-2 vCPU maximum. A limit is not reserved/billed usage: Railway bills actual CPU,
-memory, outgoing traffic and volume. Trial ends after 30 days or after spending
-the credit. The subsequent Free plan's $1/month is insufficient to promise a
-continuous service; Hobby is a paid minimum of $5/month and needs the owner's
-choice. We do not upgrade plans automatically.
-
-Current published rates are roughly $10/GB RAM/month, $20/vCPU/month,
-$0.05/GB outgoing traffic and $0.15/GB volume/month. An illustrative single
-service with 0.15–0.25 GB average RAM, 0.01–0.03 vCPU, 2–15 GB outgoing/month and
-a 0.5 GB volume costs about **$1.9–$3.9 per 30 days**. This is a planning range,
-not measured Railway billing or a guarantee. At that rate $5 lasts until the
-30-day Trial deadline; heavier traffic/CPU/viewer use can consume it earlier.
-Check **Usage** after one day and extrapolate `daily spend × 30`. Pricing, taxes
-and actual allocated usage must be checked in the owner's dashboard.
-
-The recording used to size this service averaged 1.19 messages/s and had 596
-position contacts. Delta delivery keeps outgoing traffic much lower than sending
-a full fleet snapshot to every viewer every two seconds. No raw uploaded data
-or source key is committed with this estimate. Cost control's minimum hard cap
-is $10, so do not claim a $5 configurable hard cap; use the Trial credit limit
-and available usage alerts.
-
-A 30-second synthetic full-service check at 1.2 messages/s with 600 contacts and
-three simultaneous viewers used 62 MiB RSS and about 0.009 CPU core. A burst to
-the 5,000-contact bound peaked at 114 MiB. Each continuous SSE viewer received
-approximately 76 MB/day (~3.2 MB/hour), before normal deployment overhead. These
-measurements use simulated records and local storage, not real Railway billing
-or provider connectivity. Check the actual account for any traffic quotas too.
-
-Sources: [Trial](https://docs.railway.com/pricing/free-trial),
-[plans](https://docs.railway.com/pricing/plans),
-[cost control](https://docs.railway.com/pricing/cost-control),
-[volumes](https://docs.railway.com/volumes),
-[network limits](https://docs.railway.com/networking/public-networking/specs-and-limits).
-Rates/behaviour were checked against official Railway docs snapshot
-`b2c0106946259493aa0d51c0b3a47e861a457f6a`; the owner's live account controls
-take precedence.
+Hosting, provider access and storage are the operator's responsibility. Check the chosen platform's current prices and quotas; old hackathon trial allowances are not a promise of free hosting. Use spending alerts and monitor persistent archive growth.
 
 ## Local development and verification
 

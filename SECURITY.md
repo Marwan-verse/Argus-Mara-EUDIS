@@ -4,7 +4,7 @@ Argus Mara is a hackathon prototype. The `main` branch is the only maintained ve
 
 ## Report a vulnerability
 
-Please do not put a vulnerability, credential, or sensitive data in a public issue or pull request. Tell a maintainer through the team's private channel. If GitHub offers **Report a vulnerability** on this repository's Security tab, you can use that private route instead. Include the affected file or behavior, steps to reproduce, impact, and a safe proof of concept. We will acknowledge the report and coordinate a fix and disclosure with you; we do not promise a fixed response time during the hackathon.
+Please do not put a vulnerability, credential, or sensitive data in a public issue or pull request. Use **Security → Report a vulnerability** on GitHub when private vulnerability reporting is enabled. If that option is unavailable, open a public issue asking for a private contact without including vulnerability details or sensitive data. Include the affected file or behavior, steps to reproduce, impact, and a safe proof of concept. We will acknowledge the report and coordinate a fix and disclosure with you; we do not promise a fixed response time during the hackathon.
 
 If a credential may have been exposed, revoke or rotate it first and notify the owner privately. Never include the secret itself in a report.
 
@@ -22,3 +22,7 @@ public/fictional material and is not an access-controlled private-data product.
 - Do not use this prototype to make operational decisions or trigger an automated response. A human must approve any action.
 
 See [the repository guidance](AGENTS.md) and [the data contract](demo/README.md) before changing the demo.
+
+## Maintainer publication checks
+
+See [the release audit and remaining host actions](docs/open-source-release.md). The source checker reports locations, never secret values. Local ignored credentials remain on the operator’s machine; exclusion from Git is not revocation of a previously committed credential.

@@ -252,7 +252,7 @@ with the existing private SOC host. Neither installs an OS scheduled task.
 ## Optional team database — 15 October 2026 (D74)
 
 D95 (16 October) deploys the complete schema to the user-selected new project
-`zibmytppznydhlggzlaq` in marwan-verse's projects, Ireland. The original project
+`previous-project` in marwan-verse's projects, Ireland. The original project
 is unchanged. `ais_observations` additionally preserves complete received ship
 objects, and a forward migration disables automatic AIS history deletion.
 `scripts/export_ship_history_sql.py` prepares private idempotent import batches

@@ -1,7 +1,7 @@
 # Live review goal: acceptance evidence and remaining work
 
 **16 October update:** D95 deployed the complete database schema to
-`zibmytppznydhlggzlaq`, imported 11,989 local capture rows and verified automatic
+`previous-project`, imported 11,989 local capture rows and verified automatic
 collection. The older project-access blockers below are historical. Native/host
 workers still need the new project's private key. D96's ongoing tracking,
 dark-contact, AI and Brain audit is in [the improvement record](20-tracking-brain-improvements.md);

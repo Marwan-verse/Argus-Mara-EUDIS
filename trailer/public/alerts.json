@@ -1,0 +1,64 @@
+{
+ "generated_by": "argus.brain (rules v1)",
+ "scenario": "Scenario A - fictional cable approach in the Irish Sea",
+ "alerts": [
+  {
+   "id": "A1",
+   "t": 5400,
+   "mmsi": 999000001,
+   "vessel_name": "CORMORANT STAR",
+   "state": "ALERT",
+   "score": 1.0,
+   "score_basis": "4 of 4 rule cues met: slowdown, course change, prior AIS gap, projected crossing of an assumed anchor-reachable cable section. This is not a probability.",
+   "reasons": [
+    "Observed speed fell from 12.0 kn at T+29 min to 9.1 kn at T+90 min (24%); cause unknown.",
+    "Observed heading differs by 30Â° from the pre-gap fix; cause unknown.",
+    "AIS reception gap lasted 20 min from T+30 to T+50 min; intent unknown.",
+    "Constant-course projection reaches an illustrative cable in 74 min. The 250 m anchor-reach cutoff is an assumption."
+   ],
+   "segment_id": "cable-irish-sea-1",
+   "distance_km": 20.6,
+   "eta_expected_s": 4411,
+   "eta_earliest_s": 3675,
+   "eta_method": "Constant speed and course at the alert fix; earliest uses 20% higher speed. Neither is a calibrated confidence bound.",
+   "options": [
+    {
+     "asset": "Maritime patrol aircraft (Casement)",
+     "eta_s": 2376,
+     "in_time": true,
+     "label": "assumption"
+    },
+    {
+     "asset": "Naval Service patrol ship (at sea)",
+     "eta_s": 13910,
+     "in_time": false,
+     "label": "assumption"
+    },
+    {
+     "asset": "VHF hail, Dublin coast radio",
+     "eta_s": 120,
+     "in_time": true,
+     "label": "assumption"
+    },
+    {
+     "asset": "Next Sentinel-1 look",
+     "eta_s": 15000,
+     "in_time": false,
+     "label": "assumption"
+    }
+   ],
+   "evidence_url": "evidence/contacts/contact-0001.html",
+   "observations": {
+    "baseline_fix_t": 1740,
+    "alert_fix_t": 5400,
+    "gap_start_t": 1800,
+    "gap_end_t": 3000,
+    "speed_drop_percent": 24,
+    "course_change_deg": 29.7,
+    "radar_contact_t": 2400,
+    "radar_association": "unconfirmed",
+    "anchor_reach_label": "assumption"
+   }
+  }
+ ]
+}

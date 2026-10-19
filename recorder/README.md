@@ -16,14 +16,7 @@ Keep it to yourself: never commit it, never paste it in chat.
 
 **2. Get this project onto your computer.**
 
-- **On a Mac, prefer `git clone`** — files that arrive through git carry no quarantine flag, so
-  macOS will not block them:
-  ```bash
-  git clone https://github.com/classified-mick/Defence-Hackaton.git
-  ```
-- Otherwise [download the ZIP](https://github.com/classified-mick/Defence-Hackaton/archive/refs/heads/main.zip)
-  and unzip it. On a Mac this triggers the Gatekeeper block described below — fixable in about
-  ten seconds, but cloning avoids it entirely.
+Use this repository's GitHub **Code** button to copy its current clone URL, or download its source ZIP. On macOS a Git clone avoids the download quarantine step described below. Do not use another contributor's old fork when following current setup instructions.
 
 **3. Open the `recorder` folder and double-click:**
 

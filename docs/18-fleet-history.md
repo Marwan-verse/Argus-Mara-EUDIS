@@ -7,7 +7,7 @@ the offline exercise and both demo JSON files remain unchanged.
 ## Deployment status and setup
 
 **16 October update (D95):** the new `argus-mara` project
-`zibmytppznydhlggzlaq` in marwan-verse's projects has all fleet-history and
+`previous-project` in marwan-verse's projects has all fleet-history and
 comparison migrations applied. Collection is active. The original project
 below remains inaccessible and unchanged. See [current deployment](../supabase/README.md)
 for connection instructions, imported recordings and the new keep-all-history

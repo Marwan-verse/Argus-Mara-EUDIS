@@ -87,12 +87,20 @@ class SetupScriptTests(unittest.TestCase):
         self.folder = tempfile.TemporaryDirectory()
         self.root = Path(self.folder.name)
         # main() switches keyless reading on (D108); keep that from leaking into later tests.
-        self.environment = patch.dict(os.environ)
+        self.environment = patch.dict(os.environ, {'ARGUS_SUPABASE_URL': 'https://example.supabase.co'})
         self.environment.start()
 
     def tearDown(self):
         self.environment.stop()
         self.folder.cleanup()
+
+    def test_database_setup_without_a_project_never_requests_a_secret(self):
+        with patch.dict(os.environ, {'ARGUS_SUPABASE_URL': ''}), redirect_stdout(io.StringIO()):
+            ask, rpc, save = Mock(), Mock(), Mock()
+            self.assertIsNone(watch.connect_database(self.root, ask=ask, rpc=rpc, save=save))
+        ask.assert_not_called()
+        rpc.assert_not_called()
+        save.assert_not_called()
 
     def test_tensorx_key_is_checked_for_free_before_it_is_saved(self):
         saved = []
@@ -196,7 +204,7 @@ class SetupScriptTests(unittest.TestCase):
             code = watch.main(['--root', str(self.root)])
         self.assertEqual(code, 0)
         database.assert_not_called()
-        self.assertIn('read only with the built-in key', output.getvalue())
+        self.assertIn('read only with locally configured credentials', output.getvalue())
         self.assertIn('Ready.', output.getvalue())
 
     def test_a_stored_database_key_links_a_new_workspace_without_asking(self):

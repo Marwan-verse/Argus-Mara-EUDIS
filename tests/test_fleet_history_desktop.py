@@ -23,7 +23,8 @@ class FleetHistoryDesktopTests(unittest.TestCase):
         errors = []
         root.report_callback_exception = lambda *error: errors.append(error)
         with tempfile.TemporaryDirectory() as temp, patch.dict('os.environ', {'ARGUS_AIS_AUTOCONNECT': '0',
-                'ARGUS_UI_PREFERENCES': '', 'ARGUS_SATELLITE_AUTOSTART': '0'}):
+                'ARGUS_UI_PREFERENCES': '', 'ARGUS_SATELLITE_AUTOSTART': '0',
+                'ARGUS_SUPABASE_URL': 'https://example.supabase.co'}):
             app = ArgusApp(root, *load_demo())
             satellite = app.satellite
             satellite.workspace, _, _ = fixture(Path(temp)/'satellite')
@@ -76,6 +77,12 @@ class FleetHistoryDesktopTests(unittest.TestCase):
                         self.assertTrue(any('Database sync: stale' in text for text in labels))
                     # Secret entry is native and masked; the key is neither sent
                     # to an AI model nor included in UI messages or fixture files.
+                    with patch.dict('os.environ', {'ARGUS_SUPABASE_URL': ''}), \
+                            patch('tkinter.simpledialog.askstring') as unconfigured_prompt, \
+                            patch('argus.supabase_ais.http_rpc') as unconfigured_request:
+                        satellite.connect_database()
+                        unconfigured_prompt.assert_not_called()
+                        unconfigured_request.assert_not_called()
                     secret = 'sb_secret_'+'x'*24
                     with patch('tkinter.simpledialog.askstring', return_value=secret) as prompt, \
                             patch('argus.supabase_ais.http_rpc', return_value={'positions': 2}) as remote, \
