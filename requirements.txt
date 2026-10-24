@@ -1,6 +1,6 @@
 # Native desktop dashboard (Python 3.10+ with Tkinter/Tcl-Tk)
 customtkinter==6.0.0
-Pillow==12.3.0
+Pillow==13.0.0
 # SOC client encryption; no private keys are stored on disk.
 cryptography==50.0.2
 # Optional remembered SOC sign-in: the server token, never the password, in the OS keychain.
